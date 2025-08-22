@@ -150,30 +150,30 @@ def test_llm_extractor():
         return True
     
     # Sample medical text for testing
-    sample_text = \"\"\"
+    sample_text = """
     MEDICAL SUPERBILL
-    
+
     Patient Name: Sarah Johnson
     Date of Birth: 03/15/1985
     Patient ID: PT123456
     Date of Service: 12/10/2023
-    
+
     Provider: Dr. Michael Smith, MD
     NPI: 1234567890
-    
+
     CPT Codes:
     99213 - Office visit, established patient, level 3
     36415 - Venipuncture
-    
+
     Diagnosis Codes:
     Z00.00 - Encounter for general adult medical examination
     I10 - Essential hypertension
-    
+
     Insurance: Blue Cross Blue Shield
     Policy Number: BC123456789
     Copay: $25.00
     Total Charges: $185.00
-    \"\"\"
+    """
     
     selected_fields = [
         "patient_name", "date_of_birth", "patient_id", "date_of_service",
@@ -254,7 +254,7 @@ def test_data_processor():
     mock_patient_record = {
         "record_id": "test_patient_1",
         "patient_identifier": "Test Patient",
-        "extracted_text": \"\"\"
+        "extracted_text": """
         Patient: John Smith
         DOB: 01/15/1980  
         ID: PT789012
@@ -266,7 +266,7 @@ def test_data_processor():
         Provider: Dr. Jane Wilson
         Insurance: Medicare
         Copay: $15.00
-        \"\"\",
+        """,
         "confidence": 0.85,
         "bbox": {"x0": 0, "y0": 0, "x1": 100, "y1": 100},
         "metadata": {"element_count": 10}

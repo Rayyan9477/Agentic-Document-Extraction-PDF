@@ -5,7 +5,7 @@ Creates dynamic JSON schemas and extraction templates based on selected fields.
 
 import logging
 import json
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from src.extraction.field_manager import field_manager, FieldDefinition, FieldType
 
 logger = logging.getLogger(__name__)

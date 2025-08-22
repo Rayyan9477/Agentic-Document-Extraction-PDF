@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Medical Superbill Structured Extractor - Streamlit Application
 HIPAA-compliant PDF data extraction system with user-friendly interface.
@@ -279,7 +280,7 @@ def render_field_selection():
                 with st.expander("🔧 Advanced Settings", expanded=False):
                     validation_pattern = st.text_input(
                         "Validation Pattern (Regex)",
-                        placeholder="e.g., ^[\(\)\d\s\-\.+]+$ for phone numbers",
+                        placeholder=r"e.g., ^[\(\)\d\s\-\.+]+$ for phone numbers",
                         help="Optional regular expression to validate extracted values"
                     )
                     

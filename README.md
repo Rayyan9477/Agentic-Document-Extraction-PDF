@@ -208,22 +208,27 @@ AZURE_KEY_VAULT_URL=https://your-vault.vault.azure.net/
 
 Run the API test suite:
 ```bash
-python test_api.py
+python tests\test_api.py
 ```
 
 Run the complete pipeline tests:
 ```bash
-python test_pipeline.py
+python tests\test_pipeline.py
 ```
 
 Run field extraction tests:
 ```bash
-python test_field_extraction.py
+python tests\test_field_extraction.py
 ```
 
 Run validation and export tests:
 ```bash
-python test_validation_export.py
+python tests\test_validation_export.py
+```
+
+Run Azure connection tests:
+```bash
+python tests\test_azure_connection.py
 ```
 
 Expected output for Phase 4 tests:
@@ -284,5 +289,66 @@ The Medical Superbill Structured Extractor now provides a complete, production-r
 - **Real-time Processing**: Live progress tracking and status updates
 - **Interactive Results**: Expandable result sections with detailed views
 - **Batch Operations**: Multi-file upload and processing capabilities
+
+## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.8+
+- Azure OpenAI account with GPT-4/GPT-4o deployment
+- Required Python packages (see `requirements.txt`)
+
+### Installation
+
+1. **Clone and setup:**
+   ```bash
+   git clone <repository-url>
+   cd PDF
+   pip install -r requirements.txt
+   ```
+
+2. **Configure Azure OpenAI:**
+   
+   **Option A: Using .env file (Recommended)**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Azure OpenAI credentials
+   ```
+   
+   **Option B: Using PowerShell script**
+   ```powershell
+   .\scripts\setup_azure_env.ps1
+   ```
+
+3. **Test configuration:**
+   ```bash
+   python tests\test_azure_connection.py
+   ```
+
+4. **Run the application:**
+   ```bash
+   streamlit run app.py
+   ```
+
+### Directory Structure
+```
+├── app.py                          # Main Streamlit application
+├── requirements.txt               # Python dependencies
+├── .env.example                  # Environment variable template
+├── scripts/                      # Setup and utility scripts
+│   ├── setup_azure_env.ps1      # PowerShell Azure setup
+│   └── README.md                 # Scripts documentation
+├── tests/                        # Test modules
+│   ├── test_azure_connection.py  # Azure connectivity tests
+│   ├── test_*.py                 # Additional test files
+│   └── __init__.py
+├── src/                          # Core application modules
+│   ├── config/                   # Configuration management
+│   ├── services/                 # External service integrations
+│   ├── processing/               # PDF and image processing
+│   ├── extraction/               # Data extraction and schema
+│   ├── validation/               # Data validation and medical codes
+│   ├── export/                   # Export functionality
+│   └── security/                 # Security and compliance
+```
 
 This system represents a complete, enterprise-ready solution for medical data extraction that can be deployed in healthcare environments with confidence in its security, accuracy, and compliance standards.

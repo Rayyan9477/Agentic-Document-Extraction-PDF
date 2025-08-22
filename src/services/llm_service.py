@@ -19,13 +19,17 @@ class LLMService:
     def __init__(self):
         self.client = None
         self.deployment_name = None
+        self.development_mode = False
         self._initialize_client()
     
     def _initialize_client(self):
         """Initialize Azure OpenAI client."""
         try:
             if not azure_config.validate_configuration():
-                raise ValueError("Invalid Azure configuration")
+                logger.warning("Azure configuration incomplete - running in development mode")
+                self.development_mode = True
+                self.deployment_name = "dev-mode-gpt"
+                return
             
             config = azure_config.get_openai_config()
             
@@ -40,11 +44,21 @@ class LLMService:
             
         except Exception as e:
             logger.error(f"Failed to initialize Azure OpenAI client: {e}")
-            raise
+            logger.warning("Falling back to development mode")
+            self.development_mode = True
+            self.deployment_name = "dev-mode-gpt"
     
     def test_connection(self) -> Dict[str, Any]:
         """Test connection to Azure OpenAI API."""
         try:
+            if self.development_mode:
+                return {
+                    "success": False,
+                    "error": "Development mode - No Azure configuration",
+                    "model": self.deployment_name,
+                    "note": "Please configure Azure OpenAI credentials for full functionality"
+                }
+            
             test_prompt = "Respond with 'Connection successful' if you can read this message."
             
             response = self.client.chat.completions.create(

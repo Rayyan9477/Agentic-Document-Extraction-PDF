@@ -14,18 +14,22 @@ from src.extraction.llm_extractor import llm_extractor, ExtractionResult
 from src.extraction.field_manager import field_manager
 from src.extraction.schema_generator import schema_generator
 
-# Import new validation and normalization modules
+logger = logging.getLogger(__name__)
+
+# Import validation and normalization modules
 try:
     from src.validation.medical_codes import medical_code_validator
     from src.validation.data_normalizer import data_normalizer
+    from src.validation.comprehensive_medical_codes import comprehensive_validator
     VALIDATION_AVAILABLE = True
+    COMPREHENSIVE_VALIDATION_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Validation modules not available: {e}")
     medical_code_validator = None
     data_normalizer = None
+    comprehensive_validator = None
     VALIDATION_AVAILABLE = False
-
-logger = logging.getLogger(__name__)
+    COMPREHENSIVE_VALIDATION_AVAILABLE = False
 
 
 @dataclass
@@ -430,8 +434,89 @@ class DataProcessor:
             if not schema_valid:
                 validation_errors.extend(schema_errors)
             
-            # Medical code validation using advanced validator
-            if VALIDATION_AVAILABLE and medical_code_validator:
+            # Medical code validation using comprehensive validator
+            if COMPREHENSIVE_VALIDATION_AVAILABLE and comprehensive_validator:
+                try:
+                    # Collect all medical codes for comprehensive validation
+                    all_codes = []
+                    code_field_mapping = {}
+                    
+                    # CPT codes
+                    cpt_codes = extracted_data.get('cpt_codes', [])
+                    if cpt_codes:
+                        if isinstance(cpt_codes, str):
+                            cpt_codes = [cpt_codes]
+                        for code in cpt_codes:
+                            all_codes.append(code)
+                            code_field_mapping[code] = 'cpt_codes'
+                    
+                    # ICD-10/Diagnosis codes
+                    dx_codes = extracted_data.get('dx_codes', [])
+                    if dx_codes:
+                        if isinstance(dx_codes, str):
+                            dx_codes = [dx_codes]
+                        for code in dx_codes:
+                            all_codes.append(code)
+                            code_field_mapping[code] = 'dx_codes'
+                    
+                    # HCPCS codes (if any)
+                    hcpcs_codes = extracted_data.get('hcpcs_codes', [])
+                    if hcpcs_codes:
+                        if isinstance(hcpcs_codes, str):
+                            hcpcs_codes = [hcpcs_codes]
+                        for code in hcpcs_codes:
+                            all_codes.append(code)
+                            code_field_mapping[code] = 'hcpcs_codes'
+                    
+                    # Run comprehensive validation
+                    if all_codes:
+                        import asyncio
+                        validation_results_comprehensive = comprehensive_validator.validate_codes_sync(all_codes)
+                        
+                        # Process results
+                        validated_codes = {
+                            'cpt_codes': {'valid': [], 'invalid': [], 'details': {}},
+                            'dx_codes': {'valid': [], 'invalid': [], 'details': {}},
+                            'hcpcs_codes': {'valid': [], 'invalid': [], 'details': {}}
+                        }
+                        
+                        for result in validation_results_comprehensive:
+                            field_type = code_field_mapping.get(result.code, 'unknown')
+                            if field_type in validated_codes:
+                                if result.is_valid:
+                                    validated_codes[field_type]['valid'].append(result.code)
+                                else:
+                                    validated_codes[field_type]['invalid'].append(result.code)
+                                    validation_errors.extend([f"Invalid {result.code_type} code: {result.code}"] + result.errors)
+                                
+                                validated_codes[field_type]['details'][result.code] = {
+                                    'description': result.description,
+                                    'category': result.category,
+                                    'confidence': result.confidence,
+                                    'source': result.source,
+                                    'billable': result.billable,
+                                    'errors': result.errors,
+                                    'warnings': result.warnings
+                                }
+                        
+                        validation_results["comprehensive_validation"] = validated_codes
+                        
+                        # Generate summary
+                        total_codes = len(all_codes)
+                        valid_codes = sum(len(v['valid']) for v in validated_codes.values())
+                        validation_results["validation_summary"] = {
+                            "total_codes": total_codes,
+                            "valid_codes": valid_codes,
+                            "invalid_codes": total_codes - valid_codes,
+                            "validation_rate": valid_codes / max(total_codes, 1)
+                        }
+                        
+                except Exception as e:
+                    logger.error(f"Comprehensive validation failed: {e}")
+                    validation_errors.append(f"Comprehensive validation error: {e}")
+            
+            elif VALIDATION_AVAILABLE and medical_code_validator:
+                # Fallback to basic validation
                 cpt_codes = extracted_data.get('cpt_codes', [])
                 dx_codes = extracted_data.get('dx_codes', [])
                 
@@ -451,7 +536,7 @@ class DataProcessor:
                     if icd_validation.get("invalid_codes"):
                         validation_errors.extend([f"Invalid ICD-10 code: {code}" for code in icd_validation["invalid_codes"]])
             else:
-                # Fallback to basic validation
+                # Basic fallback validation
                 for field_name in selected_fields:
                     if field_name in self.medical_code_validators:
                         field_value = extracted_data.get(field_name)
