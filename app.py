@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Import our services
 try:
-    from src.config.azure_config import azure_config
+    from src.config.api_config import api_config
     from src.services.llm_service import llm_service
     from src.processing.pipeline import processing_pipeline
     from src.extraction.field_manager import field_manager, FieldType
@@ -107,12 +107,19 @@ def render_sidebar():
     with st.sidebar:
         st.header("⚙️ Configuration")
         
-        # Azure API Status
-        st.subheader("🔗 Azure OpenAI Status")
+        # API Status
+        provider_info = api_config.get_provider_info()
+        provider_name = provider_info.get('provider', 'Unknown')
+        st.subheader(f"🔗 {provider_name} API Status")
+        
+        # Show current configuration
+        if provider_name != 'None':
+            with st.expander("📋 Current API Configuration", expanded=False):
+                st.json(provider_info)
         
         # Test API connection button
         if st.button("Test API Connection", type="primary"):
-            with st.spinner("Testing Azure OpenAI connection..."):
+            with st.spinner(f"Testing {provider_name} connection..."):
                 try:
                     result = llm_service.test_connection()
                     st.session_state.api_test_result = result
@@ -125,6 +132,7 @@ def render_sidebar():
             if result["success"]:
                 st.success("✅ API Connection Successful")
                 st.json({
+                    "Provider": result.get("provider", "Unknown"),
                     "Model": result.get("model", "Unknown"),
                     "Response": result.get("response", "No response"),
                     "Usage": result.get("usage", {})
@@ -132,6 +140,21 @@ def render_sidebar():
             else:
                 st.error("❌ API Connection Failed")
                 st.error(f"Error: {result.get('error', 'Unknown error')}")
+                
+                # Show configuration help
+                with st.expander("💡 Configuration Help", expanded=True):
+                    st.markdown("""
+                    **To configure OpenAI API:**
+                    1. Set `OPENAI_API_KEY` environment variable
+                    2. Optionally set `OPENAI_MODEL_NAME` (default: gpt-4o-mini)
+                    
+                    **To configure Azure OpenAI:**
+                    1. Set `AZURE_OPENAI_API_KEY` environment variable
+                    2. Set `AZURE_OPENAI_ENDPOINT` environment variable
+                    3. Optionally set `AZURE_OPENAI_DEPLOYMENT_NAME` and `AZURE_OPENAI_API_VERSION`
+                    
+                    **Note:** Azure OpenAI is preferred if both are configured.
+                    """)
         
         st.divider()
         
@@ -980,9 +1003,16 @@ def main():
         
         # Footer
         st.divider()
-        st.markdown("""
+        # Dynamic footer based on API provider
+        provider_info = api_config.get_provider_info()
+        provider_name = provider_info.get('provider', 'Unknown')
+        model_name = provider_info.get('model', 'Unknown')
+        
+        footer_text = f"🏥 Medical Superbill Structured Extractor v1.0 | 🔒 HIPAA Compliant | ⚡ Powered by {provider_name} ({model_name})"
+        
+        st.markdown(f"""
         <div style='text-align: center; color: #666; font-size: 14px;'>
-            <p>🏥 Medical Superbill Structured Extractor v1.0 | 🔒 HIPAA Compliant | ⚡ Powered by Azure OpenAI GPT-5</p>
+            <p>{footer_text}</p>
         </div>
         """, unsafe_allow_html=True)
         

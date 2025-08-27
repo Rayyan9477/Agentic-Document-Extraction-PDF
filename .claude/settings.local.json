@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(grep:*)",
-      "Bash(python test_comprehensive_validation.py)"
+      "Bash(python test_comprehensive_validation.py)",
+      "Bash(python -m pytest tests/ -v)"
     ],
     "deny": [],
     "ask": []

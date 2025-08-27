@@ -6,7 +6,7 @@ Tests the complete field tagging and LLM extraction workflow.
 import sys
 import logging
 import time
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Tuple
 import json
 
 # Configure logging
