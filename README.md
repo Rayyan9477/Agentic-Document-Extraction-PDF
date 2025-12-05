@@ -2,7 +2,6 @@
 
 ![HIPAA Compliant](https://img.shields.io/badge/HIPAA-Compliant-green) ![Status](https://img.shields.io/badge/Status-Production%20Ready-blue) ![Version](https://img.shields.io/badge/Version-1.0.0-orange) ![Tests](https://img.shields.io/badge/Tests-Passing-green) ![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)
 
-A comprehensive HIPAA-compliant system for extracting structured data from unstructured medical superbill PDFs using Azure OpenAI GPT-5.
 
 ## 📑 Overview
 
@@ -185,23 +184,6 @@ This phase established the foundation with Azure integration and basic Streamlit
 ├── requirements.txt                # Python dependencies
 ├── CLAUDE.md                       # Project documentation for Claude Code
 └── .env.example                    # Environment variables template
-```
-
-### Configuration
-
-Required environment variables:
-
-```bash
-# Azure OpenAI
-AZURE_OPENAI_API_KEY=your_api_key
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
-
-# Security
-ENCRYPTION_KEY=your_32_byte_key
-
-# Optional: Azure Key Vault
-AZURE_KEY_VAULT_URL=https://your-vault.vault.azure.net/
 ```
 
 ### Security Features
