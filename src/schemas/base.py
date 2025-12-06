@@ -587,13 +587,35 @@ class SchemaRegistry:
                 return schema
         return None
 
-    def list_schemas(self) -> list[str]:
+    def list_schemas(self) -> list[DocumentSchema]:
+        """Get list of all registered schemas."""
+        return list(self._schemas.values())
+
+    def list_schema_names(self) -> list[str]:
         """Get list of registered schema names."""
         return list(self._schemas.keys())
 
     def list_by_document_type(self, doc_type: DocumentType) -> list[DocumentSchema]:
         """Get all schemas for a document type."""
         return [s for s in self._schemas.values() if s.document_type == doc_type]
+
+    def get_by_type(self, doc_type: DocumentType) -> DocumentSchema:
+        """
+        Get schema by document type.
+
+        Args:
+            doc_type: Document type to find.
+
+        Returns:
+            DocumentSchema for the type.
+
+        Raises:
+            ValueError: If no schema found for type.
+        """
+        schema = self.get_by_document_type(doc_type)
+        if schema is None:
+            raise ValueError(f"No schema registered for document type: {doc_type.value}")
+        return schema
 
     def unregister(self, name: str) -> bool:
         """
@@ -613,3 +635,11 @@ class SchemaRegistry:
     def clear(self) -> None:
         """Clear all registered schemas."""
         self._schemas.clear()
+
+    def get_schema_count(self) -> int:
+        """Get number of registered schemas."""
+        return len(self._schemas)
+
+    def has_schema(self, name: str) -> bool:
+        """Check if schema is registered."""
+        return name in self._schemas

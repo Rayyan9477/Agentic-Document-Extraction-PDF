@@ -37,6 +37,31 @@ from src.schemas.superbill import SUPERBILL_SCHEMA
 from src.schemas.ub04 import UB04_SCHEMA
 from src.schemas.eob import EOB_SCHEMA
 
+# Import nested schemas
+from src.schemas.nested_schemas import (
+    NestedSchema,
+    NestedSchemaRegistry,
+    CMS1500_SERVICE_LINE_SCHEMA,
+    SUPERBILL_PROCEDURE_SCHEMA,
+    UB04_SERVICE_LINE_SCHEMA,
+    UB04_CODE_CODE_SCHEMA,
+    EOB_SERVICE_LINE_SCHEMA,
+    EOB_ADJUSTMENT_SCHEMA,
+    get_nested_schema,
+)
+
+# Import schema builders for dynamic schema creation
+from src.schemas.schema_builder import (
+    FieldBuilder,
+    RuleBuilder,
+    SchemaBuilder,
+    NestedSchemaBuilder,
+    create_field,
+    create_schema,
+    clone_schema,
+    generate_zero_shot_schema,
+)
+
 
 def get_schema(document_type: DocumentType) -> DocumentSchema:
     """
@@ -94,6 +119,25 @@ __all__ = [
     "SUPERBILL_SCHEMA",
     "UB04_SCHEMA",
     "EOB_SCHEMA",
+    # Nested schemas
+    "NestedSchema",
+    "NestedSchemaRegistry",
+    "CMS1500_SERVICE_LINE_SCHEMA",
+    "SUPERBILL_PROCEDURE_SCHEMA",
+    "UB04_SERVICE_LINE_SCHEMA",
+    "UB04_CODE_CODE_SCHEMA",
+    "EOB_SERVICE_LINE_SCHEMA",
+    "EOB_ADJUSTMENT_SCHEMA",
+    "get_nested_schema",
+    # Schema builders (for zero-shot flexibility)
+    "FieldBuilder",
+    "RuleBuilder",
+    "SchemaBuilder",
+    "NestedSchemaBuilder",
+    "create_field",
+    "create_schema",
+    "clone_schema",
+    "generate_zero_shot_schema",
     # Helper functions
     "get_schema",
     "get_all_schemas",
