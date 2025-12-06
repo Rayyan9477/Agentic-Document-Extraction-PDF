@@ -1581,7 +1581,7 @@ REMARKS_FIELDS = [
     FieldDefinition(
         name="remarks",
         display_name="Remarks (FL 80)",
-        field_type=FieldType.TEXT,
+        field_type=FieldType.STRING,
         description="Additional remarks or special instructions",
         required=False,
         location_hint="Form Locator 80",

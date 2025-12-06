@@ -15,30 +15,12 @@ Usage:
 """
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING
 
-# Core configuration
+# Core configuration (always available)
 from src.config import get_settings, get_logger, AuditLogger
 
-# Preprocessing components
-from src.preprocessing import (
-    PDFProcessor,
-    ImageEnhancer,
-    BatchManager,
-    PageImage,
-    PDFMetadata,
-    EnhancementResult,
-)
-
-# VLM client components
-from src.client import (
-    LMStudioClient,
-    ConnectionManager,
-    HealthMonitor,
-    VisionRequest,
-    VisionResponse,
-)
-
-# Schema components
+# Schema components (always available - no heavy dependencies)
 from src.schemas import (
     DocumentType,
     DocumentSchema,
@@ -48,7 +30,7 @@ from src.schemas import (
     get_all_schemas,
 )
 
-# Utility components
+# Utility components (always available)
 from src.utils import (
     ensure_directory,
     get_file_hash,
@@ -68,6 +50,44 @@ from src.utils import (
     fuzzy_match,
 )
 
+# Preprocessing components (requires cv2/numpy - optional for core functionality)
+try:
+    from src.preprocessing import (
+        PDFProcessor,
+        ImageEnhancer,
+        BatchManager,
+        PageImage,
+        PDFMetadata,
+        EnhancementResult,
+    )
+    _PREPROCESSING_AVAILABLE = True
+except ImportError:
+    PDFProcessor = None  # type: ignore[misc, assignment]
+    ImageEnhancer = None  # type: ignore[misc, assignment]
+    BatchManager = None  # type: ignore[misc, assignment]
+    PageImage = None  # type: ignore[misc, assignment]
+    PDFMetadata = None  # type: ignore[misc, assignment]
+    EnhancementResult = None  # type: ignore[misc, assignment]
+    _PREPROCESSING_AVAILABLE = False
+
+# VLM client components (requires httpx - optional for schema-only usage)
+try:
+    from src.client import (
+        LMStudioClient,
+        ConnectionManager,
+        HealthMonitor,
+        VisionRequest,
+        VisionResponse,
+    )
+    _CLIENT_AVAILABLE = True
+except ImportError:
+    LMStudioClient = None  # type: ignore[misc, assignment]
+    ConnectionManager = None  # type: ignore[misc, assignment]
+    HealthMonitor = None  # type: ignore[misc, assignment]
+    VisionRequest = None  # type: ignore[misc, assignment]
+    VisionResponse = None  # type: ignore[misc, assignment]
+    _CLIENT_AVAILABLE = False
+
 
 try:
     __version__ = version("doc-extraction-system")
@@ -84,31 +104,34 @@ __all__ = [
     "__author__",
     "__email__",
     "__license__",
+    # Availability flags
+    "_PREPROCESSING_AVAILABLE",
+    "_CLIENT_AVAILABLE",
     # Configuration
     "get_settings",
     "get_logger",
     "AuditLogger",
-    # Preprocessing
+    # Preprocessing (may be None if cv2 not installed)
     "PDFProcessor",
     "ImageEnhancer",
     "BatchManager",
     "PageImage",
     "PDFMetadata",
     "EnhancementResult",
-    # VLM Client
+    # VLM Client (may be None if httpx not installed)
     "LMStudioClient",
     "ConnectionManager",
     "HealthMonitor",
     "VisionRequest",
     "VisionResponse",
-    # Schemas
+    # Schemas (always available)
     "DocumentType",
     "DocumentSchema",
     "SchemaRegistry",
     "FieldType",
     "get_schema",
     "get_all_schemas",
-    # Utilities
+    # Utilities (always available)
     "ensure_directory",
     "get_file_hash",
     "safe_filename",

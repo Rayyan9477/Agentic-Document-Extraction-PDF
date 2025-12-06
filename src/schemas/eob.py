@@ -598,7 +598,7 @@ ADJUSTMENT_FIELDS = [
     FieldDefinition(
         name="remarks",
         display_name="Remarks/Notes",
-        field_type=FieldType.TEXT,
+        field_type=FieldType.STRING,
         description="Additional remarks or explanatory notes",
         required=False,
         location_hint="Remarks section or footer",
@@ -618,7 +618,7 @@ APPEAL_FIELDS = [
     FieldDefinition(
         name="appeal_instructions",
         display_name="Appeal Instructions",
-        field_type=FieldType.TEXT,
+        field_type=FieldType.STRING,
         description="Instructions on how to file an appeal",
         required=False,
         location_hint="Appeal rights section",

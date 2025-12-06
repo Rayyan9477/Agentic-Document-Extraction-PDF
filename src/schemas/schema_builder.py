@@ -172,10 +172,10 @@ class FieldBuilder:
             min_length=self._min_length,
             max_length=self._max_length,
             validation_func=self._validation_func,
-            transformation_func=self._transformation_func,
+            transform_func=self._transformation_func,
             list_item_type=self._list_item_type,
             nested_schema=self._nested_schema,
-            default_value=self._default_value,
+            default=self._default_value,
         )
 
 

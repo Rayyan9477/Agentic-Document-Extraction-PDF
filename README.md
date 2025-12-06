@@ -800,11 +800,11 @@ doc-extraction-system/
 - [ ] Validator agent
 
 ### Phase 3: Anti-Hallucination System (Weeks 7-8)
-- [ ] Prompt engineering layer
+- [ ] System Prompt engineering layer (For Zero Shot and Expert level of understanding)
 - [ ] Dual-pass extraction
 - [ ] Pattern validation
 - [ ] Confidence scoring
-- [ ] Human-in-the-loop interface
+- [ ] Human-in-the-loop (RLHF Reinforcement Learning)
 
 ### Phase 4: Integration & Testing (Weeks 9-10)
 - [ ] Task queue (Celery + Redis)
