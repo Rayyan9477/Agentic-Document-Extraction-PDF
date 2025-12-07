@@ -552,9 +552,8 @@ class FileEncryptor:
         with open(input_path, "rb") as f:
             plaintext = f.read()
 
-        # Add file metadata as associated data
-        associated_data = f"{input_path.name}:{input_path.stat().st_size}".encode("utf-8")
-        encrypted_data = self._encryptor.encrypt(plaintext, associated_data)
+        # Encrypt without AAD for file encryption (integrity is still verified via GCM tag)
+        encrypted_data = self._encryptor.encrypt(plaintext, None)
 
         # Write encrypted data
         with open(output_path, "wb") as f:
@@ -599,14 +598,8 @@ class FileEncryptor:
 
         encrypted_data = EncryptedData.from_bytes(encrypted_bytes)
 
-        # Use original filename as associated data if available
-        associated_data = f"{output_path.name}:{len(encrypted_data.ciphertext)}".encode("utf-8")
-
-        try:
-            plaintext = self._encryptor.decrypt(encrypted_data, associated_data)
-        except DecryptionError:
-            # Retry without associated data for backward compatibility
-            plaintext = self._encryptor.decrypt(encrypted_data, None)
+        # Decrypt without AAD (integrity is verified via GCM tag)
+        plaintext = self._encryptor.decrypt(encrypted_data, None)
 
         # Write decrypted data
         with open(output_path, "wb") as f:

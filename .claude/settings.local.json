@@ -4,7 +4,8 @@
       "Bash(python -m py_compile:*)",
       "Bash(python:*)",
       "Bash(mkdir:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(PYTHONPATH=. python:*)"
     ],
     "deny": [],
     "ask": []
