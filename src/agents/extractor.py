@@ -36,6 +36,7 @@ from src.prompts.extraction import (
     build_table_extraction_prompt,
 )
 from src.schemas import SchemaRegistry, DocumentSchema, FieldDefinition
+from src.validation import DualPassComparator, ComparisonResult
 
 
 logger = get_logger(__name__)
@@ -73,6 +74,7 @@ class ExtractorAgent(BaseAgent):
         self._schema_registry = SchemaRegistry()
         self._agreement_boost = agreement_confidence_boost
         self._disagreement_penalty = disagreement_confidence_penalty
+        self._dual_pass_comparator = DualPassComparator()
 
     def process(self, state: ExtractionState) -> ExtractionState:
         """
@@ -461,9 +463,12 @@ class ExtractorAgent(BaseAgent):
         page_number: int,
     ) -> dict[str, FieldMetadata]:
         """
-        Merge results from both extraction passes.
+        Merge results from both extraction passes using DualPassComparator.
 
-        Compares field values and calculates confidence based on agreement.
+        Uses sophisticated comparison algorithm from validation module for:
+        - Fuzzy matching with similarity scoring
+        - Confidence-weighted value selection
+        - Agreement rate calculation
 
         Args:
             pass1_fields: Fields from pass 1.
@@ -473,7 +478,13 @@ class ExtractorAgent(BaseAgent):
         Returns:
             Dictionary of merged FieldMetadata.
         """
-        merged: dict[str, FieldMetadata] = {}
+        # Extract values and confidences from pass data
+        pass1_values: dict[str, Any] = {}
+        pass2_values: dict[str, Any] = {}
+        pass1_conf: dict[str, float] = {}
+        pass2_conf: dict[str, float] = {}
+        locations: dict[str, str] = {}
+
         all_fields = set(pass1_fields.keys()) | set(pass2_fields.keys())
 
         for field_name in all_fields:
@@ -481,39 +492,42 @@ class ExtractorAgent(BaseAgent):
             p2 = pass2_fields.get(field_name, {})
 
             # Extract values
-            val1 = p1.get("value") if isinstance(p1, dict) else p1
-            val2 = p2.get("value") if isinstance(p2, dict) else p2
+            pass1_values[field_name] = p1.get("value") if isinstance(p1, dict) else p1
+            pass2_values[field_name] = p2.get("value") if isinstance(p2, dict) else p2
 
             # Extract confidences
-            conf1 = p1.get("confidence", 0.5) if isinstance(p1, dict) else 0.5
-            conf2 = p2.get("confidence", 0.5) if isinstance(p2, dict) else 0.5
+            pass1_conf[field_name] = p1.get("confidence", 0.5) if isinstance(p1, dict) else 0.5
+            pass2_conf[field_name] = p2.get("confidence", 0.5) if isinstance(p2, dict) else 0.5
 
             # Extract locations
             loc1 = p1.get("location", "") if isinstance(p1, dict) else ""
             loc2 = p2.get("location", "") if isinstance(p2, dict) else ""
+            locations[field_name] = loc1 or loc2
 
-            # Check agreement
-            passes_agree = self._values_match(val1, val2)
+        # Use DualPassComparator for sophisticated merging
+        comparison_result = self._dual_pass_comparator.compare(
+            pass1_data=pass1_values,
+            pass2_data=pass2_values,
+            pass1_confidence=pass1_conf,
+            pass2_confidence=pass2_conf,
+        )
 
-            # Calculate final confidence
-            if passes_agree:
-                # Agreement: average + boost
-                final_confidence = min(1.0, (conf1 + conf2) / 2 + self._agreement_boost)
-                final_value = val1 if val1 is not None else val2
-            else:
-                # Disagreement: lower confidence
-                final_confidence = max(0.0, min(conf1, conf2) - self._disagreement_penalty)
-                # Use value with higher confidence
-                final_value = val1 if conf1 >= conf2 else val2
+        # Convert comparison results to FieldMetadata
+        merged: dict[str, FieldMetadata] = {}
+        for field_name, field_comparison in comparison_result.field_comparisons.items():
+            passes_agree = field_comparison.result in (
+                ComparisonResult.EXACT_MATCH,
+                ComparisonResult.FUZZY_MATCH,
+            )
 
             merged[field_name] = FieldMetadata(
                 field_name=field_name,
-                value=final_value,
-                confidence=final_confidence,
-                pass1_value=val1,
-                pass2_value=val2,
+                value=field_comparison.merged_value,
+                confidence=field_comparison.merge_confidence,
+                pass1_value=field_comparison.pass1_value,
+                pass2_value=field_comparison.pass2_value,
                 passes_agree=passes_agree,
-                location_hint=loc1 or loc2,
+                location_hint=locations.get(field_name, ""),
                 source_page=page_number,
             )
 

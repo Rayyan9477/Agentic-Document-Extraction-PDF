@@ -3,10 +3,13 @@ Validator Agent for quality assurance and hallucination detection.
 
 Responsible for:
 - Schema validation against document type rules
-- Hallucination pattern detection
+- Hallucination pattern detection (via validation module)
 - Medical code validation (CPT, ICD-10, NPI)
 - Cross-field rule validation
 - Final confidence score calculation
+
+Integrates with Phase 3 validation module for comprehensive
+anti-hallucination detection and validation.
 """
 
 import re
@@ -39,6 +42,21 @@ from src.schemas import (
     validate_npi,
     CrossFieldRule,
     RuleOperator,
+)
+from src.validation import (
+    HallucinationPatternDetector,
+    detect_hallucination_patterns,
+    ConfidenceScorer,
+    AdaptiveConfidenceScorer,
+    ConfidenceAction,
+    MedicalCodeValidationEngine,
+    validate_medical_codes,
+    CrossFieldValidator,
+    MedicalDocumentRules,
+    validate_cross_fields,
+    HumanReviewQueue,
+    ReviewReason,
+    create_review_task,
 )
 
 
@@ -77,11 +95,14 @@ class ValidatorAgent(BaseAgent):
     Validation agent for quality assurance and hallucination detection.
 
     Implements Layer 3 of the 3-layer anti-hallucination system:
-    - Pattern-based hallucination detection
-    - Medical code validation
-    - Cross-field rule validation
+    - Pattern-based hallucination detection (via HallucinationPatternDetector)
+    - Medical code validation (via MedicalCodeValidationEngine)
+    - Cross-field rule validation (via CrossFieldValidator)
     - Schema compliance checking
-    - Final confidence scoring
+    - Final confidence scoring (via ConfidenceScorer)
+
+    Integrates with the Phase 3 validation module for comprehensive
+    anti-hallucination detection with confidence-based routing.
 
     VLM Calls: 0-1 per document (optional verification)
     """
@@ -92,6 +113,7 @@ class ValidatorAgent(BaseAgent):
         high_confidence_threshold: float = 0.85,
         low_confidence_threshold: float = 0.50,
         enable_vlm_verification: bool = False,
+        review_queue_path: str | None = None,
     ) -> None:
         """
         Initialize the Validator agent.
@@ -101,12 +123,22 @@ class ValidatorAgent(BaseAgent):
             high_confidence_threshold: Threshold for high confidence (auto-accept).
             low_confidence_threshold: Threshold for low confidence (human review).
             enable_vlm_verification: Whether to use VLM for additional verification.
+            review_queue_path: Optional path for persisting human review queue.
         """
         super().__init__(name="validator", client=client)
         self._schema_registry = SchemaRegistry()
         self._high_threshold = high_confidence_threshold
         self._low_threshold = low_confidence_threshold
         self._enable_vlm_verification = enable_vlm_verification
+
+        # Initialize Phase 3 validation components
+        self._pattern_detector = HallucinationPatternDetector()
+        self._medical_validator = MedicalCodeValidationEngine()
+        self._confidence_scorer = ConfidenceScorer()
+        self._review_queue = HumanReviewQueue(
+            queue_path=review_queue_path,
+            auto_persist=review_queue_path is not None,
+        )
 
     def process(self, state: ExtractionState) -> ExtractionState:
         """
@@ -315,6 +347,12 @@ class ValidatorAgent(BaseAgent):
         """
         Perform comprehensive validation of extraction results.
 
+        Uses Phase 3 validation module for:
+        - Hallucination pattern detection
+        - Medical code validation
+        - Cross-field validation
+        - Confidence scoring
+
         Args:
             extraction: Merged extraction results.
             field_metadata: Field metadata from extraction.
@@ -325,36 +363,57 @@ class ValidatorAgent(BaseAgent):
             ValidationResult with all validation details.
         """
         result = ValidationResult()
-        total_confidence = 0.0
-        field_count = 0
 
-        # Validate each field
+        # Extract values and confidences from extraction data
+        values: dict[str, Any] = {}
+        extraction_confidences: dict[str, float] = {}
+
         for field_name, field_data in extraction.items():
-            value = field_data.get("value") if isinstance(field_data, dict) else field_data
-            confidence = (
-                field_data.get("confidence", 0.5)
-                if isinstance(field_data, dict)
-                else 0.5
-            )
+            if isinstance(field_data, dict):
+                values[field_name] = field_data.get("value")
+                extraction_confidences[field_name] = field_data.get("confidence", 0.5)
+            else:
+                values[field_name] = field_data
+                extraction_confidences[field_name] = 0.5
 
-            # Track confidence
-            if value is not None:
-                total_confidence += confidence
-                field_count += 1
+        # Step 1: Hallucination pattern detection using validation module
+        pattern_result = self._pattern_detector.detect(
+            values, extraction_confidences
+        )
 
-            # Field validation
+        if pattern_result.is_likely_hallucination:
+            result.hallucination_flags.extend(list(pattern_result.flagged_fields))
+            for match in pattern_result.matches:
+                result.warnings.append(
+                    f"{match.field_name}: {match.description}"
+                )
+
+        # Step 2: Medical code validation using validation module
+        code_result = self._medical_validator.validate_all(values)
+
+        for code_detail in code_result.validations:
+            if not code_detail.is_valid:
+                result.errors.append(
+                    f"{code_detail.code}: {code_detail.message}"
+                )
+            result.field_validations[code_detail.code] = code_detail.is_valid
+
+        # Step 3: Schema-based field validation (existing logic)
+        for field_name, value in values.items():
+            if value is None:
+                continue
+
             field_errors: list[str] = []
-            field_warnings: list[str] = []
 
-            # Check for hallucination patterns
+            # Legacy hallucination check (for backward compatibility)
             hallucination_flag = self._check_hallucination_patterns(
-                field_name, value, confidence
+                field_name, value, extraction_confidences.get(field_name, 0.5)
             )
-            if hallucination_flag:
+            if hallucination_flag and field_name not in result.hallucination_flags:
                 result.hallucination_flags.append(field_name)
-                field_warnings.append(f"Potential hallucination detected: {hallucination_flag}")
+                result.warnings.append(f"{field_name}: {hallucination_flag}")
 
-            # Schema-based validation
+            # Schema validation
             if schema:
                 field_def = self._get_field_definition(schema, field_name)
                 if field_def:
@@ -362,11 +421,6 @@ class ValidatorAgent(BaseAgent):
                     if not is_valid and error:
                         field_errors.append(error)
 
-            # Medical code validation
-            code_errors = self._validate_medical_codes(field_name, value)
-            field_errors.extend(code_errors)
-
-            # Store field validation result
             result.field_validations[field_name] = len(field_errors) == 0
 
             if field_errors:
@@ -374,50 +428,60 @@ class ValidatorAgent(BaseAgent):
                     [f"{field_name}: {e}" for e in field_errors]
                 )
 
-            if field_warnings:
-                result.warnings.extend(
-                    [f"{field_name}: {w}" for w in field_warnings]
-                )
+        # Step 4: Cross-field validation using validation module
+        cross_result = validate_cross_fields(values, document_type.lower())
 
-        # Cross-field validation
+        if not cross_result.passed:
+            for violation in cross_result.violations:
+                result.cross_field_validations.append(violation.to_dict())
+                result.errors.append(violation.message)
+
+        # Legacy cross-field validation from schema
         if schema and schema.cross_field_rules:
-            cross_field_results = self._validate_cross_field_rules(
+            legacy_cross = self._validate_cross_field_rules(
                 extraction, schema.cross_field_rules
             )
-            result.cross_field_validations = cross_field_results
-
-            for cf_result in cross_field_results:
+            for cf_result in legacy_cross:
                 if not cf_result.get("passed", True):
+                    result.cross_field_validations.append(cf_result)
                     result.errors.append(cf_result.get("message", "Cross-field validation failed"))
 
-        # Check for repetitive values (hallucination indicator)
+        # Step 5: Check for repetitive values
         repetition_warnings = self._check_repetitive_values(extraction)
         result.warnings.extend(repetition_warnings)
 
-        # Calculate overall confidence
-        if field_count > 0:
-            result.overall_confidence = total_confidence / field_count
-        else:
-            result.overall_confidence = 0.0
+        # Step 6: Calculate confidence using validation module
+        validation_results = {
+            k: v for k, v in result.field_validations.items()
+        }
 
-        # Determine confidence level
-        if result.overall_confidence >= self._high_threshold:
+        conf_result = self._confidence_scorer.calculate(
+            extraction_confidences=extraction_confidences,
+            validation_results=validation_results,
+            pattern_flags=set(result.hallucination_flags),
+            retry_count=0,  # Retry count is tracked in state
+        )
+
+        result.overall_confidence = conf_result.overall_confidence
+
+        # Map confidence level from validation module to pipeline state
+        if conf_result.overall_level.value == "high":
             result.confidence_level = ConfidenceLevel.HIGH
-        elif result.overall_confidence >= self._low_threshold:
+        elif conf_result.overall_level.value == "medium":
             result.confidence_level = ConfidenceLevel.MEDIUM
         else:
             result.confidence_level = ConfidenceLevel.LOW
 
-        # Determine overall validity
+        # Determine validity
         result.is_valid = (
             len(result.errors) == 0 and
             len(result.hallucination_flags) == 0
         )
 
-        # Determine if retry or review needed
-        if result.confidence_level == ConfidenceLevel.LOW:
+        # Determine routing based on confidence module recommendation
+        if conf_result.recommended_action == ConfidenceAction.HUMAN_REVIEW:
             result.requires_human_review = True
-        elif result.confidence_level == ConfidenceLevel.MEDIUM and len(result.hallucination_flags) > 0:
+        elif conf_result.recommended_action == ConfidenceAction.RETRY:
             result.requires_retry = True
 
         return result
