@@ -1,0 +1,559 @@
+"""
+API Middleware for Security, Metrics, and Audit Logging.
+
+Provides comprehensive middleware for the FastAPI application including:
+- Authentication and authorization
+- Request/response metrics collection
+- Audit logging for HIPAA compliance
+- Rate limiting
+- Security headers
+"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Callable
+
+from fastapi import HTTPException, Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+
+import structlog
+
+from src.monitoring.metrics import MetricsCollector
+from src.security.audit import (
+    AuditContext,
+    AuditEventType,
+    AuditLogger,
+    AuditOutcome,
+    AuditSeverity,
+)
+from src.security.rbac import (
+    Permission,
+    RBACManager,
+    TokenError,
+    TokenExpiredError,
+    TokenPayload,
+)
+
+logger = structlog.get_logger(__name__)
+
+
+@dataclass(slots=True)
+class RateLimitConfig:
+    """Rate limiting configuration."""
+
+    requests_per_minute: int = 60
+    burst_size: int = 10
+
+
+@dataclass
+class RateLimitState:
+    """Rate limiting state for a client."""
+
+    requests: list[float] = field(default_factory=list)
+    last_cleanup: float = 0.0
+
+
+class RateLimiter:
+    """
+    Token bucket rate limiter.
+
+    Provides per-client rate limiting with configurable limits.
+    """
+
+    def __init__(
+        self,
+        default_rpm: int = 60,
+        burst_size: int = 10,
+    ) -> None:
+        """
+        Initialize rate limiter.
+
+        Args:
+            default_rpm: Default requests per minute.
+            burst_size: Maximum burst size.
+        """
+        self._default_rpm = default_rpm
+        self._burst_size = burst_size
+        self._clients: dict[str, RateLimitState] = defaultdict(RateLimitState)
+        self._endpoint_limits: dict[str, RateLimitConfig] = {}
+
+    def set_endpoint_limit(
+        self,
+        endpoint: str,
+        rpm: int,
+        burst: int | None = None,
+    ) -> None:
+        """Set rate limit for a specific endpoint."""
+        self._endpoint_limits[endpoint] = RateLimitConfig(
+            requests_per_minute=rpm,
+            burst_size=burst or max(rpm // 6, 1),
+        )
+
+    def is_allowed(
+        self,
+        client_id: str,
+        endpoint: str | None = None,
+    ) -> tuple[bool, dict[str, int]]:
+        """
+        Check if request is allowed.
+
+        Args:
+            client_id: Client identifier (IP or user ID).
+            endpoint: Endpoint path for specific limits.
+
+        Returns:
+            Tuple of (allowed, headers_dict).
+        """
+        now = time.time()
+        window_start = now - 60  # 1 minute window
+
+        # Get config
+        config = self._endpoint_limits.get(endpoint or "", None)
+        rpm = config.requests_per_minute if config else self._default_rpm
+
+        # Get/create client state
+        state = self._clients[client_id]
+
+        # Cleanup old requests
+        if now - state.last_cleanup > 10:
+            state.requests = [t for t in state.requests if t > window_start]
+            state.last_cleanup = now
+
+        # Check limit
+        remaining = max(0, rpm - len(state.requests))
+        headers = {
+            "X-RateLimit-Limit": rpm,
+            "X-RateLimit-Remaining": remaining,
+            "X-RateLimit-Reset": int(window_start + 60),
+        }
+
+        if len(state.requests) >= rpm:
+            return False, headers
+
+        # Record request
+        state.requests.append(now)
+        headers["X-RateLimit-Remaining"] = remaining - 1
+
+        return True, headers
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to add security headers to all responses.
+
+    Implements OWASP recommended security headers.
+    """
+
+    SECURITY_HEADERS = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+    }
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        """Add security headers to response."""
+        response = await call_next(request)
+
+        for header, value in self.SECURITY_HEADERS.items():
+            response.headers[header] = value
+
+        return response
+
+
+class MetricsMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to collect request metrics for Prometheus.
+
+    Records request duration, count, and size metrics.
+    """
+
+    def __init__(self, app: Any) -> None:
+        """Initialize metrics middleware."""
+        super().__init__(app)
+        self._collector = MetricsCollector()
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        """Collect metrics for request."""
+        method = request.method
+        path = self._normalize_path(request.url.path)
+        start_time = time.perf_counter()
+
+        # Track in-progress requests
+        self._collector._registry.api_requests_in_progress.labels(
+            method=method,
+            endpoint=path,
+        ).inc()
+
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+        except Exception as e:
+            status_code = 500
+            raise
+        finally:
+            duration = time.perf_counter() - start_time
+
+            # Record metrics
+            self._collector.record_api_request(
+                method=method,
+                endpoint=path,
+                status_code=status_code,
+                duration=duration,
+                request_size=int(request.headers.get("content-length", 0)),
+            )
+
+            # Decrement in-progress
+            self._collector._registry.api_requests_in_progress.labels(
+                method=method,
+                endpoint=path,
+            ).dec()
+
+        return response
+
+    def _normalize_path(self, path: str) -> str:
+        """Normalize path by replacing dynamic segments."""
+        # Replace UUIDs
+        import re
+        path = re.sub(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            "{id}",
+            path,
+        )
+        # Replace numeric IDs
+        path = re.sub(r"/\d+(?=/|$)", "/{id}", path)
+        return path
+
+
+class AuditMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware for HIPAA-compliant audit logging.
+
+    Logs all API requests with appropriate context.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        log_dir: str = "./logs/audit",
+        mask_phi: bool = True,
+    ) -> None:
+        """
+        Initialize audit middleware.
+
+        Args:
+            app: FastAPI application.
+            log_dir: Audit log directory.
+            mask_phi: Enable PHI masking.
+        """
+        super().__init__(app)
+        self._audit_logger = AuditLogger(
+            log_dir=log_dir,
+            mask_phi=mask_phi,
+        )
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        """Audit log the request."""
+        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        user_id = getattr(request.state, "user_id", None)
+        client_ip = self._get_client_ip(request)
+        start_time = time.perf_counter()
+
+        # Set audit context
+        self._audit_logger.set_context(
+            request_id=request_id,
+            user_id=user_id,
+            client_ip=client_ip,
+        )
+
+        try:
+            response = await call_next(request)
+            outcome = AuditOutcome.SUCCESS if response.status_code < 400 else AuditOutcome.FAILURE
+        except Exception as e:
+            outcome = AuditOutcome.FAILURE
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+
+            # Log API request
+            self._audit_logger.log_api_request(
+                method=request.method,
+                path=request.url.path,
+                status_code=response.status_code if "response" in locals() else 500,
+                duration_ms=duration_ms,
+                client_ip=client_ip,
+                user_id=user_id,
+                query_params=str(request.query_params) if request.query_params else None,
+            )
+
+            # Clear context
+            self._audit_logger.clear_context()
+
+        return response
+
+    def _get_client_ip(self, request: Request) -> str:
+        """Get client IP address from request."""
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
+
+
+class AuthenticationMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware for JWT token authentication.
+
+    Validates tokens and populates request context with user info.
+    """
+
+    # Paths that don't require authentication
+    PUBLIC_PATHS = {
+        "/",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/api/v1/health",
+        "/api/v1/health/ready",
+        "/api/v1/health/live",
+        "/metrics",
+    }
+
+    def __init__(
+        self,
+        app: Any,
+        rbac_manager: RBACManager | None = None,
+        api_key_header: str = "X-API-Key",
+        bearer_header: str = "Authorization",
+    ) -> None:
+        """
+        Initialize authentication middleware.
+
+        Args:
+            app: FastAPI application.
+            rbac_manager: RBAC manager instance.
+            api_key_header: Header name for API key.
+            bearer_header: Header name for Bearer token.
+        """
+        super().__init__(app)
+        self._rbac = rbac_manager
+        self._api_key_header = api_key_header
+        self._bearer_header = bearer_header
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        """Authenticate the request."""
+        path = request.url.path
+
+        # Skip authentication for public paths
+        if self._is_public_path(path):
+            return await call_next(request)
+
+        # Skip if no RBAC manager configured
+        if self._rbac is None:
+            return await call_next(request)
+
+        # Try to authenticate
+        try:
+            payload = await self._authenticate(request)
+            if payload:
+                request.state.user_id = payload.sub
+                request.state.username = payload.username
+                request.state.roles = payload.roles
+                request.state.permissions = payload.permissions
+        except TokenExpiredError:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "token_expired",
+                    "message": "Authentication token has expired",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except TokenError as e:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "error": "authentication_failed",
+                    "message": str(e),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+
+        return await call_next(request)
+
+    def _is_public_path(self, path: str) -> bool:
+        """Check if path is public."""
+        if path in self.PUBLIC_PATHS:
+            return True
+        # Check prefixes
+        public_prefixes = ["/docs", "/redoc", "/openapi"]
+        return any(path.startswith(p) for p in public_prefixes)
+
+    async def _authenticate(self, request: Request) -> TokenPayload | None:
+        """
+        Authenticate request using token or API key.
+
+        Args:
+            request: FastAPI request.
+
+        Returns:
+            Token payload if authenticated.
+        """
+        # Try Bearer token
+        auth_header = request.headers.get(self._bearer_header)
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            return self._rbac.tokens.validate_token(token)
+
+        # Try API key
+        api_key = request.headers.get(self._api_key_header)
+        if api_key:
+            return self._rbac.tokens.validate_token(api_key)
+
+        return None
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware for rate limiting.
+
+    Implements per-client and per-endpoint rate limiting.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        default_rpm: int = 60,
+        burst_size: int = 10,
+    ) -> None:
+        """
+        Initialize rate limit middleware.
+
+        Args:
+            app: FastAPI application.
+            default_rpm: Default requests per minute.
+            burst_size: Maximum burst size.
+        """
+        super().__init__(app)
+        self._limiter = RateLimiter(default_rpm, burst_size)
+
+        # Set endpoint-specific limits
+        self._limiter.set_endpoint_limit("/api/v1/documents/process", 10, 2)
+        self._limiter.set_endpoint_limit("/api/v1/documents/batch", 5, 1)
+        self._limiter.set_endpoint_limit("/api/v1/documents/export", 30, 5)
+
+    async def dispatch(
+        self,
+        request: Request,
+        call_next: RequestResponseEndpoint,
+    ) -> Response:
+        """Apply rate limiting."""
+        client_id = self._get_client_id(request)
+        path = request.url.path
+
+        allowed, headers = self._limiter.is_allowed(client_id, path)
+
+        if not allowed:
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": "rate_limit_exceeded",
+                    "message": "Too many requests",
+                    "retry_after": headers.get("X-RateLimit-Reset", 60),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+                headers={k: str(v) for k, v in headers.items()},
+            )
+
+        response = await call_next(request)
+
+        # Add rate limit headers to response
+        for key, value in headers.items():
+            response.headers[key] = str(value)
+
+        return response
+
+    def _get_client_id(self, request: Request) -> str:
+        """Get client identifier for rate limiting."""
+        # Use user ID if authenticated
+        user_id = getattr(request.state, "user_id", None)
+        if user_id:
+            return f"user:{user_id}"
+
+        # Fall back to IP address
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return f"ip:{forwarded.split(',')[0].strip()}"
+
+        return f"ip:{request.client.host if request.client else 'unknown'}"
+
+
+def get_current_user(request: Request) -> dict[str, Any] | None:
+    """
+    Get current user from request state.
+
+    Args:
+        request: FastAPI request.
+
+    Returns:
+        User info dict or None.
+    """
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        return None
+
+    return {
+        "user_id": user_id,
+        "username": getattr(request.state, "username", None),
+        "roles": getattr(request.state, "roles", []),
+        "permissions": getattr(request.state, "permissions", []),
+    }
+
+
+def require_permission(permission: Permission) -> Callable:
+    """
+    Dependency for requiring a specific permission.
+
+    Args:
+        permission: Required permission.
+
+    Returns:
+        FastAPI dependency.
+    """
+    async def dependency(request: Request) -> None:
+        permissions = getattr(request.state, "permissions", [])
+        if permission.value not in permissions:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error": "forbidden",
+                    "message": f"Missing required permission: {permission.value}",
+                },
+            )
+
+    return dependency
