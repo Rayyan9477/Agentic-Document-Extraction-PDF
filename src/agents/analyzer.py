@@ -47,8 +47,8 @@ DOCUMENT_TYPE_MAP = {
     "EXPLANATION OF BENEFITS": DocumentType.EOB,
     "SUPERBILL": DocumentType.SUPERBILL,
     "ENCOUNTER FORM": DocumentType.SUPERBILL,
-    "OTHER": DocumentType.OTHER,
-    "UNKNOWN": DocumentType.OTHER,
+    "OTHER": DocumentType.UNKNOWN,
+    "UNKNOWN": DocumentType.UNKNOWN,
 }
 
 
@@ -338,7 +338,7 @@ class AnalyzerAgent(BaseAgent):
 
         # Map document type to schema
         doc_type_str = classification.get("document_type", "OTHER")
-        doc_type = DOCUMENT_TYPE_MAP.get(doc_type_str, DocumentType.OTHER)
+        doc_type = DOCUMENT_TYPE_MAP.get(doc_type_str, DocumentType.UNKNOWN)
 
         # Get schema from registry
         try:

@@ -10,7 +10,7 @@ import { AppLayout } from '@/components/layout';
 import { FileUploader, UploadOptions } from '@/components/documents';
 import type { UploadFile } from '@/components/documents';
 import { Card, CardHeader, CardContent, Button, StepProgress } from '@/components/ui';
-import { documentsApi, schemasApi } from '@/lib/api';
+import { documentsApi, schemaApi } from '@/lib/api';
 import { generateId } from '@/lib/utils';
 import type { ExportFormat, ProcessingPriority } from '@/types/api';
 
@@ -36,7 +36,7 @@ export default function DocumentUploadPage() {
   // Fetch available schemas
   const { data: schemas = [] } = useQuery({
     queryKey: ['schemas'],
-    queryFn: () => schemasApi.list(),
+    queryFn: () => schemaApi.list(),
   });
 
   // Upload mutation

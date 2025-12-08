@@ -246,12 +246,13 @@ def process_document_task(
         _update_task_state("PROCESSING", {"status": TaskStatus.PROCESSING.value})
 
         # Import pipeline here to avoid circular imports
-        from src.pipeline.graph import run_extraction_pipeline
+        from src.pipeline.runner import PipelineRunner
 
         # Run the extraction pipeline
-        pipeline_result = run_extraction_pipeline(
+        runner = PipelineRunner(enable_checkpointing=False)
+        pipeline_result = runner.extract_from_pdf(
             pdf_path=pdf_path,
-            schema_name=schema_name,
+            custom_schema=None,
         )
 
         result.processing_id = pipeline_result.get("processing_id", "")
@@ -401,41 +402,58 @@ def batch_process_task(
     successful = 0
     failed = 0
 
-    for idx, pdf_path in enumerate(pdf_paths):
+    # Use Celery group for parallel processing (non-blocking)
+    from celery import group
+
+    # Create task signatures for all documents
+    task_signatures = [
+        process_document_task.s(
+            pdf_path,
+            output_dir=output_dir,
+            schema_name=schema_name,
+            export_format=export_format,
+            mask_phi=mask_phi,
+        )
+        for pdf_path in pdf_paths
+    ]
+
+    # Execute tasks in parallel
+    job = group(task_signatures)
+    async_results = job.apply_async()
+
+    # Wait for all tasks to complete with progress updates
+    total_tasks = len(pdf_paths)
+    while not async_results.ready():
+        completed_count = sum(1 for r in async_results.results if r.ready())
         _update_task_state(
             "PROCESSING",
             {
-                "current": idx + 1,
-                "total": len(pdf_paths),
-                "current_file": pdf_path,
+                "current": completed_count,
+                "total": total_tasks,
+                "status": "processing_batch",
             },
         )
+        import time
+        time.sleep(1)  # Check every second
 
+    # Collect results
+    for idx, (pdf_path, async_result) in enumerate(zip(pdf_paths, async_results.results)):
         try:
-            # Process each document synchronously within the batch
-            doc_result = process_document_task.apply(
-                args=[pdf_path],
-                kwargs={
-                    "output_dir": output_dir,
-                    "schema_name": schema_name,
-                    "export_format": export_format,
-                    "mask_phi": mask_phi,
-                },
-            ).get()
+            if async_result.successful():
+                doc_result = async_result.get(timeout=5)
+                results.append(doc_result)
 
-            results.append(doc_result)
-
-            if doc_result.get("status") == TaskStatus.COMPLETED.value:
-                successful += 1
+                if doc_result.get("status") == TaskStatus.COMPLETED.value:
+                    successful += 1
+                else:
+                    failed += 1
             else:
                 failed += 1
-                if stop_on_error:
-                    logger.warning(
-                        "batch_stopped_on_error",
-                        task_id=task_id,
-                        failed_file=pdf_path,
-                    )
-                    break
+                results.append({
+                    "pdf_path": pdf_path,
+                    "status": TaskStatus.FAILED.value,
+                    "errors": [str(async_result.result) if async_result.result else "Unknown error"],
+                })
 
         except Exception as e:
             failed += 1
@@ -444,15 +462,6 @@ def batch_process_task(
                 "status": TaskStatus.FAILED.value,
                 "errors": [str(e)],
             })
-
-            if stop_on_error:
-                logger.warning(
-                    "batch_stopped_on_error",
-                    task_id=task_id,
-                    failed_file=pdf_path,
-                    error=str(e),
-                )
-                break
 
     completed_at = datetime.now(timezone.utc)
     duration_ms = int((completed_at - started_at).total_seconds() * 1000)

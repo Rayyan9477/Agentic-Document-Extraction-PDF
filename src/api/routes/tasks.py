@@ -23,6 +23,79 @@ router = APIRouter()
 
 
 @router.get(
+    "/tasks/active",
+    response_model=list[TaskStatusResponse],
+    summary="List active tasks",
+    description="Get a list of all active/pending tasks.",
+)
+async def list_active_tasks(
+    http_request: Request,
+) -> list[TaskStatusResponse]:
+    """
+    List all active and pending tasks.
+
+    Args:
+        http_request: HTTP request object.
+
+    Returns:
+        List of active task statuses.
+    """
+    request_id = getattr(http_request.state, "request_id", "")
+
+    logger.info(
+        "list_active_tasks_request",
+        request_id=request_id,
+    )
+
+    try:
+        from src.queue.celery_app import celery_app
+
+        # Get active tasks from all workers
+        inspect = celery_app.control.inspect()
+
+        active_tasks = []
+
+        # Get active (currently executing) tasks
+        active = inspect.active() or {}
+        for worker_tasks in active.values():
+            for task in worker_tasks:
+                active_tasks.append(TaskStatusResponse(
+                    task_id=task.get("id", ""),
+                    status="STARTED",
+                    ready=False,
+                    successful=None,
+                    progress=None,
+                    result=None,
+                    error=None,
+                ))
+
+        # Get reserved (pending) tasks
+        reserved = inspect.reserved() or {}
+        for worker_tasks in reserved.values():
+            for task in worker_tasks:
+                active_tasks.append(TaskStatusResponse(
+                    task_id=task.get("id", ""),
+                    status="PENDING",
+                    ready=False,
+                    successful=None,
+                    progress=None,
+                    result=None,
+                    error=None,
+                ))
+
+        return active_tasks
+
+    except Exception as e:
+        logger.error(
+            "list_active_tasks_error",
+            request_id=request_id,
+            error=str(e),
+        )
+        # Return empty list on error instead of 500
+        return []
+
+
+@router.get(
     "/tasks/{task_id}",
     response_model=TaskStatusResponse,
     summary="Get task status",

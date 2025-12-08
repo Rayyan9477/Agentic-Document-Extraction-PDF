@@ -151,13 +151,18 @@ def create_app(
         lifespan=lifespan,
     )
 
-    # Configure CORS
+    # Configure CORS - require explicit origins for security
+    cors_origins = getattr(settings, "cors_origins", None)
+    if not cors_origins:
+        cors_origins = ["http://localhost:3000", "http://localhost:8000"]
+        logger.warning("cors_origins_not_configured", using_defaults=cors_origins)
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins if hasattr(settings, "cors_origins") else ["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
     )
 
     # Add security headers middleware
@@ -322,11 +327,15 @@ def create_app(
     from src.api.routes.tasks import router as tasks_router
     from src.api.routes.health import router as health_router
     from src.api.routes.schemas import router as schemas_router
+    from src.api.routes.dashboard import router as dashboard_router
+    from src.api.routes.queue import router as queue_router
 
     app.include_router(documents_router, prefix="/api/v1", tags=["Documents"])
     app.include_router(tasks_router, prefix="/api/v1", tags=["Tasks"])
     app.include_router(health_router, prefix="/api/v1", tags=["Health"])
     app.include_router(schemas_router, prefix="/api/v1", tags=["Schemas"])
+    app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])
+    app.include_router(queue_router, prefix="/api/v1", tags=["Queue"])
 
     # Root endpoint
     @app.get("/", include_in_schema=False)
@@ -337,6 +346,17 @@ def create_app(
             "version": API_VERSION,
             "docs": "/docs",
         }
+
+    # Favicon endpoint (prevents 404 errors)
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        """Return empty favicon to prevent 404 errors."""
+        # Return a minimal 1x1 transparent PNG
+        import base64
+        png_data = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+        return Response(content=png_data, media_type="image/png")
 
     return app
 

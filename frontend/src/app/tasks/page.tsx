@@ -89,13 +89,13 @@ export default function TasksPage() {
     },
   });
 
-  const tasks = tasksData?.tasks || [];
-  const activeTasks = tasks.filter((t) =>
+  const tasks: TaskStatusResponse[] = tasksData || [];
+  const activeTasks = tasks.filter((t: TaskStatusResponse) =>
     ['started', 'processing', 'validating', 'exporting'].includes(t.status)
   );
-  const pendingTasks = tasks.filter((t) => t.status === 'pending');
-  const completedTasks = tasks.filter((t) => t.status === 'completed');
-  const failedTasks = tasks.filter((t) => ['failed', 'cancelled'].includes(t.status));
+  const pendingTasks = tasks.filter((t: TaskStatusResponse) => t.status === 'pending');
+  const completedTasks = tasks.filter((t: TaskStatusResponse) => t.status === 'completed');
+  const failedTasks = tasks.filter((t: TaskStatusResponse) => ['failed', 'cancelled'].includes(t.status));
 
   const TaskRow: React.FC<{ task: TaskStatusResponse; index: number }> = ({
     task,
@@ -300,7 +300,7 @@ export default function TasksPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {activeTasks.map((task, index) => (
+                        {activeTasks.map((task: TaskStatusResponse, index: number) => (
                           <TaskRow key={task.task_id} task={task} index={index} />
                         ))}
                       </div>
@@ -314,7 +314,7 @@ export default function TasksPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {pendingTasks.map((task, index) => (
+                        {pendingTasks.map((task: TaskStatusResponse, index: number) => (
                           <TaskRow key={task.task_id} task={task} index={index} />
                         ))}
                       </div>
@@ -328,7 +328,7 @@ export default function TasksPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {completedTasks.map((task, index) => (
+                        {completedTasks.map((task: TaskStatusResponse, index: number) => (
                           <TaskRow key={task.task_id} task={task} index={index} />
                         ))}
                       </div>
@@ -342,7 +342,7 @@ export default function TasksPage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {failedTasks.map((task, index) => (
+                        {failedTasks.map((task: TaskStatusResponse, index: number) => (
                           <TaskRow key={task.task_id} task={task} index={index} />
                         ))}
                       </div>

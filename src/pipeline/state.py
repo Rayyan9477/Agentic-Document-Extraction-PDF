@@ -264,6 +264,14 @@ class ExtractionState(TypedDict, total=False):
     requires_human_review: bool
     human_review_reason: str | None
 
+    # === Memory Fields (Mem0 Integration) ===
+    session_id: str | None  # Session identifier for memory grouping
+    checkpoint_id: str | None  # Checkpoint identifier for recovery
+    memory_context: dict[str, Any] | None  # Retrieved context from memory
+    similar_docs: list[str]  # IDs of similar previously processed documents
+    provider_patterns: dict[str, Any] | None  # Provider-specific extraction patterns
+    correction_hints: dict[str, Any] | None  # Hints from past corrections
+
 
 def create_initial_state(
     pdf_path: str | Path,
@@ -325,6 +333,13 @@ def create_initial_state(
         final_output=None,
         requires_human_review=False,
         human_review_reason=None,
+        # Memory
+        session_id=secrets.token_hex(8),
+        checkpoint_id=None,
+        memory_context=None,
+        similar_docs=[],
+        provider_patterns=None,
+        correction_hints=None,
     )
 
 

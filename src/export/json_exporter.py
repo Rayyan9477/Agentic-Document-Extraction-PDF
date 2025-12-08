@@ -229,13 +229,20 @@ class JSONExporter:
                     }
                 }]
             },
-            "extension": [{
-                "url": "http://example.org/fhir/StructureDefinition/extraction-data",
-                "valueReference": {
-                    "data": data,
-                    "confidence": state.get("overall_confidence", 0.0),
+            "extension": [
+                {
+                    "url": "http://example.org/fhir/StructureDefinition/extraction-data",
+                    "valueString": self._serialize_extraction_data(data),
+                },
+                {
+                    "url": "http://example.org/fhir/StructureDefinition/extraction-confidence",
+                    "valueDecimal": state.get("overall_confidence", 0.0),
+                },
+                {
+                    "url": "http://example.org/fhir/StructureDefinition/extraction-status",
+                    "valueCode": state.get("status", "unknown"),
                 }
-            }]
+            ]
         }
 
     def _extract_values(self, state: ExtractionState) -> dict[str, Any]:
@@ -365,6 +372,19 @@ class JSONExporter:
         if isinstance(value, str) and len(value) > 4:
             return f"{value[:2]}{self.config.phi_mask_pattern}{value[-2:]}"
         return self.config.phi_mask_pattern
+
+    def _serialize_extraction_data(self, data: dict[str, Any]) -> str:
+        """
+        Serialize extraction data to JSON string for FHIR extension.
+
+        Args:
+            data: Extraction data dictionary.
+
+        Returns:
+            JSON string representation of the data.
+        """
+        import json
+        return json.dumps(data, default=str, ensure_ascii=False)
 
     def _write_to_file(self, data: dict[str, Any], path: Path) -> None:
         """Write JSON data to file."""

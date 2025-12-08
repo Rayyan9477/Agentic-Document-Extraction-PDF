@@ -78,17 +78,17 @@ class MarkdownExporter:
     """
 
     CONFIDENCE_EMOJI = {
-        ConfidenceLevel.HIGH: "",
-        ConfidenceLevel.MEDIUM: "",
-        ConfidenceLevel.LOW: "",
+        ConfidenceLevel.HIGH: "✅",
+        ConfidenceLevel.MEDIUM: "⚠️",
+        ConfidenceLevel.LOW: "❌",
     }
 
     STATUS_EMOJI = {
-        "completed": "",
-        "failed": "",
-        "pending": "",
-        "processing": "",
-        "human_review": "",
+        "completed": "✅",
+        "failed": "❌",
+        "pending": "⏳",
+        "processing": "🔄",
+        "human_review": "👁️",
     }
 
     def __init__(self, config: MarkdownExportConfig | None = None) -> None:

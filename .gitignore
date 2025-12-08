@@ -25,6 +25,10 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+node_modules/
+nul
+.next
+
 
 # Virtual environment
 venv/

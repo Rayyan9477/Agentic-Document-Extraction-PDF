@@ -5,7 +5,11 @@
       "Bash(python:*)",
       "Bash(mkdir:*)",
       "Bash(pip install:*)",
-      "Bash(PYTHONPATH=. python:*)"
+      "Bash(PYTHONPATH=. python:*)",
+      "Bash(dir:*)",
+      "Bash(npx tsc --noEmit --skipLibCheck)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []

@@ -1,0 +1,52 @@
+{
+  "a5922d474ac4f02c": {
+    "id": "a5922d474ac4f02c",
+    "content": "Test extraction for CMS-1500 form",
+    "metadata": {
+      "document_type": "CMS-1500",
+      "confidence": 0.95
+    },
+    "created_at": "2025-12-08T14:09:58.735960+00:00",
+    "updated_at": "2025-12-08T14:09:58.735960+00:00",
+    "memory_type": "extraction",
+    "user_id": "test_user"
+  },
+  "432df501efc40cc8": {
+    "id": "432df501efc40cc8",
+    "content": "document_type:CMS-1500 confidence:0.90 fields:patient_name:John Doe",
+    "metadata": {
+      "document_type": "CMS-1500",
+      "fields": {
+        "patient_name": "John Doe"
+      },
+      "confidence": 0.9,
+      "pdf_hash": "abc123",
+      "provider_name": null,
+      "extracted_at": "2025-12-08T14:10:02.389416+00:00"
+    },
+    "created_at": "2025-12-08T14:10:02.393922+00:00",
+    "updated_at": "2025-12-08T14:10:02.393922+00:00",
+    "memory_type": "extraction",
+    "user_id": "test_session"
+  },
+  "6f43addc14fb9cf1": {
+    "id": "6f43addc14fb9cf1",
+    "content": "correction field:patient_name document_type:CMS-1500 type:value original:Jon Doe corrected:John Doe",
+    "metadata": {
+      "id": "1c5ad8e00ef0f7f0",
+      "field_name": "patient_name",
+      "original_value": "Jon Doe",
+      "corrected_value": "John Doe",
+      "document_type": "CMS-1500",
+      "confidence_before": 0.7,
+      "correction_type": "value",
+      "user_id": "default",
+      "created_at": "2025-12-08T14:10:02.403432+00:00",
+      "metadata": {}
+    },
+    "created_at": "2025-12-08T14:10:06.014349+00:00",
+    "updated_at": "2025-12-08T14:10:06.014349+00:00",
+    "memory_type": "correction",
+    "user_id": "default"
+  }
+}
