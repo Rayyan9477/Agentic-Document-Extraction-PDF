@@ -2,31 +2,30 @@
 
 import React, { useState } from 'react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
+import { ProtectedRoute } from '@/components/auth';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import Footer from './Footer';
 
 interface AppLayoutProps {
   children: React.ReactNode;
-  user?: {
-    name: string;
-    email: string;
-    avatar?: string;
-  };
   notifications?: number;
   showFooter?: boolean;
+  requireAuth?: boolean;
 }
 
 const AppLayout: React.FC<AppLayoutProps> = ({
   children,
-  user,
   notifications = 0,
   showFooter = true,
+  requireAuth = true,
 }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { user } = useAuth();
 
-  return (
+  const layoutContent = (
     <div className="min-h-screen bg-surface-50 flex">
       {/* Sidebar */}
       <Sidebar
@@ -41,7 +40,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({
         {/* Header */}
         <Header
           onMenuClick={() => setSidebarOpen(true)}
-          user={user}
+          user={user ? { name: user.username, email: user.email } : undefined}
           notifications={notifications}
         />
 
@@ -57,6 +56,13 @@ const AppLayout: React.FC<AppLayoutProps> = ({
       </div>
     </div>
   );
+
+  // Wrap in ProtectedRoute if auth is required
+  if (requireAuth) {
+    return <ProtectedRoute>{layoutContent}</ProtectedRoute>;
+  }
+
+  return layoutContent;
 };
 
 export default AppLayout;
