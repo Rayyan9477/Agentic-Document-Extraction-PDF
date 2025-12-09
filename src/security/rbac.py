@@ -292,7 +292,8 @@ class PasswordManager:
         self._context = CryptContext(
             schemes=schemes,
             deprecated="auto",
-            bcrypt__rounds=12,  # OWASP recommended minimum
+            bcrypt__rounds=14,  # OWASP 2024 recommendation (increased from 12)
+            bcrypt__ident="2b",  # Use modern bcrypt variant
         )
 
     def hash_password(self, password: str) -> str:

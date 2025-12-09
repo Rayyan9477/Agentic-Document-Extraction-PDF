@@ -154,11 +154,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         "X-Content-Type-Options": "nosniff",
         "X-Frame-Options": "DENY",
         "X-XSS-Protection": "1; mode=block",
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains; preload",
         "Cache-Control": "no-store, no-cache, must-revalidate",
         "Pragma": "no-cache",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+        # Content Security Policy - defense in depth against XSS
+        "Content-Security-Policy": (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: https:; "
+            "font-src 'self'; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'; "
+            "base-uri 'self'; "
+            "form-action 'self'; "
+            "object-src 'none'"
+        ),
     }
 
     async def dispatch(
@@ -462,7 +475,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._limiter = RateLimiter(default_rpm, burst_size)
 
-        # Set endpoint-specific limits
+        # CRITICAL: Strict rate limits for authentication endpoints (prevent brute force)
+        self._limiter.set_endpoint_limit("/api/v1/auth/login", 5, 1)  # 5 attempts/min
+        self._limiter.set_endpoint_limit("/api/v1/auth/signup", 3, 1)  # 3 attempts/min
+        self._limiter.set_endpoint_limit("/api/v1/auth/refresh", 10, 2)  # 10/min
+        self._limiter.set_endpoint_limit("/api/v1/auth/me", 30, 5)  # 30/min
+
+        # Set endpoint-specific limits for documents
         self._limiter.set_endpoint_limit("/api/v1/documents/process", 10, 2)
         self._limiter.set_endpoint_limit("/api/v1/documents/batch", 5, 1)
         self._limiter.set_endpoint_limit("/api/v1/documents/export", 30, 5)

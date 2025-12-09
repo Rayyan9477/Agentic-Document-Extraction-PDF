@@ -17,7 +17,7 @@ interface UploadOptions {
 interface UploadOptionsProps {
   options: UploadOptions;
   onChange: (options: UploadOptions) => void;
-  schemas: Array<{ name: string; description: string }>;
+  schemas?: Array<{ name: string; description: string }>;
   loading?: boolean;
 }
 
@@ -29,7 +29,7 @@ const UploadOptionsComponent: React.FC<UploadOptionsProps> = ({
 }) => {
   const schemaOptions: SelectOption[] = [
     { value: '', label: 'Auto-detect schema' },
-    ...schemas.map((s) => ({
+    ...(Array.isArray(schemas) ? schemas : []).map((s) => ({
       value: s.name,
       label: s.name,
     })),

@@ -184,7 +184,7 @@ def check_frontend_dependencies() -> bool:
 
 
 def check_env_file() -> bool:
-    """Check .env file exists."""
+    """Check .env file exists and validate security configuration."""
     env_file = PROJECT_ROOT / ".env"
     env_example = PROJECT_ROOT / ".env.example"
 
@@ -198,6 +198,27 @@ def check_env_file() -> bool:
         return True
 
     log_success("Environment file: OK")
+
+    # Verify critical security environment variables
+    from dotenv import load_dotenv
+    load_dotenv(env_file)
+
+    critical_vars = ['JWT_SECRET_KEY', 'SECRET_KEY', 'ENCRYPTION_KEY']
+    missing_vars = []
+
+    for var in critical_vars:
+        value = os.getenv(var)
+        if not value:
+            missing_vars.append(var)
+        elif len(value) < 32:
+            log_warning(f"{var} is too short (< 32 characters). Use strong keys in production!")
+
+    if missing_vars:
+        log_error(f"Missing critical environment variables: {', '.join(missing_vars)}")
+        log_error("Generate secure keys with: python -c 'import secrets; print(secrets.token_urlsafe(64))'")
+        return False
+
+    log_success("Security configuration: OK")
     return True
 
 

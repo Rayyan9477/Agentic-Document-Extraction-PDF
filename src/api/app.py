@@ -151,18 +151,34 @@ def create_app(
         lifespan=lifespan,
     )
 
-    # Configure CORS - require explicit origins for security
+    # Configure CORS - strict security requirements
     cors_origins = getattr(settings, "cors_origins", None)
     if not cors_origins:
-        cors_origins = ["http://localhost:3000", "http://localhost:8000"]
+        # Development defaults - strict even for dev
+        cors_origins = ["http://localhost:3000"]
         logger.warning("cors_origins_not_configured", using_defaults=cors_origins)
+
+    # Production validation: NEVER allow wildcards with credentials
+    # Check if running in production (env variable or settings)
+    import os
+    is_production = os.getenv("APP_ENV", "").lower() == "production" or \
+                    (hasattr(settings, "app_env") and str(settings.app_env).lower() == "production")
+
+    if is_production:
+        for origin in cors_origins:
+            if not origin.startswith("https://"):
+                raise ValueError(
+                    f"Production CORS origins must use HTTPS: {origin}. "
+                    "HTTP origins are not secure for production."
+                )
 
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
+        allow_methods=["GET", "POST", "PUT", "DELETE"],  # Removed OPTIONS (handled automatically)
+        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID", "X-CSRF-Token"],
+        max_age=3600,  # Cache preflight for 1 hour
     )
 
     # Add security headers middleware
@@ -323,6 +339,7 @@ def create_app(
         )
 
     # Register routes
+    from src.api.routes.auth import router as auth_router
     from src.api.routes.documents import router as documents_router
     from src.api.routes.tasks import router as tasks_router
     from src.api.routes.health import router as health_router
@@ -330,6 +347,7 @@ def create_app(
     from src.api.routes.dashboard import router as dashboard_router
     from src.api.routes.queue import router as queue_router
 
+    app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])
     app.include_router(documents_router, prefix="/api/v1", tags=["Documents"])
     app.include_router(tasks_router, prefix="/api/v1", tags=["Tasks"])
     app.include_router(health_router, prefix="/api/v1", tags=["Health"])

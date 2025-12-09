@@ -199,8 +199,8 @@ export default function LoginPage() {
         {/* Footer */}
         <p className="text-center text-white/70 text-sm mt-6">
           Don't have an account?{' '}
-          <Link href="/register" className="text-white font-medium hover:underline">
-            Contact administrator
+          <Link href="/signup" className="text-white font-medium hover:underline">
+            Sign up
           </Link>
         </p>
       </motion.div>
