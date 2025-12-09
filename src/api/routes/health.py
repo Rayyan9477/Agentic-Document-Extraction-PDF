@@ -468,9 +468,9 @@ async def metrics() -> Response:
     try:
         from src.monitoring.metrics import MetricsRegistry
 
-        # Get the global registry and generate metrics
-        registry = MetricsRegistry()
-        metrics_text = registry.generate_exposition()
+        # Get the global registry singleton and generate metrics
+        registry = MetricsRegistry.get_instance()
+        metrics_text = registry.get_metrics()
 
         return PlainTextResponse(
             content=metrics_text,

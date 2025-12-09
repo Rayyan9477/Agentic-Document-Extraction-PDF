@@ -9,7 +9,8 @@
       "Bash(dir:*)",
       "Bash(npx tsc --noEmit --skipLibCheck)",
       "Bash(npm run type-check:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)"
     ],
     "deny": [],
     "ask": []

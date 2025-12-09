@@ -65,10 +65,22 @@ async def list_schemas(
         from src.schemas import get_all_schemas
 
         all_schemas = get_all_schemas()
-        schemas = [
-            _get_schema_info(name, schema_def)
-            for name, schema_def in all_schemas.items()
-        ]
+        schemas = []
+        for schema in all_schemas:
+            # Handle both DocumentSchema objects and dict schemas
+            if hasattr(schema, "name"):
+                schemas.append(SchemaInfo(
+                    name=schema.name,
+                    description=getattr(schema, "description", ""),
+                    document_type=getattr(schema, "document_type", schema.name),
+                    field_count=len(getattr(schema, "fields", [])),
+                    version=getattr(schema, "version", "1.0.0"),
+                ))
+            elif isinstance(schema, dict):
+                schemas.append(_get_schema_info(
+                    schema.get("name", "unknown"),
+                    schema
+                ))
 
         return SchemaListResponse(
             schemas=schemas,
