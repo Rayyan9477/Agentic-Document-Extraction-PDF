@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { FileText, Download, Eye, AlertCircle, CheckCircle, Clock } from 'lucide-react';
+import { FileText, Download, Eye, AlertCircle, Clock } from 'lucide-react';
 import { cn, formatRelativeTime } from '@/lib/utils';
 import { Card, CardHeader, CardContent, StatusBadge, Skeleton } from '@/components/ui';
 import type { RecentActivity } from '@/types/api';

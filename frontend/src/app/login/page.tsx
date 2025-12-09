@@ -63,8 +63,9 @@ export default function LoginPage() {
 
       toast.success('Welcome back!');
       router.push('/dashboard');
-    } catch (error: any) {
-      toast.error(error.message || 'Invalid credentials');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Invalid credentials';
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -198,7 +199,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-white/70 text-sm mt-6">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <Link href="/signup" className="text-white font-medium hover:underline">
             Sign up
           </Link>

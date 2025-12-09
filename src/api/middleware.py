@@ -475,11 +475,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._limiter = RateLimiter(default_rpm, burst_size)
 
-        # CRITICAL: Strict rate limits for authentication endpoints (prevent brute force)
-        self._limiter.set_endpoint_limit("/api/v1/auth/login", 5, 1)  # 5 attempts/min
-        self._limiter.set_endpoint_limit("/api/v1/auth/signup", 3, 1)  # 3 attempts/min
-        self._limiter.set_endpoint_limit("/api/v1/auth/refresh", 10, 2)  # 10/min
-        self._limiter.set_endpoint_limit("/api/v1/auth/me", 30, 5)  # 30/min
+        # Rate limits for authentication endpoints
+        # NOTE: In production, these should be stricter (5/min for login)
+        self._limiter.set_endpoint_limit("/api/v1/auth/login", 30, 5)  # 30 attempts/min
+        self._limiter.set_endpoint_limit("/api/v1/auth/signup", 20, 3)  # 20 attempts/min
+        self._limiter.set_endpoint_limit("/api/v1/auth/refresh", 60, 10)  # 60/min
+        self._limiter.set_endpoint_limit("/api/v1/auth/me", 120, 20)  # 120/min
 
         # Set endpoint-specific limits for documents
         self._limiter.set_endpoint_limit("/api/v1/documents/process", 10, 2)
@@ -492,6 +493,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         call_next: RequestResponseEndpoint,
     ) -> Response:
         """Apply rate limiting."""
+        # Skip rate limiting for OPTIONS preflight requests (required for CORS)
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         client_id = self._get_client_id(request)
         path = request.url.path
 

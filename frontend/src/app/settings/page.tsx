@@ -4,12 +4,9 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  Settings,
   User,
   Shield,
   Bell,
-  Database,
-  Palette,
   Server,
   Key,
   Save,
@@ -17,9 +14,6 @@ import {
 import { AppLayout } from '@/components/layout';
 import {
   Card,
-  CardHeader,
-  CardContent,
-  CardFooter,
   Button,
   Input,
   Select,

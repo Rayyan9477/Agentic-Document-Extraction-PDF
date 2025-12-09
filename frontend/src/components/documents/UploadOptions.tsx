@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Shield, FileOutput, Zap, Database } from 'lucide-react';
+import { Shield, FileOutput, Zap } from 'lucide-react';
 import { Card, CardHeader, CardContent, Select, Input } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
 import type { ExportFormat, ProcessingPriority } from '@/types/api';

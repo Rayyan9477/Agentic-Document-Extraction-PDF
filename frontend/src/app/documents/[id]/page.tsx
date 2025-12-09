@@ -14,9 +14,7 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  Clock,
   Copy,
-  ExternalLink,
   ChevronDown,
   ChevronRight,
   Eye,
@@ -26,8 +24,6 @@ import {
 import { AppLayout } from '@/components/layout';
 import {
   Card,
-  CardHeader,
-  CardContent,
   Button,
   Badge,
   Modal,
@@ -40,18 +36,16 @@ import {
 } from '@/components/ui';
 import { documentsApi, previewApi, exportApi } from '@/lib/api';
 import {
-  formatDateTime,
   formatDuration,
   formatConfidence,
   getConfidenceLevel,
   getConfidenceColor,
   getStatusColor,
   getStatusText,
-  formatDocumentType,
   copyToClipboard,
   cn,
 } from '@/lib/utils';
-import type { ProcessResponse, FieldResult, ConfidenceLevel } from '@/types/api';
+import type { FieldResult, ConfidenceLevel } from '@/types/api';
 
 // Field card component for displaying extraction results
 interface FieldCardProps {

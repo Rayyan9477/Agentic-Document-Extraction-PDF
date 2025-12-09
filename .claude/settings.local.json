@@ -16,7 +16,9 @@
       "Bash(npm run dev:*)",
       "Bash(taskkill:*)",
       "Bash(findstr:*)",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(timeout:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

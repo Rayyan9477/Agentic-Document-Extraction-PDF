@@ -5,10 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import {
-  ListTodo,
   RefreshCw,
-  Play,
-  Pause,
   X,
   RotateCcw,
   Clock,
@@ -35,7 +32,7 @@ import {
 } from '@/components/ui';
 import { tasksApi, queueApi } from '@/lib/api';
 import { formatRelativeTime, formatDuration } from '@/lib/utils';
-import type { TaskStatusResponse, QueueStats, WorkerStatus } from '@/types/api';
+import type { TaskStatusResponse } from '@/types/api';
 
 export default function TasksPage() {
   const queryClient = useQueryClient();
@@ -133,7 +130,7 @@ export default function TasksPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <StatusBadge status={task.status as any} size="sm" />
+          <StatusBadge status={task.status} size="sm" />
           {task.status === 'failed' && (
             <Button
               variant="ghost"

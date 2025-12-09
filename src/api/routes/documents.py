@@ -8,8 +8,10 @@ batch processing, and result retrieval.
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import tempfile
+import shutil
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, UploadFile, File, Form
 
 from src.api.models import (
     ProcessRequest,
@@ -260,6 +262,124 @@ async def process_document(
         raise HTTPException(
             status_code=500,
             detail=f"Processing failed: {str(e)}",
+        )
+
+
+@router.post(
+    "/documents/upload",
+    response_model=AsyncProcessResponse,
+    summary="Upload and process a document",
+    description="Upload a PDF file and queue it for processing.",
+)
+async def upload_document(
+    http_request: Request,
+    file: UploadFile = File(...),
+    schema_name: str | None = Form(None),
+    export_format: ExportFormatEnum = Form(ExportFormatEnum.JSON),
+    mask_phi: bool = Form(False),
+    priority: str = Form("normal"),
+) -> AsyncProcessResponse:
+    """
+    Upload and process a PDF document.
+
+    - **file**: PDF file to upload and process
+    - **schema_name**: Optional schema name for extraction
+    - **export_format**: Output format (json/excel/both)
+    - **mask_phi**: Whether to mask PHI fields in output
+    - **priority**: Processing priority level
+
+    Returns:
+        Task ID for async processing.
+
+    Raises:
+        HTTPException: If upload or processing fails.
+    """
+    request_id = getattr(http_request.state, "request_id", "")
+
+    logger.info(
+        "document_upload_request",
+        request_id=request_id,
+        filename=file.filename,
+        file_size=file.size,
+        schema_name=schema_name,
+    )
+
+    # Validate file type
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(
+            status_code=400,
+            detail="Only PDF files are supported",
+        )
+
+    # Validate file size (50MB limit)
+    if file.size and file.size > 50 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail="File size exceeds 50MB limit",
+        )
+
+    # Create temp directory for uploads
+    upload_dir = Path(tempfile.gettempdir()) / "pdf_uploads"
+    upload_dir.mkdir(exist_ok=True)
+
+    # Save uploaded file
+    temp_file_path = upload_dir / f"{request_id}_{file.filename}"
+    try:
+        with temp_file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        logger.error(
+            "file_save_error",
+            request_id=request_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save uploaded file: {str(e)}",
+        )
+
+    # Queue for async processing
+    try:
+        from src.queue.tasks import process_document_task
+
+        task = process_document_task.delay(
+            pdf_path=str(temp_file_path),
+            output_dir="./output",
+            schema_name=schema_name,
+            export_format=export_format.value,
+            mask_phi=mask_phi,
+            priority=priority,
+        )
+
+        logger.info(
+            "document_upload_queued",
+            request_id=request_id,
+            task_id=task.id,
+            temp_path=str(temp_file_path),
+        )
+
+        return AsyncProcessResponse(
+            task_id=task.id,
+            status=TaskStatusEnum.PENDING,
+            message="Document uploaded and queued for processing",
+            status_url=f"/api/v1/tasks/{task.id}",
+        )
+
+    except Exception as e:
+        # Clean up temp file on error
+        try:
+            temp_file_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+        logger.error(
+            "document_upload_queue_error",
+            request_id=request_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to queue document for processing: {str(e)}",
         )
 
 

@@ -19,8 +19,6 @@ import {
 import { AppLayout } from '@/components/layout';
 import {
   Card,
-  CardHeader,
-  CardContent,
   Button,
   Input,
   StatusBadge,
@@ -30,13 +28,13 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { documentsApi } from '@/lib/api';
-import { formatDateTime, formatDuration, truncate } from '@/lib/utils';
+import { formatDuration, truncate } from '@/lib/utils';
 import type { ProcessResponse } from '@/types/api';
 
 export default function DocumentsPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { data: documents, isLoading, error } = useQuery({
+  const { data: documents, isLoading } = useQuery({
     queryKey: ['documents', 'recent'],
     queryFn: () => documentsApi.listRecent(50),
   });

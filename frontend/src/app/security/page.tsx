@@ -7,7 +7,6 @@ import {
   Lock,
   Key,
   UserCheck,
-  AlertTriangle,
   CheckCircle,
   Info,
 } from 'lucide-react';
@@ -121,7 +120,7 @@ export default function SecurityPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Card variant="outline" padding="lg">
+                <Card variant="outlined" padding="lg">
                   <div className="flex items-start gap-4">
                     <div className="w-10 h-10 rounded-lg bg-primary-100 flex items-center justify-center flex-shrink-0">
                       {feature.icon}
@@ -150,7 +149,7 @@ export default function SecurityPage() {
         </div>
 
         {/* Compliance */}
-        <Card variant="outline" padding="lg">
+        <Card variant="outlined" padding="lg">
           <CardHeader
             title="Compliance Status"
             description="Current compliance and security standards"
@@ -181,7 +180,7 @@ export default function SecurityPage() {
         </Card>
 
         {/* Security Recommendations */}
-        <Card variant="outline" padding="lg">
+        <Card variant="outlined" padding="lg">
           <CardHeader
             title="Security Recommendations"
             description="Recommended improvements for production"

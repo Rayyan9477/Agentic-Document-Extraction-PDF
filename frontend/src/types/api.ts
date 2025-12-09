@@ -135,6 +135,14 @@ export interface TaskStatusResponse {
   error?: string;
 }
 
+// Async Process Response
+export interface AsyncProcessResponse {
+  task_id: string;
+  status: TaskStatus;
+  message: string;
+  status_url: string;
+}
+
 // Preview Request
 export interface PreviewRequest {
   processing_id: string;

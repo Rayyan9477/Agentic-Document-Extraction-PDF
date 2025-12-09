@@ -11,7 +11,7 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import { cn, formatFileSize, isPdfFile } from '@/lib/utils';
+import { cn, formatFileSize } from '@/lib/utils';
 import { Button, Progress } from '@/components/ui';
 
 export interface UploadFile {
@@ -43,7 +43,7 @@ const FileUploader: React.FC<FileUploaderProps> = ({
   const [dragError, setDragError] = useState<string | null>(null);
 
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: any[]) => {
+    (acceptedFiles: File[], rejectedFiles: { file: File; errors: { code: string; message: string }[] }[]) => {
       setDragError(null);
 
       if (rejectedFiles.length > 0) {

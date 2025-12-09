@@ -101,7 +101,9 @@ export default function SignupPage() {
         if (data.detail) {
           if (Array.isArray(data.detail)) {
             // Pydantic validation errors
-            errorMsg = data.detail.map((err: any) => err.msg).join(', ');
+            errorMsg = data.detail.map((err: unknown) => {
+              return typeof err === 'object' && err !== null && 'msg' in err ? String((err as { msg: unknown }).msg) : String(err);
+            }).join(', ');
           } else if (typeof data.detail === 'string') {
             errorMsg = data.detail;
           }
@@ -111,9 +113,10 @@ export default function SignupPage() {
 
       toast.success('Account created successfully! Please login.');
       router.push('/login');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Signup error:', error);
-      toast.error(error.message || 'Failed to create account');
+      const message = error instanceof Error ? error.message : 'Failed to create account';
+      toast.error(message);
     } finally {
       setLoading(false);
     }

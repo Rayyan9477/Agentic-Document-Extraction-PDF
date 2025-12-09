@@ -523,17 +523,104 @@ class TokenManager:
 
 class UserStore:
     """
-    In-memory user store for development and testing.
+    Persistent user store with JSON file storage.
 
+    Stores users in a JSON file for persistence across server restarts.
     In production, replace with database-backed implementation.
     """
 
-    def __init__(self) -> None:
-        """Initialize user store."""
+    def __init__(self, storage_path: str | None = None) -> None:
+        """Initialize user store with persistence.
+
+        Args:
+            storage_path: Path to JSON file for user storage.
+                         Defaults to ./data/users.json
+        """
+        import json
+        import os
+        from pathlib import Path
+
         self._users: dict[str, User] = {}
         self._username_index: dict[str, str] = {}
         self._email_index: dict[str, str] = {}
         self._password_manager = PasswordManager()
+
+        # Set up storage path
+        if storage_path is None:
+            storage_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "users.json")
+        self._storage_path = Path(storage_path).resolve()
+
+        # Ensure directory exists
+        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing users from file
+        self._load_users()
+
+    def _load_users(self) -> None:
+        """Load users from JSON file."""
+        import json
+
+        if not self._storage_path.exists():
+            logger.info("user_store_initialized", path=str(self._storage_path))
+            return
+
+        try:
+            with open(self._storage_path, "r") as f:
+                data = json.load(f)
+
+            for user_data in data.get("users", []):
+                user = User(
+                    user_id=user_data["user_id"],
+                    username=user_data["username"],
+                    email=user_data["email"],
+                    password_hash=user_data["password_hash"],
+                    roles={Role(r) for r in user_data.get("roles", ["viewer"])},
+                    permissions={Permission(p) for p in user_data.get("permissions", [])},
+                    is_active=user_data.get("is_active", True),
+                    is_locked=user_data.get("is_locked", False),
+                    failed_login_attempts=user_data.get("failed_login_attempts", 0),
+                    last_login=datetime.fromisoformat(user_data["last_login"]) if user_data.get("last_login") else None,
+                    created_at=datetime.fromisoformat(user_data["created_at"]) if user_data.get("created_at") else datetime.now(timezone.utc),
+                    updated_at=datetime.fromisoformat(user_data["updated_at"]) if user_data.get("updated_at") else datetime.now(timezone.utc),
+                    metadata=user_data.get("metadata", {}),
+                )
+                self._users[user.user_id] = user
+                self._username_index[user.username.lower()] = user.user_id
+                self._email_index[user.email.lower()] = user.user_id
+
+            logger.info("users_loaded", count=len(self._users), path=str(self._storage_path))
+        except Exception as e:
+            logger.error("users_load_error", error=str(e), path=str(self._storage_path))
+
+    def _save_users(self) -> None:
+        """Save users to JSON file."""
+        import json
+
+        try:
+            users_data = []
+            for user in self._users.values():
+                users_data.append({
+                    "user_id": user.user_id,
+                    "username": user.username,
+                    "email": user.email,
+                    "password_hash": user.password_hash,
+                    "roles": [r.value for r in user.roles],
+                    "permissions": [p.value for p in user.permissions],
+                    "is_active": user.is_active,
+                    "is_locked": user.is_locked,
+                    "failed_login_attempts": user.failed_login_attempts,
+                    "last_login": user.last_login.isoformat() if user.last_login else None,
+                    "created_at": user.created_at.isoformat() if user.created_at else None,
+                    "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+                    "metadata": user.metadata,
+                })
+
+            with open(self._storage_path, "w") as f:
+                json.dump({"users": users_data}, f, indent=2)
+
+            logger.debug("users_saved", count=len(users_data), path=str(self._storage_path))
+        except Exception as e:
+            logger.error("users_save_error", error=str(e), path=str(self._storage_path))
 
     def create_user(
         self,
@@ -579,6 +666,9 @@ class UserStore:
         self._username_index[username.lower()] = user_id
         self._email_index[email.lower()] = user_id
 
+        # Persist to file
+        self._save_users()
+
         logger.info("user_created", user_id=user_id, username=username)
 
         return user
@@ -601,6 +691,8 @@ class UserStore:
         """Update user in store."""
         user.updated_at = datetime.now(timezone.utc)
         self._users[user.user_id] = user
+        # Persist to file
+        self._save_users()
 
     def delete_user(self, user_id: str) -> bool:
         """Delete user from store."""
@@ -609,6 +701,8 @@ class UserStore:
             del self._users[user_id]
             self._username_index.pop(user.username.lower(), None)
             self._email_index.pop(user.email.lower(), None)
+            # Persist to file
+            self._save_users()
             logger.info("user_deleted", user_id=user_id)
             return True
         return False

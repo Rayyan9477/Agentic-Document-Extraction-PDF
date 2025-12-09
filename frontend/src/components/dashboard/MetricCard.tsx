@@ -28,14 +28,6 @@ const MetricCard: React.FC<MetricCardProps> = ({
   color = 'primary',
   loading = false,
 }) => {
-  const colorClasses = {
-    primary: 'from-primary-500 to-primary-600',
-    success: 'from-success-500 to-success-600',
-    warning: 'from-warning-500 to-warning-600',
-    error: 'from-error-500 to-error-600',
-    info: 'from-info-500 to-info-600',
-  };
-
   const iconBgClasses = {
     primary: 'bg-primary-100 text-primary-600',
     success: 'bg-success-100 text-success-600',

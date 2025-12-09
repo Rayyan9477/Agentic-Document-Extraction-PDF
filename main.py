@@ -259,6 +259,7 @@ class ProcessManager:
 
     def __init__(self):
         self.processes: dict[str, subprocess.Popen] = {}
+        self.configs: dict[str, ServerConfig] = {}
         self.running = False
         self._shutdown_event = asyncio.Event()
 
@@ -292,12 +293,13 @@ class ProcessManager:
         return ServerConfig(
             name="frontend",
             color=Color.MAGENTA,
-            command=[npm_cmd, "run", "dev"],
+            command=[npm_cmd, "run", "dev", "--", "--port", "3000"],
             cwd=FRONTEND_DIR,
             port=3000,
             health_url="http://localhost:3000",
             env={
                 "NEXT_PUBLIC_API_URL": "http://localhost:8000",
+                "PORT": "3000",  # Explicitly set port
             }
         )
 
@@ -359,6 +361,7 @@ class ProcessManager:
             )
 
             self.processes[config.name] = process
+            self.configs[config.name] = config
 
             # Stream output in background threads
             self._stream_output(process, config)
@@ -419,7 +422,7 @@ class ProcessManager:
             return False
         return process.poll() is None
 
-    async def wait_for_health(self, config: ServerConfig, timeout: int = 30) -> bool:
+    async def wait_for_health(self, config: ServerConfig, timeout: int = 60) -> bool:
         """Wait for server health check to pass."""
         import urllib.request
         import urllib.error
@@ -429,13 +432,25 @@ class ProcessManager:
             if not self.is_running(config.name):
                 return False
 
-            try:
-                with urllib.request.urlopen(config.health_url, timeout=2) as response:
-                    if response.status == 200:
-                        log_success(f"{config.name.capitalize()} server is healthy")
-                        return True
-            except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
-                pass
+            # For frontend, try multiple possible ports since Next.js might switch
+            urls_to_try = [config.health_url]
+            if config.name == "frontend":
+                urls_to_try.extend([
+                    "http://localhost:3001",
+                    "http://localhost:3002",
+                ])
+
+            for url in urls_to_try:
+                try:
+                    with urllib.request.urlopen(url, timeout=2) as response:
+                        if response.status == 200:
+                            log_success(f"{config.name.capitalize()} server is healthy on {url}")
+                            # Update the config with the actual working URL
+                            config.health_url = url
+                            config.port = int(url.split(':')[-1])
+                            return True
+                except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError):
+                    continue
 
             await asyncio.sleep(1)
 
@@ -483,8 +498,8 @@ class ProcessManager:
                     return
 
                 if wait_for_health:
-                    await asyncio.sleep(3)  # Next.js takes longer to compile
-                    # Don't wait for frontend health - it compiles on first request
+                    await asyncio.sleep(5)  # Next.js takes longer to compile
+                    await self.wait_for_health(frontend_config, timeout=120)  # Longer timeout for frontend
 
             # Print access information
             print()
@@ -496,7 +511,9 @@ class ProcessManager:
                 log(f"  Backend API:    {Color.CYAN}http://localhost:8000{Color.RESET}")
                 log(f"  API Docs:       {Color.CYAN}http://localhost:8000/docs{Color.RESET}")
             if run_frontend:
-                log(f"  Frontend:       {Color.MAGENTA}http://localhost:3000{Color.RESET}")
+                frontend_config = self.configs.get("frontend")
+                frontend_port = frontend_config.port if frontend_config else 3000
+                log(f"  Frontend:       {Color.MAGENTA}http://localhost:{frontend_port}{Color.RESET}")
             print()
             log(f"Press {Color.BOLD}Ctrl+C{Color.RESET} to stop all servers")
             print()
@@ -544,8 +561,19 @@ async def main_async(args: argparse.Namespace) -> int:
     print()
 
     # Determine what to run
-    run_backend = args.backend or (not args.frontend)
-    run_frontend = args.frontend or (not args.backend)
+    if args.both:
+        run_backend = True
+        run_frontend = True
+    elif args.backend:
+        run_backend = True
+        run_frontend = False
+    elif args.frontend:
+        run_backend = False
+        run_frontend = True
+    else:
+        # Default: run both
+        run_backend = True
+        run_frontend = True
 
     # Create and run process manager
     manager = ProcessManager()
@@ -566,6 +594,7 @@ def main() -> int:
         epilog="""
 Examples:
   python main.py              Run both backend and frontend
+  python main.py --both       Run both backend and frontend (explicit)
   python main.py --backend    Run backend only
   python main.py --frontend   Run frontend only
   python main.py --check      Run dependency checks only
@@ -581,6 +610,11 @@ Examples:
         "--frontend",
         action="store_true",
         help="Run frontend server only"
+    )
+    parser.add_argument(
+        "--both",
+        action="store_true",
+        help="Run both backend and frontend servers (default)"
     )
     parser.add_argument(
         "--check",

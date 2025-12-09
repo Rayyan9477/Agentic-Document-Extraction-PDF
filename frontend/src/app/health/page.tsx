@@ -18,7 +18,7 @@ import {
 import { AppLayout } from '@/components/layout';
 import { Card, CardHeader, CardContent, Button, Skeleton } from '@/components/ui';
 import { healthApi } from '@/lib/api';
-import type { HealthResponse, ComponentHealth } from '@/types/api';
+import type { ComponentHealth } from '@/types/api';
 import { cn, formatDateTime } from '@/lib/utils';
 
 export default function HealthPage() {

@@ -13,7 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout';
-import { Card, CardHeader, CardContent, Button } from '@/components/ui';
+import { Card, CardHeader, CardContent } from '@/components/ui';
 
 export default function HelpPage() {
   const resources = [
@@ -113,7 +113,7 @@ export default function HelpPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
               >
-                <Card variant="outline" padding="lg" className="h-full">
+                <Card variant="outlined" padding="lg" className="h-full">
                   <a
                     href={resource.link}
                     target={resource.external ? '_blank' : undefined}
@@ -156,7 +156,7 @@ export default function HelpPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.4 + index * 0.1 }}
               >
-                <Card variant="outline" padding="lg">
+                <Card variant="outlined" padding="lg">
                   <div className="flex items-start gap-4">
                     <div className="w-8 h-8 rounded-lg bg-info-100 flex items-center justify-center flex-shrink-0">
                       <HelpCircle className="w-4 h-4 text-info-600" />
@@ -215,7 +215,7 @@ export default function HelpPage() {
         </Card>
 
         {/* Contact Support */}
-        <Card variant="outline" padding="lg">
+        <Card variant="outlined" padding="lg">
           <CardHeader
             title="Contact Support"
             description="Need additional help? Reach out to our team"
@@ -235,10 +235,7 @@ export default function HelpPage() {
                     <p className="text-sm text-surface-500">{option.value}</p>
                   </div>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  as="a"
+                <a
                   href={option.action}
                   target={option.action.startsWith('http') ? '_blank' : undefined}
                   rel={
@@ -246,16 +243,18 @@ export default function HelpPage() {
                       ? 'noopener noreferrer'
                       : undefined
                   }
+                  aria-label={`Open ${option.title}`}
+                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg border-2 border-primary-600 text-primary-600 hover:bg-primary-50 transition-colors"
                 >
                   <ExternalLink className="w-4 h-4" />
-                </Button>
+                </a>
               </div>
             ))}
           </CardContent>
         </Card>
 
         {/* System Info */}
-        <Card variant="outline" padding="lg">
+        <Card variant="outlined" padding="lg">
           <div className="flex items-start gap-4">
             <AlertCircle className="w-5 h-5 text-info-600 flex-shrink-0 mt-0.5" />
             <div>
