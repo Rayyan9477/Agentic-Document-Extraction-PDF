@@ -36,7 +36,7 @@ export default function DocumentsPage() {
 
   const { data: documents, isLoading } = useQuery({
     queryKey: ['documents', 'recent'],
-    queryFn: () => documentsApi.listRecent(50),
+    queryFn: () => documentsApi.listRecent(),
   });
 
   const filteredDocuments = documents?.filter((doc) =>

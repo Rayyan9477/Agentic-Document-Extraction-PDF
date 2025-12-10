@@ -31,7 +31,6 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { tasksApi, queueApi } from '@/lib/api';
-import { formatRelativeTime, formatDuration } from '@/lib/utils';
 import type { TaskStatusResponse } from '@/types/api';
 
 export default function TasksPage() {
@@ -42,7 +41,7 @@ export default function TasksPage() {
   // Fetch tasks
   const { data: tasksData, isLoading: tasksLoading } = useQuery({
     queryKey: ['tasks'],
-    queryFn: () => tasksApi.list({ limit: 50 }),
+    queryFn: () => tasksApi.list(),
     refetchInterval: 5000,
   });
 

@@ -10,8 +10,8 @@
  * - Navigation after login
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import toast from 'react-hot-toast';
 import LoginPage from '@/app/login/page';
@@ -194,12 +194,12 @@ describe('LoginPage', () => {
       const mockLogin = vi.mocked(authApi.login);
 
       // Create a promise that we can control
-      let resolveLogin: any;
+      let resolveLogin: (value: unknown) => void;
       const loginPromise = new Promise((resolve) => {
         resolveLogin = resolve;
       });
 
-      mockLogin.mockReturnValueOnce(loginPromise as any);
+      mockLogin.mockReturnValueOnce(loginPromise as Promise<unknown>);
 
       render(<LoginPage />);
 

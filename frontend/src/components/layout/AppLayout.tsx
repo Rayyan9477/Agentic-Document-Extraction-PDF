@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { ProtectedRoute } from '@/components/auth';
 import Header from './Header';

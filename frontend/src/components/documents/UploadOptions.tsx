@@ -25,7 +25,6 @@ const UploadOptionsComponent: React.FC<UploadOptionsProps> = ({
   options,
   onChange,
   schemas,
-  loading = false,
 }) => {
   const schemaOptions: SelectOption[] = [
     { value: '', label: 'Auto-detect schema' },

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useState } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Upload,
@@ -43,11 +43,11 @@ const FileUploader: React.FC<FileUploaderProps> = ({
   const [dragError, setDragError] = useState<string | null>(null);
 
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: { file: File; errors: { code: string; message: string }[] }[]) => {
+    (acceptedFiles: File[], fileRejections: FileRejection[]) => {
       setDragError(null);
 
-      if (rejectedFiles.length > 0) {
-        const errors = rejectedFiles.map((f) => {
+      if (fileRejections.length > 0) {
+        const errors = fileRejections.map((f) => {
           if (f.errors[0]?.code === 'file-too-large') {
             return `${f.file.name} is too large (max ${formatFileSize(maxSize)})`;
           }

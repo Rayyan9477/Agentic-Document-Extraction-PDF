@@ -2,8 +2,8 @@
 
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
-import { motion } from 'framer-motion';
 import {
   FileText,
   Bell,
@@ -15,7 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { Button, Dropdown, Badge } from '@/components/ui';
+import { Button, Dropdown } from '@/components/ui';
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -116,9 +116,11 @@ const Header: React.FC<HeaderProps> = ({ onMenuClick, user, notifications = 0 })
                 <Button variant="ghost" className="flex items-center gap-2 px-2">
                   <div className="w-8 h-8 rounded-full bg-primary-100 flex items-center justify-center">
                     {user.avatar ? (
-                      <img
+                      <Image
                         src={user.avatar}
                         alt={user.name}
+                        width={32}
+                        height={32}
                         className="w-8 h-8 rounded-full"
                       />
                     ) : (

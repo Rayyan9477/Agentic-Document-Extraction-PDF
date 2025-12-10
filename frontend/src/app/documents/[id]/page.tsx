@@ -40,7 +40,6 @@ import {
   formatConfidence,
   getConfidenceLevel,
   getConfidenceColor,
-  getStatusColor,
   getStatusText,
   copyToClipboard,
   cn,

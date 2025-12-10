@@ -123,7 +123,7 @@ export interface BatchProcessResponse {
 // Task Status Response
 export interface TaskStatusResponse {
   task_id: string;
-  status: string;
+  status: TaskStatus;
   ready: boolean;
   successful?: boolean;
   progress?: {
