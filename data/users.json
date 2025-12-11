@@ -1,0 +1,55 @@
+{
+  "users": [
+    {
+      "user_id": "qV05Ka8gmAhlmPQb8IV-Pg",
+      "username": "newuser",
+      "email": "new@example.com",
+      "password_hash": "$2b$14$89OWsMxHgXRLFEE7RytsyOBNRVwHWMX2.E/cvn2U9fp70rMlynvJa",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": null,
+      "created_at": "2025-12-11T19:40:20.093672+00:00",
+      "updated_at": "2025-12-11T19:40:20.093672+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "FR_PVZBy4BqKAbAI9TXK7A",
+      "username": "testuser",
+      "email": "testuser@example.com",
+      "password_hash": "$2b$14$BdT1gGY.Sub4IO88C6wDeOH2NjvaN4IEPAx10CqKfX7NkL6EUYxkC",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": true,
+      "failed_login_attempts": 5,
+      "last_login": null,
+      "created_at": "2025-12-11T19:40:21.144149+00:00",
+      "updated_at": "2025-12-11T19:40:25.552639+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "1Ecy-VyXBfHYcavin9HjKw",
+      "username": "expireduser",
+      "email": "expired@example.com",
+      "password_hash": "$2b$14$nPmEjjcARaRjT2wQBwXoc.s3hqLGXyYlUrxFP1E8ysYHKuEZBXuSS",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": null,
+      "created_at": "2025-12-11T19:46:34.810407+00:00",
+      "updated_at": "2025-12-11T19:46:34.810407+00:00",
+      "metadata": {}
+    }
+  ]
+}

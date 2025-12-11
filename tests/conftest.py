@@ -7,6 +7,8 @@ Provides common fixtures and configuration for all test files.
 import pytest
 import os
 import sys
+import tempfile
+import shutil
 from pathlib import Path
 from typing import Generator
 from fastapi.testclient import TestClient
@@ -34,6 +36,14 @@ def test_secret_key() -> str:
 # =============================================================================
 
 
+@pytest.fixture
+def test_data_dir(tmp_path) -> Path:
+    """Create temporary directory for test data storage."""
+    data_dir = tmp_path / "test_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
 @pytest.fixture(autouse=True)
 def reset_rbac_manager():
     """Automatically reset RBAC manager singleton before each test."""
@@ -43,9 +53,15 @@ def reset_rbac_manager():
 
 
 @pytest.fixture
-def rbac_manager(test_secret_key) -> RBACManager:
-    """Create fresh RBAC manager for each test."""
-    return RBACManager.get_instance(secret_key=test_secret_key)
+def rbac_manager(test_secret_key, test_data_dir) -> RBACManager:
+    """Create fresh RBAC manager for each test with isolated storage."""
+    user_storage = str(test_data_dir / "users.json")
+    revocation_storage = str(test_data_dir / "revoked_tokens.json")
+    return RBACManager.get_instance(
+        secret_key=test_secret_key,
+        user_storage_path=user_storage,
+        revocation_storage_path=revocation_storage,
+    )
 
 
 @pytest.fixture

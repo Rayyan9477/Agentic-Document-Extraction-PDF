@@ -5,6 +5,7 @@ Defines the TypedDict state that flows through the extraction pipeline,
 tracking all extraction data, validation results, and control flow.
 """
 
+import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -348,9 +349,10 @@ def update_state(
     updates: dict[str, Any],
 ) -> ExtractionState:
     """
-    Create updated state with new values.
+    Create updated state with new values using deep copy.
 
-    This creates a new state dict with updates applied.
+    This creates a new state dict with updates applied, ensuring
+    nested mutable structures (lists, dicts) are not shared between states.
     Used for immutable state updates in LangGraph.
 
     Args:
@@ -358,10 +360,12 @@ def update_state(
         updates: Dictionary of updates to apply.
 
     Returns:
-        New ExtractionState with updates applied.
+        New ExtractionState with updates applied (deep copied).
     """
-    new_state: ExtractionState = dict(state)  # type: ignore
-    new_state.update(updates)
+    # Use deep copy to prevent shared mutable state between old and new states
+    new_state: ExtractionState = copy.deepcopy(dict(state))  # type: ignore
+    # Deep copy updates as well to prevent external mutation
+    new_state.update(copy.deepcopy(updates))
     return new_state
 
 

@@ -5,6 +5,7 @@ Provides endpoints for user authentication, registration, and token management.
 """
 
 import re
+import unicodedata
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -56,7 +57,7 @@ class PasswordValidator:
     @staticmethod
     def validate_password(password: str) -> tuple[bool, Optional[str]]:
         """
-        Validate password strength.
+        Validate password strength with Unicode normalization.
 
         Args:
             password: Password to validate
@@ -64,6 +65,15 @@ class PasswordValidator:
         Returns:
             Tuple of (is_valid, error_message)
         """
+        # SECURITY: Normalize Unicode to prevent lookalike character bypass attacks
+        # NFKC normalization converts visually similar characters to their canonical form
+        password = unicodedata.normalize('NFKC', password)
+
+        # SECURITY: Only allow ASCII printable characters to prevent Unicode bypass
+        # This prevents attacks using Cyrillic or other lookalike characters
+        if not all(32 <= ord(c) <= 126 for c in password):
+            return False, "Password must contain only ASCII printable characters (letters, numbers, and standard symbols)"
+
         if len(password) < PasswordValidator.MIN_LENGTH:
             return False, f"Password must be at least {PasswordValidator.MIN_LENGTH} characters"
 
@@ -97,6 +107,50 @@ class PasswordValidator:
         return True, None
 
 
+def _validate_jwt_secret_entropy(secret_key: str) -> None:
+    """
+    Validate JWT secret key has sufficient entropy.
+
+    Args:
+        secret_key: The secret key to validate.
+
+    Raises:
+        ValueError: If the key has insufficient entropy or appears weak.
+    """
+    # Check minimum length
+    if len(secret_key) < 32:
+        raise ValueError(
+            f"JWT_SECRET_KEY must be at least 32 characters (current: {len(secret_key)}). "
+            "Generate a stronger key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+        )
+
+    # Check for sufficient unique characters (entropy indicator)
+    unique_chars = len(set(secret_key))
+    if unique_chars < 16:
+        raise ValueError(
+            f"JWT_SECRET_KEY has insufficient entropy (only {unique_chars} unique characters). "
+            "The key appears to be weak or repetitive. "
+            "Generate a stronger key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+        )
+
+    # Check for obvious patterns (all same character, simple sequences)
+    if secret_key == secret_key[0] * len(secret_key):
+        raise ValueError(
+            "JWT_SECRET_KEY is a repeated single character. "
+            "Generate a proper random key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+        )
+
+    # Check for common weak patterns
+    weak_patterns = ['password', 'secret', '123456', 'abcdef', 'qwerty']
+    lower_key = secret_key.lower()
+    for pattern in weak_patterns:
+        if pattern in lower_key:
+            raise ValueError(
+                f"JWT_SECRET_KEY contains weak pattern '{pattern}'. "
+                "Generate a proper random key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
+            )
+
+
 def get_rbac_manager() -> RBACManager:
     """Get or create RBAC manager singleton."""
     global _rbac_manager
@@ -112,12 +166,8 @@ def get_rbac_manager() -> RBACManager:
                 "Generate with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
             )
 
-        # Validate minimum key strength (32 characters = ~192 bits)
-        if len(secret_key) < 32:
-            raise ValueError(
-                f"JWT_SECRET_KEY must be at least 32 characters (current: {len(secret_key)}). "
-                "Generate a stronger key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
-            )
+        # Validate key strength and entropy
+        _validate_jwt_secret_entropy(secret_key)
 
         _rbac_manager = RBACManager.get_instance(secret_key=secret_key)
     return _rbac_manager
@@ -221,11 +271,22 @@ async def login(
         request_id=request_id,
     )
 
+    import asyncio
+    import time
+
+    # SECURITY: Start timing for constant-time response (prevents timing attacks)
+    start_time = time.perf_counter()
+    min_response_time = 0.5  # Minimum 500ms response time
+
     try:
         rbac = get_rbac_manager()
         tokens = rbac.authenticate(request.username, request.password)
 
         if tokens is None:
+            # SECURITY: Add constant-time delay to prevent timing-based user enumeration
+            elapsed = time.perf_counter() - start_time
+            await asyncio.sleep(max(0, min_response_time - elapsed))
+
             logger.warning(
                 "login_failed",
                 username=request.username,
@@ -250,8 +311,15 @@ async def login(
         )
 
     except HTTPException:
+        # SECURITY: Ensure constant time even for HTTPExceptions
+        elapsed = time.perf_counter() - start_time
+        await asyncio.sleep(max(0, min_response_time - elapsed))
         raise
     except Exception as e:
+        # SECURITY: Ensure constant time even for unexpected errors
+        elapsed = time.perf_counter() - start_time
+        await asyncio.sleep(max(0, min_response_time - elapsed))
+
         logger.error(
             "login_error",
             username=request.username,

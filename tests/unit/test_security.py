@@ -27,6 +27,40 @@ import pytest
 
 
 # =============================================================================
+# Test Fixtures for Isolated Storage
+# =============================================================================
+
+
+@pytest.fixture
+def test_data_dir(tmp_path) -> Path:
+    """Create isolated temporary directory for test data storage."""
+    data_dir = tmp_path / "test_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+@pytest.fixture
+def isolated_user_store(test_data_dir):
+    """Create UserStore with isolated storage."""
+    from src.security.rbac import UserStore
+    return UserStore(storage_path=str(test_data_dir / "users.json"))
+
+
+@pytest.fixture
+def isolated_rbac_manager(test_data_dir):
+    """Create RBACManager with isolated storage."""
+    from src.security.rbac import RBACManager
+    RBACManager.reset_instance()
+    manager = RBACManager(
+        secret_key="test-secret-key-for-isolated-tests-12345",
+        user_storage_path=str(test_data_dir / "users.json"),
+        revocation_storage_path=str(test_data_dir / "revoked_tokens.json"),
+    )
+    yield manager
+    RBACManager.reset_instance()
+
+
+# =============================================================================
 # Encryption Tests
 # =============================================================================
 
@@ -862,13 +896,11 @@ class TestTokenManager:
 class TestUserStore:
     """Tests for UserStore."""
 
-    def test_create_user(self) -> None:
+    def test_create_user(self, isolated_user_store) -> None:
         """Test user creation in store."""
-        from src.security.rbac import Role, UserStore
+        from src.security.rbac import Role
 
-        store = UserStore()
-
-        user = store.create_user(
+        user = isolated_user_store.create_user(
             username="newuser",
             password="SecureP@ss123!",
             email="new@example.com",
@@ -878,147 +910,172 @@ class TestUserStore:
         assert user.username == "newuser"
         assert user.user_id is not None
 
-    def test_get_user_by_username(self) -> None:
+    def test_get_user_by_username(self, isolated_user_store) -> None:
         """Test user retrieval by username."""
-        from src.security.rbac import Role, UserStore
+        from src.security.rbac import Role
 
-        store = UserStore()
-        store.create_user(
+        isolated_user_store.create_user(
             username="testuser",
+            email="testuser@example.com",
             password="SecureP@ss123!",
             roles=[Role.VIEWER],
         )
 
-        user = store.get_by_username("testuser")
+        user = isolated_user_store.get_user_by_username("testuser")
 
         assert user is not None
         assert user.username == "testuser"
 
-    def test_authenticate_user(self) -> None:
+    def test_authenticate_user(self, isolated_user_store) -> None:
         """Test user authentication."""
-        from src.security.rbac import Role, UserStore
+        from src.security.rbac import Role
 
-        store = UserStore()
-        store.create_user(
+        isolated_user_store.create_user(
             username="authuser",
+            email="authuser@example.com",
             password="CorrectPassword123!",
             roles=[Role.VIEWER],
         )
 
         # Correct credentials
-        user = store.authenticate("authuser", "CorrectPassword123!")
+        user = isolated_user_store.authenticate("authuser", "CorrectPassword123!")
         assert user is not None
 
         # Wrong password
-        user = store.authenticate("authuser", "WrongPassword")
+        user = isolated_user_store.authenticate("authuser", "WrongPassword")
         assert user is None
 
 
 class TestRBACManager:
     """Tests for RBACManager."""
 
-    def test_login(self) -> None:
-        """Test user login."""
-        from src.security.rbac import RBACManager, Role
-
-        manager = RBACManager(secret_key="test-secret-key-12345")
+    def test_authenticate(self, isolated_rbac_manager) -> None:
+        """Test user authentication."""
+        from src.security.rbac import Role
 
         # Create user
-        manager.users.create_user(
+        isolated_rbac_manager.users.create_user(
             username="loginuser",
+            email="loginuser@example.com",
             password="SecureP@ss123!",
             roles=[Role.VIEWER],
         )
 
-        # Login
-        tokens = manager.login("loginuser", "SecureP@ss123!")
+        # Authenticate
+        tokens = isolated_rbac_manager.authenticate("loginuser", "SecureP@ss123!")
 
         assert tokens is not None
         assert tokens.access_token is not None
 
-    def test_check_permission(self) -> None:
-        """Test permission checking."""
-        from src.security.rbac import Permission, RBACManager, Role
+    def test_validate_access(self, isolated_rbac_manager) -> None:
+        """Test access validation with permissions."""
+        from src.security.rbac import Permission, Role
 
-        manager = RBACManager(secret_key="test-secret-key-12345")
-
-        user = manager.users.create_user(
+        # Create user with processor role
+        isolated_rbac_manager.users.create_user(
             username="permuser",
+            email="permuser@example.com",
             password="SecureP@ss123!",
-            roles=[Role.OPERATOR],
+            roles=[Role.PROCESSOR],
         )
 
-        # Should have document read
-        assert manager.check_permission(user, Permission.DOCUMENTS_READ)
+        # Authenticate to get tokens
+        tokens = isolated_rbac_manager.authenticate("permuser", "SecureP@ss123!")
+        assert tokens is not None
 
-        # Should not have admin permissions
-        assert not manager.check_permission(user, Permission.ADMIN_USERS)
+        # Validate access with document read permission (should pass)
+        payload = isolated_rbac_manager.validate_access(
+            tokens.access_token,
+            required_permissions={Permission.DOCUMENT_READ}
+        )
+        assert payload is not None
+
+        # Validate access with user create permission (should fail)
+        from src.security.rbac import AuthorizationError
+        with pytest.raises(AuthorizationError):
+            isolated_rbac_manager.validate_access(
+                tokens.access_token,
+                required_permissions={Permission.USER_CREATE}
+            )
 
 
 class TestRequirePermissionsDecorator:
     """Tests for permission decorators."""
 
-    def test_require_permissions(self) -> None:
-        """Test require_permissions decorator."""
-        from src.security.rbac import (
-            AuthorizationError,
-            Permission,
-            RBACManager,
-            Role,
-            require_permissions,
-        )
+    def test_require_permissions(self, isolated_rbac_manager) -> None:
+        """Test permission validation via validate_access."""
+        from src.security.rbac import Permission, Role, AuthorizationError
 
-        manager = RBACManager(secret_key="test-secret-key-12345")
-
-        @require_permissions(Permission.DOCUMENTS_READ, rbac_manager=manager)
-        def read_document(user: Any, doc_id: str) -> str:
-            return f"Read {doc_id}"
-
-        # Create user with permission
-        user = manager.users.create_user(
+        # Create user with viewer role (has DOCUMENT_READ permission)
+        isolated_rbac_manager.users.create_user(
             username="reader",
+            email="reader@example.com",
             password="SecureP@ss123!",
             roles=[Role.VIEWER],
         )
 
-        # Should succeed
-        result = read_document(user, "doc-123")
-        assert result == "Read doc-123"
+        tokens = isolated_rbac_manager.authenticate("reader", "SecureP@ss123!")
+        assert tokens is not None
 
-    def test_require_admin(self) -> None:
-        """Test require_admin decorator."""
-        from src.security.rbac import (
-            AuthorizationError,
-            RBACManager,
-            Role,
-            require_admin,
+        # Should have document read permission
+        payload = isolated_rbac_manager.validate_access(
+            tokens.access_token,
+            required_permissions={Permission.DOCUMENT_READ}
         )
+        assert payload is not None
 
-        manager = RBACManager(secret_key="test-secret-key-12345")
+        # Should NOT have document delete permission
+        with pytest.raises(AuthorizationError):
+            isolated_rbac_manager.validate_access(
+                tokens.access_token,
+                required_permissions={Permission.DOCUMENT_DELETE}
+            )
 
-        @require_admin(rbac_manager=manager)
-        def admin_action(user: Any) -> str:
-            return "Admin action completed"
+    def test_require_admin(self, isolated_rbac_manager) -> None:
+        """Test admin role permission checking via validate_access."""
+        from src.security.rbac import Permission, Role, AuthorizationError
 
         # Non-admin user
-        viewer = manager.users.create_user(
+        isolated_rbac_manager.users.create_user(
             username="viewer",
+            email="viewer@example.com",
             password="SecureP@ss123!",
             roles=[Role.VIEWER],
         )
 
+        viewer_tokens = isolated_rbac_manager.authenticate("viewer", "SecureP@ss123!")
+        assert viewer_tokens is not None
+
+        # Viewer should not have user management permissions
         with pytest.raises(AuthorizationError):
-            admin_action(viewer)
+            isolated_rbac_manager.validate_access(
+                viewer_tokens.access_token,
+                required_permissions={Permission.USER_CREATE}
+            )
 
         # Admin user
-        admin = manager.users.create_user(
+        isolated_rbac_manager.users.create_user(
             username="admin",
+            email="admin@example.com",
             password="SecureP@ss123!",
             roles=[Role.ADMIN],
         )
 
-        result = admin_action(admin)
-        assert result == "Admin action completed"
+        admin_tokens = isolated_rbac_manager.authenticate("admin", "SecureP@ss123!")
+        assert admin_tokens is not None
+
+        # Admin should have all permissions including user management
+        payload = isolated_rbac_manager.validate_access(
+            admin_tokens.access_token,
+            required_permissions={Permission.USER_CREATE}
+        )
+        assert payload is not None
+
+        payload = isolated_rbac_manager.validate_access(
+            admin_tokens.access_token,
+            required_permissions={Permission.DOCUMENT_DELETE}
+        )
+        assert payload is not None
 
 
 # =============================================================================
@@ -1080,8 +1137,15 @@ class TestSecurityIntegration:
         from src.security.audit import AuditLogger
         from src.security.rbac import Permission, RBACManager, Role
 
-        # Set up RBAC
-        manager = RBACManager(secret_key="test-secret-key-12345")
+        # Reset singleton to ensure clean state
+        RBACManager.reset_instance()
+
+        # Set up RBAC with isolated storage
+        manager = RBACManager(
+            secret_key="test-secret-key-12345",
+            user_storage_path=str(temp_dir / "users.json"),
+            revocation_storage_path=str(temp_dir / "revoked_tokens.json"),
+        )
         audit_logger = AuditLogger(log_dir=str(temp_dir / "audit"))
 
         # Create users

@@ -38,9 +38,23 @@ def reset_rbac_singleton():
 
 
 @pytest.fixture
-def rbac_manager() -> RBACManager:
-    """Create RBAC manager for testing."""
-    return RBACManager.get_instance(secret_key="test-secret-key-for-auth-tests-12345")
+def test_data_dir(tmp_path):
+    """Create isolated temporary directory for test data storage."""
+    data_dir = tmp_path / "test_data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir
+
+
+@pytest.fixture
+def rbac_manager(test_data_dir) -> RBACManager:
+    """Create RBAC manager for testing with isolated storage."""
+    user_storage = str(test_data_dir / "users.json")
+    revocation_storage = str(test_data_dir / "revoked_tokens.json")
+    return RBACManager.get_instance(
+        secret_key="test-secret-key-for-auth-tests-12345",
+        user_storage_path=user_storage,
+        revocation_storage_path=revocation_storage,
+    )
 
 
 @pytest.fixture

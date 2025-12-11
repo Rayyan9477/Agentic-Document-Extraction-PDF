@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from openai import OpenAI, APIConnectionError, APITimeoutError, RateLimitError
+from openai import OpenAI, AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
 from tenacity import (
     retry,
     stop_after_attempt,
@@ -303,7 +304,13 @@ class LMStudioClient:
         self._retry_min_wait = retry_min_wait or settings.lm_studio.retry_min_wait
         self._retry_max_wait = retry_max_wait or settings.lm_studio.retry_max_wait
 
-        # Initialize OpenAI client for LM Studio
+        # Thread-local storage for OpenAI clients (thread-safety for concurrent requests)
+        self._thread_local = threading.local()
+
+        # Lock for thread-safe initialization
+        self._client_lock = threading.Lock()
+
+        # Initialize main OpenAI client for LM Studio (used in main thread)
         self._client = OpenAI(
             base_url=self._base_url,
             api_key="not-needed",  # LM Studio doesn't require API key
@@ -311,11 +318,18 @@ class LMStudioClient:
             max_retries=0,  # We handle retries ourselves
         )
 
+        # Async client for async operations (created lazily)
+        self._async_client: AsyncOpenAI | None = None
+        self._async_client_lock = asyncio.Lock()
+
         # HTTP client for health checks
         self._http_client = httpx.Client(
             base_url=self._base_url.rstrip("/v1"),
             timeout=10.0,
         )
+
+        # Track if closed
+        self._closed = False
 
         # JSON extraction patterns
         self._json_patterns = [
@@ -545,12 +559,26 @@ class LMStudioClient:
 
         return None
 
+    async def _get_async_client(self) -> AsyncOpenAI:
+        """Get or create the async OpenAI client (thread-safe)."""
+        if self._async_client is None:
+            async with self._async_client_lock:
+                # Double-check after acquiring lock
+                if self._async_client is None:
+                    self._async_client = AsyncOpenAI(
+                        base_url=self._base_url,
+                        api_key="not-needed",
+                        timeout=float(self._timeout),
+                        max_retries=0,
+                    )
+        return self._async_client
+
     async def send_vision_request_async(
         self,
         request: VisionRequest,
     ) -> VisionResponse:
         """
-        Send a vision request asynchronously.
+        Send a vision request asynchronously using native async client.
 
         Args:
             request: VisionRequest to send.
@@ -558,9 +586,81 @@ class LMStudioClient:
         Returns:
             VisionResponse with model output.
         """
-        # Run sync request in thread pool
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.send_vision_request, request)
+        start_time = time.perf_counter()
+
+        # Get async client
+        client = await self._get_async_client()
+
+        # Build messages
+        messages: list[dict[str, Any]] = []
+
+        if request.system_prompt:
+            messages.append({
+                "role": MessageRole.SYSTEM.value,
+                "content": request.system_prompt,
+            })
+
+        user_content: list[dict[str, Any]] = [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": request.image_data,
+                    "detail": "high",
+                },
+            },
+            {
+                "type": "text",
+                "text": request.prompt,
+            },
+        ]
+
+        messages.append({
+            "role": MessageRole.USER.value,
+            "content": user_content,
+        })
+
+        try:
+            # Send async request using native async client
+            response = await client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                max_tokens=request.max_tokens,
+                temperature=request.temperature,
+            )
+
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            content = response.choices[0].message.content or ""
+            parsed_json = self._extract_json(content)
+
+            vision_response = VisionResponse(
+                content=content,
+                parsed_json=parsed_json,
+                model=response.model,
+                usage={
+                    "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                    "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                    "total_tokens": response.usage.total_tokens if response.usage else 0,
+                },
+                latency_ms=latency_ms,
+                request_id=request.request_id,
+            )
+
+            logger.info(
+                "async_vision_request_complete",
+                request_id=request.request_id,
+                latency_ms=latency_ms,
+                tokens=vision_response.total_tokens,
+                has_json=vision_response.has_json,
+            )
+
+            return vision_response
+
+        except APIConnectionError as e:
+            raise LMConnectionError(f"Async connection failed: {e}") from e
+        except APITimeoutError as e:
+            raise LMTimeoutError(f"Async request timed out: {e}") from e
+        except Exception as e:
+            raise LMClientError(f"Async request failed: {e}") from e
 
     async def send_batch_async(
         self,
@@ -587,8 +687,38 @@ class LMStudioClient:
         return await asyncio.gather(*tasks)
 
     def close(self) -> None:
-        """Close client connections."""
-        self._http_client.close()
+        """Close client connections and release resources."""
+        if self._closed:
+            return
+
+        self._closed = True
+
+        # Close HTTP client
+        try:
+            self._http_client.close()
+        except Exception:
+            pass  # Best effort cleanup
+
+        # Close async client if initialized
+        if self._async_client is not None:
+            try:
+                # AsyncOpenAI client cleanup
+                asyncio.get_event_loop().run_until_complete(self._async_client.close())
+            except RuntimeError:
+                # No event loop running, client will be cleaned up by GC
+                pass
+            except Exception:
+                pass  # Best effort cleanup
+
+        logger.debug("lm_client_closed")
+
+    def __del__(self) -> None:
+        """Destructor to ensure resources are released."""
+        try:
+            if not getattr(self, "_closed", True):
+                self.close()
+        except Exception:
+            pass  # Best effort cleanup during garbage collection
 
     def __enter__(self) -> "LMStudioClient":
         """Context manager entry."""

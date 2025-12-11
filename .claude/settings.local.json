@@ -18,7 +18,8 @@
       "Bash(findstr:*)",
       "Bash(test:*)",
       "Bash(timeout:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

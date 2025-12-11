@@ -341,7 +341,13 @@ class TokenManager:
     """
     JWT token management with secure signing and validation.
 
-    Supports access and refresh tokens with revocation capability.
+    Supports access and refresh tokens with persistent revocation capability.
+    Revoked tokens are stored in a file and survive server restarts.
+
+    For production with multiple servers, use Redis instead:
+        redis_client = redis.Redis(host='localhost', port=6379, db=0)
+        # Store with TTL: redis_client.setex(f"revoked:{jti}", ttl_seconds, "1")
+        # Check: redis_client.exists(f"revoked:{jti}")
     """
 
     def __init__(
@@ -350,23 +356,42 @@ class TokenManager:
         algorithm: str = "HS256",
         access_token_expire_minutes: int = 30,
         refresh_token_expire_days: int = 7,
+        revocation_storage_path: str | None = None,
     ) -> None:
         """
-        Initialize token manager.
+        Initialize token manager with persistent revocation storage.
 
         Args:
             secret_key: Secret key for JWT signing.
             algorithm: JWT algorithm.
             access_token_expire_minutes: Access token lifetime.
             refresh_token_expire_days: Refresh token lifetime.
+            revocation_storage_path: Path to file for storing revoked tokens.
         """
+        import json
+        import os
+        from pathlib import Path as FilePath
+
         self._secret_key = secret_key
         self._algorithm = algorithm
         self._access_expire = timedelta(minutes=access_token_expire_minutes)
         self._refresh_expire = timedelta(days=refresh_token_expire_days)
 
-        # Token revocation list (in production, use Redis or database)
-        self._revoked_tokens: set[str] = set()
+        # SECURITY: Persistent token revocation with file-based storage
+        # NOTE: For multi-server deployments, use Redis with TTL instead
+        if revocation_storage_path is None:
+            revocation_storage_path = os.path.join(
+                os.path.dirname(__file__), "..", "..", "data", "revoked_tokens.json"
+            )
+        self._revocation_path = FilePath(revocation_storage_path).resolve()
+        self._revocation_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Load existing revoked tokens from file
+        self._revoked_tokens: dict[str, float] = {}  # jti -> expiration timestamp
+        self._load_revoked_tokens()
+
+        # Clean up expired revocations on startup
+        self._cleanup_expired_revocations()
 
     def create_access_token(self, user: User) -> tuple[str, datetime]:
         """
@@ -475,8 +500,8 @@ class TokenManager:
 
             token_payload = TokenPayload.from_dict(payload)
 
-            # Check if token is revoked
-            if token_payload.jti in self._revoked_tokens:
+            # Check if token is revoked (with cleanup of expired revocations)
+            if self.is_revoked(token_payload.jti):
                 raise TokenInvalidError("Token has been revoked")
 
             return token_payload
@@ -486,39 +511,106 @@ class TokenManager:
         except JWTError as e:
             raise TokenInvalidError(f"Invalid token: {e}") from e
 
+    def _load_revoked_tokens(self) -> None:
+        """Load revoked tokens from persistent storage."""
+        import json
+
+        if not self._revocation_path.exists():
+            logger.info("revocation_store_initialized", path=str(self._revocation_path))
+            return
+
+        try:
+            with open(self._revocation_path, "r") as f:
+                data = json.load(f)
+            self._revoked_tokens = {k: float(v) for k, v in data.get("revoked", {}).items()}
+            logger.info("revoked_tokens_loaded", count=len(self._revoked_tokens))
+        except Exception as e:
+            logger.error("revoked_tokens_load_error", error=str(e))
+            self._revoked_tokens = {}
+
+    def _save_revoked_tokens(self) -> None:
+        """Save revoked tokens to persistent storage."""
+        import json
+
+        try:
+            with open(self._revocation_path, "w") as f:
+                json.dump({"revoked": self._revoked_tokens}, f, indent=2)
+            logger.debug("revoked_tokens_saved", count=len(self._revoked_tokens))
+        except Exception as e:
+            logger.error("revoked_tokens_save_error", error=str(e))
+
+    def _cleanup_expired_revocations(self) -> int:
+        """
+        Remove expired token revocations from storage.
+
+        Returns:
+            Number of entries cleaned up.
+        """
+        now = datetime.now(timezone.utc).timestamp()
+        expired = [jti for jti, exp_time in self._revoked_tokens.items() if exp_time < now]
+
+        for jti in expired:
+            del self._revoked_tokens[jti]
+
+        if expired:
+            self._save_revoked_tokens()
+            logger.info("revoked_tokens_cleanup", removed=len(expired))
+
+        return len(expired)
+
     def revoke_token(self, token: str) -> None:
         """
-        Revoke a token.
+        Revoke a token with persistent storage.
 
         Args:
             token: Token to revoke.
         """
         try:
-            # Decode without verification to get JTI
+            # Decode without verification to get JTI and expiration
             payload = jwt.decode(
                 token,
                 self._secret_key,
                 algorithms=[self._algorithm],
                 options={"verify_exp": False},
             )
-            self._revoked_tokens.add(payload.get("jti", ""))
-        except JWTError:
-            pass
+            jti = payload.get("jti", "")
+            exp = payload.get("exp", 0)
+
+            if jti:
+                # Store with expiration timestamp for cleanup
+                self._revoked_tokens[jti] = float(exp)
+                self._save_revoked_tokens()
+                logger.info("token_revoked", jti=jti[:8] + "...")
+        except JWTError as e:
+            logger.warning("token_revocation_failed", error=str(e))
 
     def is_revoked(self, jti: str) -> bool:
-        """Check if a token ID is revoked."""
-        return jti in self._revoked_tokens
+        """
+        Check if a token ID is revoked.
+
+        Also cleans up the entry if it has expired.
+        """
+        if jti not in self._revoked_tokens:
+            return False
+
+        # Check if the revocation entry has expired
+        exp_time = self._revoked_tokens[jti]
+        if exp_time < datetime.now(timezone.utc).timestamp():
+            # Entry expired, remove it
+            del self._revoked_tokens[jti]
+            self._save_revoked_tokens()
+            return False
+
+        return True
 
     def cleanup_expired_revocations(self) -> int:
         """
-        Clean up expired token revocations.
+        Public method to clean up expired token revocations.
 
         Returns:
             Number of entries cleaned up.
         """
-        # In production, this would check expiration times
-        # For now, just return 0
-        return 0
+        return self._cleanup_expired_revocations()
 
 
 class UserStore:
@@ -794,6 +886,8 @@ class RBACManager:
         algorithm: str = "HS256",
         access_token_expire_minutes: int = 30,
         refresh_token_expire_days: int = 7,
+        user_storage_path: str | None = None,
+        revocation_storage_path: str | None = None,
     ) -> None:
         """
         Initialize RBAC manager.
@@ -803,14 +897,17 @@ class RBACManager:
             algorithm: JWT algorithm.
             access_token_expire_minutes: Access token lifetime.
             refresh_token_expire_days: Refresh token lifetime.
+            user_storage_path: Path to user storage file (for testing isolation).
+            revocation_storage_path: Path to revoked tokens file (for testing isolation).
         """
         self._token_manager = TokenManager(
             secret_key=secret_key,
             algorithm=algorithm,
             access_token_expire_minutes=access_token_expire_minutes,
             refresh_token_expire_days=refresh_token_expire_days,
+            revocation_storage_path=revocation_storage_path,
         )
-        self._user_store = UserStore()
+        self._user_store = UserStore(storage_path=user_storage_path)
         self._password_manager = PasswordManager()
 
     @classmethod

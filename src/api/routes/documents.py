@@ -11,7 +11,9 @@ from typing import Any
 import tempfile
 import shutil
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, UploadFile, File, Form, Path as FastAPIPath
+from typing import Annotated
+import re
 
 from src.api.models import (
     ProcessRequest,
@@ -322,8 +324,24 @@ async def upload_document(
     upload_dir = Path(tempfile.gettempdir()) / "pdf_uploads"
     upload_dir.mkdir(exist_ok=True)
 
-    # Save uploaded file
-    temp_file_path = upload_dir / f"{request_id}_{file.filename}"
+    # SECURITY: Sanitize filename to prevent path traversal attacks
+    def secure_filename(filename: str) -> str:
+        """Sanitize filename to prevent path traversal and other attacks."""
+        import os
+        # Get only the basename (removes any path components)
+        filename = os.path.basename(filename)
+        # Remove null bytes
+        filename = filename.replace('\x00', '')
+        # Allow only safe characters: alphanumeric, dash, underscore, dot
+        safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.')
+        filename = ''.join(c if c in safe_chars else '_' for c in filename)
+        # Prevent empty or dangerous filenames
+        if not filename or filename.startswith('.'):
+            filename = 'upload.pdf'
+        return filename
+
+    safe_name = secure_filename(file.filename or "upload.pdf")
+    temp_file_path = upload_dir / f"{request_id}_{safe_name}"
     try:
         with temp_file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -539,23 +557,38 @@ async def batch_process_documents(
     description="Retrieve the result of a previous processing request.",
 )
 async def get_processing_result(
-    processing_id: str,
+    processing_id: Annotated[
+        str,
+        FastAPIPath(
+            min_length=16,
+            max_length=64,
+            pattern=r"^[a-zA-Z0-9\-_]+$",
+            description="Unique processing ID (alphanumeric, dashes, underscores only)",
+        )
+    ],
     http_request: Request,
 ) -> ProcessResponse:
     """
     Get the result of a previous processing request.
 
     Args:
-        processing_id: Unique processing ID.
+        processing_id: Unique processing ID (validated format).
         http_request: HTTP request object.
 
     Returns:
         Processing result.
 
     Raises:
-        HTTPException: If processing ID not found.
+        HTTPException: If processing ID not found or invalid format.
     """
     request_id = getattr(http_request.state, "request_id", "")
+
+    # SECURITY: Additional validation for processing_id format
+    if not re.match(r"^[a-zA-Z0-9\-_]{16,64}$", processing_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid processing ID format",
+        )
 
     logger.info(
         "get_result_request",

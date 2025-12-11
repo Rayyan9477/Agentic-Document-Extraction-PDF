@@ -304,18 +304,25 @@ class ImageEnhancer:
             raise EnhancementError(f"Image enhancement failed: {e}") from e
 
     def _page_to_cv2(self, page_image: PageImage) -> NDArray[np.uint8]:
-        """Convert PageImage to OpenCV BGR array."""
+        """Convert PageImage to OpenCV BGR array with proper memory cleanup."""
         pil_image = page_image.to_pil_image()
 
-        # Convert to RGB if necessary
-        if pil_image.mode != "RGB":
-            pil_image = pil_image.convert("RGB")
+        try:
+            # Convert to RGB if necessary
+            if pil_image.mode != "RGB":
+                converted = pil_image.convert("RGB")
+                pil_image.close()  # Close original after conversion
+                pil_image = converted
 
-        # Convert to numpy array
-        img_array = np.array(pil_image, dtype=np.uint8)
+            # Convert to numpy array
+            img_array = np.array(pil_image, dtype=np.uint8)
 
-        # Convert RGB to BGR for OpenCV
-        return cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+            # Convert RGB to BGR for OpenCV
+            return cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+        finally:
+            # Ensure PIL image is closed to release memory
+            pil_image.close()
+            del pil_image
 
     def _cv2_to_page(
         self,
