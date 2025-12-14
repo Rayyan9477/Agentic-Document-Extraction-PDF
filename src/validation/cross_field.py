@@ -27,6 +27,7 @@ class RuleType(str, Enum):
 
     DATE_ORDER = "date_order"
     SUM_VALIDATION = "sum_validation"
+    NESTED_SUM_VALIDATION = "nested_sum_validation"
     REQUIRED_IF = "required_if"
     REQUIRED_UNLESS = "required_unless"
     MUTUAL_EXCLUSIVE = "mutual_exclusive"
@@ -246,6 +247,43 @@ class CrossFieldValidator:
             message_template=f"Sum of components must equal {{total_field}}",
         ))
 
+    def add_nested_sum_rule(
+        self,
+        name: str,
+        array_field: str,
+        item_field: str,
+        total_field: str,
+        tolerance: float = 0.01,
+        severity: RuleSeverity = RuleSeverity.ERROR,
+    ) -> None:
+        """
+        Add a rule requiring sum of nested array field values to equal total.
+
+        Use this for validating totals of line items, e.g., sum of service_lines[].total_charges
+        should equal the document's total_charges.
+
+        Args:
+            name: Rule identifier.
+            array_field: Name of the array field (e.g., "service_lines").
+            item_field: Field within each array item to sum (e.g., "total_charges").
+            total_field: Field containing expected total.
+            tolerance: Allowed difference for floating point.
+            severity: Severity of violation.
+        """
+        self.rules.append(CrossFieldRule(
+            name=name,
+            rule_type=RuleType.NESTED_SUM_VALIDATION,
+            fields=[array_field, total_field],
+            severity=severity,
+            params={
+                "array_field": array_field,
+                "item_field": item_field,
+                "total_field": total_field,
+                "tolerance": tolerance,
+            },
+            message_template=f"Sum of {array_field}[].{item_field} must equal {{total_field}}",
+        ))
+
     def add_required_if_rule(
         self,
         name: str,
@@ -449,6 +487,7 @@ class CrossFieldValidator:
         checkers = {
             RuleType.DATE_ORDER: self._check_date_order,
             RuleType.SUM_VALIDATION: self._check_sum,
+            RuleType.NESTED_SUM_VALIDATION: self._check_nested_sum,
             RuleType.REQUIRED_IF: self._check_required_if,
             RuleType.REQUIRED_UNLESS: self._check_required_unless,
             RuleType.MUTUAL_EXCLUSIVE: self._check_mutual_exclusive,
@@ -544,6 +583,71 @@ class CrossFieldValidator:
                 message=f"Sum of {', '.join(component_fields)} ({component_sum:.2f}) does not equal {total_field} ({total:.2f})",
                 expected=f"Sum = {total:.2f}",
                 actual=f"Sum = {component_sum:.2f}",
+            )
+
+        return None
+
+    def _check_nested_sum(
+        self,
+        rule: CrossFieldRule,
+        data: dict[str, Any],
+    ) -> RuleViolation | None:
+        """Check nested array sum validation rule.
+
+        Sums a field across all items in an array and compares to a total field.
+        E.g., sum(service_lines[].total_charges) == total_charges
+        """
+        array_field = rule.params.get("array_field")
+        item_field = rule.params.get("item_field")
+        total_field = rule.params.get("total_field")
+        tolerance = rule.params.get("tolerance", 0.01)
+
+        if not array_field or not item_field or not total_field:
+            return None
+
+        # Get total value
+        total_val = data.get(total_field)
+        if total_val is None:
+            return None
+
+        total = self._to_float(total_val)
+        if total is None:
+            return None
+
+        # Get array and sum item field values
+        array_data = data.get(array_field)
+        if not array_data or not isinstance(array_data, list):
+            # No array data to validate - skip
+            return None
+
+        item_sum = 0.0
+        valid_items = 0
+        for item in array_data:
+            if isinstance(item, dict):
+                item_val = item.get(item_field)
+                if item_val is not None:
+                    item_float = self._to_float(item_val)
+                    if item_float is not None:
+                        item_sum += item_float
+                        valid_items += 1
+
+        # No valid items found - skip validation
+        if valid_items == 0:
+            return None
+
+        # Check within tolerance
+        if abs(item_sum - total) > tolerance:
+            return RuleViolation(
+                rule_name=rule.name,
+                rule_type=rule.rule_type,
+                severity=rule.severity,
+                fields=(array_field, total_field),
+                message=(
+                    f"Sum of {array_field}[].{item_field} ({item_sum:.2f}) "
+                    f"does not equal {total_field} ({total:.2f})"
+                ),
+                expected=f"Sum = {total:.2f}",
+                actual=f"Sum = {item_sum:.2f} ({valid_items} items)",
             )
 
         return None
@@ -867,11 +971,21 @@ class MedicalDocumentRules:
             "attending_physician_npi",
         )
 
-        # Sum validation
-        validator.add_sum_rule(
+        # Sum validation - service line charges should sum to total
+        validator.add_nested_sum_rule(
             "revenue_totals",
-            ["total_charges"],
-            "total_charges",
+            array_field="service_lines",
+            item_field="total_charges",
+            total_field="total_charges",
+            tolerance=0.01,
+        )
+
+        # Non-covered charges validation
+        validator.add_nested_sum_rule(
+            "non_covered_totals",
+            array_field="service_lines",
+            item_field="non_covered_charges",
+            total_field="total_non_covered_charges",
             tolerance=0.01,
         )
 

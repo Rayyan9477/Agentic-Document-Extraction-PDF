@@ -33,10 +33,46 @@ from src.api.models import (
     PreviewStyleEnum,
 )
 from src.config import get_logger
+from src.security.path_validator import (
+    SecurePathValidator,
+    PathTraversalError,
+    PathValidationError,
+    validate_pdf_path,
+)
 
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+# SECURITY: Configure allowed directories for file operations
+# In production, these should be loaded from configuration
+ALLOWED_PDF_DIRECTORIES: list[str] = [
+    "./uploads",
+    "./data",
+    "./input",
+    tempfile.gettempdir(),  # For uploaded files
+]
+
+ALLOWED_OUTPUT_DIRECTORIES: list[str] = [
+    "./output",
+    "./exports",
+    "./data/output",
+]
+
+# Initialize validators
+_pdf_validator = SecurePathValidator(
+    allowed_directories=None,  # Allow any directory but validate for traversal
+    allowed_extensions=[".pdf"],
+    allow_absolute_paths=True,
+    resolve_symlinks=True,
+)
+
+_output_validator = SecurePathValidator(
+    allowed_directories=None,  # Allow any directory but validate for traversal
+    allowed_extensions=[".json", ".xlsx", ".xls", ".md", ".csv"],
+    allow_absolute_paths=True,
+    resolve_symlinks=True,
+)
 
 
 def _map_confidence_level(confidence: float) -> ConfidenceLevelEnum:
@@ -166,8 +202,45 @@ async def process_document(
         async_processing=request.async_processing,
     )
 
+    # SECURITY: Validate path for traversal attacks before any file operations
+    try:
+        validated_pdf_path = _pdf_validator.validate(request.pdf_path)
+    except PathTraversalError as e:
+        logger.warning(
+            "path_traversal_attempt",
+            request_id=request_id,
+            path=request.pdf_path[:100],  # Truncate for logging
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file path",  # Generic message to avoid info disclosure
+        )
+    except PathValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file path: {e}",
+        )
+
+    # Validate output_dir if provided
+    validated_output_dir: Path | None = None
+    if request.output_dir:
+        try:
+            validated_output_dir = _output_validator.validate(request.output_dir)
+        except (PathTraversalError, PathValidationError) as e:
+            logger.warning(
+                "output_path_validation_failed",
+                request_id=request_id,
+                path=request.output_dir[:100],
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid output directory path",
+            )
+
     # Validate file exists
-    pdf_path = Path(request.pdf_path)
+    pdf_path = validated_pdf_path
     if not pdf_path.exists():
         raise HTTPException(
             status_code=404,
@@ -433,11 +506,50 @@ async def batch_process_documents(
         async_processing=request.async_processing,
     )
 
+    # SECURITY: Validate all paths for traversal attacks
+    validated_paths: list[Path] = []
+    for pdf_path in request.pdf_paths:
+        try:
+            validated = _pdf_validator.validate(pdf_path)
+            validated_paths.append(validated)
+        except PathTraversalError as e:
+            logger.warning(
+                "batch_path_traversal_attempt",
+                request_id=request_id,
+                path=pdf_path[:100],
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path in batch",
+            )
+        except PathValidationError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file path: {e}",
+            )
+
+    # Validate output_dir if provided
+    if request.output_dir:
+        try:
+            _output_validator.validate(request.output_dir)
+        except (PathTraversalError, PathValidationError) as e:
+            logger.warning(
+                "batch_output_path_validation_failed",
+                request_id=request_id,
+                path=request.output_dir[:100],
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid output directory path",
+            )
+
     # Validate all files exist
     missing_files = []
-    for pdf_path in request.pdf_paths:
-        if not Path(pdf_path).exists():
-            missing_files.append(pdf_path)
+    for validated_path in validated_paths:
+        if not validated_path.exists():
+            missing_files.append(str(validated_path))
 
     if missing_files:
         raise HTTPException(

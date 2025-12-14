@@ -7,8 +7,7 @@ import { motion } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { FileText, Mail, Lock, User, ArrowRight } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@/components/ui';
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+import { authApi } from '@/lib/api';
 
 export default function SignupPage() {
   const router = useRouter();
@@ -79,37 +78,13 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/signup`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          username: formData.username,
-          email: formData.email,
-          password: formData.password,
-          confirm_password: formData.confirmPassword,
-        }),
+      // Use centralized API client for consistent error handling and configuration
+      await authApi.signup({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+        confirm_password: formData.confirmPassword,
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        // Extract detailed error message from validation errors
-        let errorMsg = 'Signup failed';
-        if (data.detail) {
-          if (Array.isArray(data.detail)) {
-            // Pydantic validation errors
-            errorMsg = data.detail.map((err: unknown) => {
-              return typeof err === 'object' && err !== null && 'msg' in err ? String((err as { msg: unknown }).msg) : String(err);
-            }).join(', ');
-          } else if (typeof data.detail === 'string') {
-            errorMsg = data.detail;
-          }
-        }
-        throw new Error(errorMsg);
-      }
 
       toast.success('Account created successfully! Please login.');
       router.push('/login');

@@ -59,12 +59,10 @@ const FieldCard: React.FC<FieldCardProps> = ({ name, result, maskPhi }) => {
 
   const displayValue = () => {
     if (maskPhi && result.value) {
-      // Mask PHI data
-      const valueStr = String(result.value);
-      if (valueStr.length > 4) {
-        return '****' + valueStr.slice(-4);
-      }
-      return '****';
+      // HIPAA-compliant PHI masking
+      // SECURITY: Never reveal any characters, length, or format of PHI
+      // Use consistent mask to prevent pattern analysis
+      return '••••••••';
     }
     if (typeof result.value === 'object') {
       return JSON.stringify(result.value, null, 2);
@@ -164,6 +162,7 @@ export default function DocumentDetailPage() {
   const [activeTab, setActiveTab] = useState('fields');
   const [maskPhi, setMaskPhi] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showReviewModal, setShowReviewModal] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   // Fetch document data
@@ -218,6 +217,21 @@ export default function DocumentDetailPage() {
       setCopiedField(fieldName);
       setTimeout(() => setCopiedField(null), 2000);
     }
+  };
+
+  // Human review handler - opens review workflow modal
+  const handleStartReview = () => {
+    setShowReviewModal(true);
+  };
+
+  // Mark review as complete (would typically call an API)
+  const handleCompleteReview = async (approved: boolean, notes: string) => {
+    // TODO: Implement API call to mark review as complete
+    // For now, close modal and show success message
+    console.log('Review completed:', { processingId, approved, notes });
+    setShowReviewModal(false);
+    // Refresh document data to get updated review status
+    refetch();
   };
 
   if (isLoading) {
@@ -417,7 +431,9 @@ export default function DocumentDetailPage() {
                 {document.human_review_reason || 'This document requires manual verification.'}
               </p>
             </div>
-            <Button variant="secondary">Start Review</Button>
+            <Button variant="secondary" onClick={handleStartReview}>
+              Start Review
+            </Button>
           </motion.div>
         )}
 
@@ -615,7 +631,105 @@ export default function DocumentDetailPage() {
             </div>
           </div>
         </Modal>
+
+        {/* Human Review Modal */}
+        <Modal
+          isOpen={showReviewModal}
+          onClose={() => setShowReviewModal(false)}
+          title="Human Review"
+        >
+          <HumanReviewForm
+            document={document}
+            onSubmit={handleCompleteReview}
+            onCancel={() => setShowReviewModal(false)}
+          />
+        </Modal>
       </div>
     </AppLayout>
+  );
+}
+
+// Human Review Form Component
+interface HumanReviewFormProps {
+  document: any;
+  onSubmit: (approved: boolean, notes: string) => void;
+  onCancel: () => void;
+}
+
+function HumanReviewForm({ document, onSubmit, onCancel }: HumanReviewFormProps) {
+  const [notes, setNotes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (approved: boolean) => {
+    setIsSubmitting(true);
+    try {
+      await onSubmit(approved, notes);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Review Reason */}
+      <div className="p-4 bg-warning-50 border border-warning-200 rounded-lg">
+        <p className="text-sm font-medium text-warning-800">Review Required Because:</p>
+        <p className="text-sm text-warning-700 mt-1">
+          {document?.human_review_reason || 'Low confidence extraction or validation issues detected.'}
+        </p>
+      </div>
+
+      {/* Key Fields Summary */}
+      <div>
+        <h4 className="text-sm font-medium text-surface-700 mb-2">Key Fields to Verify:</h4>
+        <div className="space-y-2 max-h-48 overflow-y-auto">
+          {Object.entries(document?.field_metadata || {})
+            .filter(([_, result]: [string, any]) => result.confidence < 0.85 || !result.validation_passed)
+            .slice(0, 5)
+            .map(([name, result]: [string, any]) => (
+              <div key={name} className="flex items-center justify-between p-2 bg-surface-50 rounded">
+                <span className="text-sm font-medium text-surface-700">{name}</span>
+                <span className="text-sm text-surface-600">{String(result.value)}</span>
+              </div>
+            ))}
+        </div>
+      </div>
+
+      {/* Review Notes */}
+      <div>
+        <label htmlFor="review-notes" className="block text-sm font-medium text-surface-700 mb-1">
+          Review Notes (optional)
+        </label>
+        <textarea
+          id="review-notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Add any notes about your review..."
+          className="w-full px-3 py-2 border border-surface-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+          rows={3}
+        />
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex justify-end gap-3 pt-2">
+        <Button variant="secondary" onClick={onCancel} disabled={isSubmitting}>
+          Cancel
+        </Button>
+        <Button
+          variant="danger"
+          onClick={() => handleSubmit(false)}
+          disabled={isSubmitting}
+        >
+          Reject
+        </Button>
+        <Button
+          variant="primary"
+          onClick={() => handleSubmit(true)}
+          disabled={isSubmitting}
+        >
+          Approve
+        </Button>
+      </div>
+    </div>
   );
 }

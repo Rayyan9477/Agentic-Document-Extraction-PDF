@@ -486,22 +486,34 @@ async def logout(
     )
 
 
+class RefreshTokenRequest(BaseModel):
+    """Refresh token request model."""
+
+    refresh_token: str = Field(..., min_length=1)
+
+
 @router.post(
     "/auth/refresh",
     response_model=TokenResponse,
     summary="Refresh token",
-    description="Refresh access token using refresh token.",
+    description="Refresh access token using refresh token with secure rotation.",
     status_code=status.HTTP_200_OK,
 )
 async def refresh_token(
-    refresh_token: str,
+    request: RefreshTokenRequest,
     http_request: Request,
 ) -> TokenResponse:
     """
-    Refresh access token.
+    Refresh access token with secure token rotation.
+
+    SECURITY: Implements refresh token rotation per OWASP guidelines:
+    - Old refresh token is revoked immediately after validation
+    - New token pair is issued
+    - Prevents refresh token replay attacks
+    - Detects token theft (reused revoked token = breach indicator)
 
     Args:
-        refresh_token: Refresh token.
+        request: Refresh token request body.
         http_request: HTTP request object.
 
     Returns:
@@ -519,30 +531,76 @@ async def refresh_token(
 
     try:
         rbac = get_rbac_manager()
+        incoming_refresh_token = request.refresh_token
 
         # Validate refresh token
-        payload = rbac.tokens.validate_token(refresh_token)
+        payload = rbac.tokens.validate_token(incoming_refresh_token)
 
         if payload.token_type != "refresh":
+            logger.warning(
+                "token_refresh_invalid_type",
+                token_type=payload.token_type,
+                request_id=request_id,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid token type",
             )
 
-        # Get user
-        user = rbac.users.get_user_by_username(payload.username)
+        # Get user and verify active status
+        user = rbac.users.get_user(payload.sub)
         if user is None:
+            logger.warning(
+                "token_refresh_user_not_found",
+                user_id=payload.sub,
+                request_id=request_id,
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User not found",
             )
 
-        # Create new token pair
+        if not user.is_active:
+            logger.warning(
+                "token_refresh_inactive_user",
+                user_id=user.user_id,
+                username=user.username,
+                request_id=request_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account is inactive",
+            )
+
+        if user.is_locked:
+            logger.warning(
+                "token_refresh_locked_user",
+                user_id=user.user_id,
+                username=user.username,
+                request_id=request_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account is locked",
+            )
+
+        # SECURITY: Revoke old refresh token BEFORE issuing new ones
+        # This implements secure refresh token rotation per OWASP guidelines
+        # If a revoked token is ever used again, it indicates token theft
+        rbac.tokens.revoke_token(incoming_refresh_token)
+        logger.info(
+            "token_refresh_old_token_revoked",
+            jti=payload.jti[:8] + "..." if payload.jti else "unknown",
+            request_id=request_id,
+        )
+
+        # Create new token pair with fresh tokens
         tokens = rbac.tokens.create_token_pair(user)
 
         logger.info(
             "token_refresh_success",
-            username=payload.username,
+            user_id=user.user_id,
+            username=user.username,
             request_id=request_id,
         )
 
@@ -554,11 +612,25 @@ async def refresh_token(
         )
 
     except (TokenInvalidError, TokenExpiredError) as e:
-        logger.warning(
-            "token_refresh_failed",
-            error=str(e),
-            request_id=request_id,
-        )
+        # SECURITY: Log token reuse attempts - could indicate theft
+        error_msg = str(e)
+        is_revoked = "revoked" in error_msg.lower()
+
+        if is_revoked:
+            # CRITICAL: Revoked token reuse detected - potential token theft!
+            logger.critical(
+                "token_refresh_revoked_token_reuse",
+                error=error_msg,
+                request_id=request_id,
+                alert="POTENTIAL_TOKEN_THEFT",
+            )
+        else:
+            logger.warning(
+                "token_refresh_failed",
+                error=error_msg,
+                request_id=request_id,
+            )
+
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",

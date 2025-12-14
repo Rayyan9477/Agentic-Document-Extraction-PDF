@@ -299,107 +299,99 @@
 ---
 
 ### HIGH-011: No Refresh Token Rotation
-- **Status:** [ ] Not Started
-- **File:** `src/security/rbac.py`
-- **Lines:** 455-469
+- **Status:** [x] Completed (2025-12-14)
+- **File:** `src/api/routes/auth.py`
+- **Lines:** 489-649
 - **Description:** Refresh tokens never change, only access tokens are rotated
 - **Impact:** If refresh token is compromised, attacker has unlimited access
-- **Fix:** Implement refresh token rotation on use
+- **Fix:** Implemented secure refresh token rotation per OWASP guidelines. Old refresh token is revoked immediately after validation before issuing new tokens. Added detection and critical logging for revoked token reuse (theft indicator). Also added user status validation (is_active, is_locked) during refresh.
 
 ---
 
 ### HIGH-012: Path Traversal Vulnerability
-- **Status:** [ ] Not Started
-- **File:** `src/api/routes/documents.py`
-- **Line:** 69
+- **Status:** [x] Completed (2025-12-14)
+- **Files:** `src/security/path_validator.py` (new), `src/api/routes/documents.py`, `src/api/routes/schemas.py`
 - **Description:** Path validation only checks .pdf extension, no path traversal protection
 - **Impact:** Could allow access to files outside intended directory
-- **Fix:** Use `Path.resolve()` and validate path is within allowed directory
+- **Fix:** Created comprehensive `SecurePathValidator` module with OWASP-compliant protection against: directory traversal (../), null byte injection, URL-encoded sequences, dangerous shell characters, symlink escapes. Applied to `process_document`, `batch_process_documents`, and `detect_schema` endpoints. Includes pattern detection, path resolution, and extension validation.
 
 ---
 
 ### HIGH-013: Frontend Import Typo Breaks Upload
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `frontend/src/app/documents/upload/page.tsx`
-- **Line:** 13
+- **Lines:** 13, 39
 - **Description:** Import uses `schemaApi` but the actual export is `schemasApi`
 - **Impact:** Upload page fails to load schemas
-- **Fix:** Change `schemaApi` to `schemasApi`
+- **Fix:** Changed import and usage from `schemaApi` to `schemasApi` (plural) to match the actual export in api.ts
 
 ---
 
 ### HIGH-014: Upload Completion Logic Error
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `frontend/src/app/documents/upload/page.tsx`
-- **Lines:** 101-103
+- **Lines:** 88-117
 - **Description:** Checks if files are `success` OR `uploading`, succeeds even while files still uploading
-- **Code:**
-  ```typescript
-  const allSuccess = files.every(
-    (f) => f.status === 'success' || f.status === 'uploading'
-  );
-  ```
 - **Impact:** Upload completes prematurely
-- **Fix:** Remove `|| f.status === 'uploading'` condition
+- **Fix:** Rewrote `handleUpload` to track success count independently of React state (which is async). Now uses local counter incremented after each successful mutation. Step 3 (completion) only triggers when `successCount === totalFiles`. Also added try-catch around mutations to prevent error counting as success.
 
 ---
 
 ### HIGH-015: Auth State Race Condition
-- **Status:** [ ] Not Started
-- **File:** `frontend/src/hooks/useAuth.ts`
-- **Lines:** 22-30
-- **Description:** Logout clears tokens but user state might still exist in store
+- **Status:** [x] Completed (2025-12-14)
+- **File:** `frontend/src/store/authStore.ts`
+- **Lines:** 5-20, 50-62, 70-84
+- **Description:** Logout clears Zustand state but tokens might still exist in localStorage
 - **Impact:** Potential auth bypass, stale user data visible
-- **Fix:** Synchronize store state clearing with token clearing
+- **Fix:** Modified `logout()` function to synchronously clear localStorage tokens BEFORE clearing store state. Added `clearAllAuthTokens()` helper with SSR safety. Also added `onRehydrateStorage` hook to detect and fix inconsistent state on page load (authenticated state but missing tokens triggers automatic logout).
 
 ---
 
 ### HIGH-016: ProtectedRoute Shows Blank Screen
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `frontend/src/components/auth/ProtectedRoute.tsx`
-- **Line:** 23
+- **Lines:** 1-53
 - **Description:** Returns `null` while relying on side-effects for redirect
 - **Impact:** Poor UX - blank screen before redirect
-- **Fix:** Show loading spinner or redirect immediately
+- **Fix:** Rewrote component to use local `isRedirecting` state. Now shows PageLoader with "Redirecting to login..." message during redirect. Uses `router.replace()` to prevent back button issues. Shows appropriate loading states for both auth check and redirect phases.
 
 ---
 
 ### HIGH-017: PHI Masking Too Weak (Frontend)
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `frontend/src/app/documents/[id]/page.tsx`
-- **Lines:** 60-68
+- **Lines:** 60-71
 - **Description:** Masking shows `****` + last 4 characters
 - **Impact:** Not HIPAA compliant, reveals partial data
-- **Fix:** Implement full masking with proper anonymization
+- **Fix:** Changed to consistent `••••••••` mask pattern. No characters or length information revealed. Added security comments explaining HIPAA compliance requirements.
 
 ---
 
 ### HIGH-018: Empty onClick Handler for Human Review
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `frontend/src/app/documents/[id]/page.tsx`
-- **Line:** 420
+- **Lines:** 165, 222-235, 434-436, 635-735
 - **Description:** "Human Review Required" button has empty onClick handler
 - **Impact:** Feature is non-functional
-- **Fix:** Implement human review workflow handler
+- **Fix:** Implemented full human review workflow: Added `showReviewModal` state, `handleStartReview` and `handleCompleteReview` handlers, and `HumanReviewForm` component. Modal shows review reason, low-confidence fields to verify, review notes textarea, and Approve/Reject buttons.
 
 ---
 
 ### HIGH-019: Hardcoded API URL in Signup
-- **Status:** [ ] Not Started
-- **File:** `frontend/src/app/signup/page.tsx`
-- **Line:** 11
+- **Status:** [x] Completed (2025-12-14)
+- **Files:** `frontend/src/app/signup/page.tsx`, `frontend/src/lib/api.ts`
 - **Description:** Uses direct fetch with hardcoded URL instead of centralized API client
 - **Impact:** Inconsistent error handling, breaks if API URL changes
-- **Fix:** Use `authApi.signup()` method like login page
+- **Fix:** Added `SignupRequest`/`SignupResponse` types and `authApi.signup()` method to api.ts. Updated signup page to import and use centralized API client instead of direct fetch. Removed local API_BASE_URL constant.
 
 ---
 
 ### HIGH-020: No Error Boundaries
-- **Status:** [ ] Not Started
-- **File:** Multiple frontend components
+- **Status:** [x] Completed (2025-12-14)
+- **Files:** `frontend/src/components/ErrorBoundary.tsx` (new), `frontend/src/app/layout.tsx`, `frontend/src/components/layout/AppLayout.tsx`
 - **Description:** Components handle errors inline but don't provide recovery UI
 - **Impact:** Errors cascade and crash entire page
-- **Fix:** Implement React Error Boundaries for graceful error handling
+- **Fix:** Created comprehensive `ErrorBoundary` component with: default fallback UI with Try Again/Refresh/Home buttons, development error details toggle, `AsyncBoundary` for async components, `PageErrorBoundary` for full-page errors. Added to root layout and AppLayout for nested error catching.
 
 ---
 

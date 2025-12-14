@@ -387,32 +387,41 @@ class PipelineRunner:
                 # Render page to pixmap
                 pixmap = page.get_pixmap(matrix=matrix)
 
-                # Convert to PNG bytes
-                png_bytes = pixmap.tobytes("png")
+                try:
+                    # Convert to PNG bytes
+                    png_bytes = pixmap.tobytes("png")
 
-                # Check if resizing needed
-                if (
-                    pixmap.width > self._max_image_dimension
-                    or pixmap.height > self._max_image_dimension
-                ):
-                    png_bytes = self._resize_image(
-                        png_bytes,
-                        self._max_image_dimension,
+                    # Store dimensions before releasing pixmap
+                    pix_width = pixmap.width
+                    pix_height = pixmap.height
+
+                    # Check if resizing needed
+                    if (
+                        pix_width > self._max_image_dimension
+                        or pix_height > self._max_image_dimension
+                    ):
+                        png_bytes = self._resize_image(
+                            png_bytes,
+                            self._max_image_dimension,
+                        )
+
+                    # Encode to base64
+                    base64_data = base64.b64encode(png_bytes).decode("utf-8")
+                    data_uri = f"data:image/png;base64,{base64_data}"
+
+                    page_images.append(
+                        {
+                            "page_number": page_num,
+                            "width": pix_width,
+                            "height": pix_height,
+                            "data_uri": data_uri,
+                            "base64_encoded": base64_data,
+                        }
                     )
-
-                # Encode to base64
-                base64_data = base64.b64encode(png_bytes).decode("utf-8")
-                data_uri = f"data:image/png;base64,{base64_data}"
-
-                page_images.append(
-                    {
-                        "page_number": page_num,
-                        "width": pixmap.width,
-                        "height": pixmap.height,
-                        "data_uri": data_uri,
-                        "base64_encoded": base64_data,
-                    }
-                )
+                finally:
+                    # Release PyMuPDF pixmap native memory
+                    # Pixmaps hold native memory that must be explicitly freed
+                    pixmap = None
 
         return page_images
 
@@ -447,32 +456,40 @@ class PipelineRunner:
                 # Render page to pixmap
                 pixmap = page.get_pixmap(matrix=matrix)
 
-                # Convert to PNG bytes
-                png_bytes = pixmap.tobytes("png")
+                try:
+                    # Convert to PNG bytes
+                    png_bytes = pixmap.tobytes("png")
 
-                # Check if resizing needed
-                if (
-                    pixmap.width > self._max_image_dimension
-                    or pixmap.height > self._max_image_dimension
-                ):
-                    png_bytes = self._resize_image(
-                        png_bytes,
-                        self._max_image_dimension,
+                    # Store dimensions before releasing pixmap
+                    pix_width = pixmap.width
+                    pix_height = pixmap.height
+
+                    # Check if resizing needed
+                    if (
+                        pix_width > self._max_image_dimension
+                        or pix_height > self._max_image_dimension
+                    ):
+                        png_bytes = self._resize_image(
+                            png_bytes,
+                            self._max_image_dimension,
+                        )
+
+                    # Encode to base64
+                    base64_data = base64.b64encode(png_bytes).decode("utf-8")
+                    data_uri = f"data:image/png;base64,{base64_data}"
+
+                    page_images.append(
+                        {
+                            "page_number": page_num,
+                            "width": pix_width,
+                            "height": pix_height,
+                            "data_uri": data_uri,
+                            "base64_encoded": base64_data,
+                        }
                     )
-
-                # Encode to base64
-                base64_data = base64.b64encode(png_bytes).decode("utf-8")
-                data_uri = f"data:image/png;base64,{base64_data}"
-
-                page_images.append(
-                    {
-                        "page_number": page_num,
-                        "width": pixmap.width,
-                        "height": pixmap.height,
-                        "data_uri": data_uri,
-                        "base64_encoded": base64_data,
-                    }
-                )
+                finally:
+                    # Release PyMuPDF pixmap native memory
+                    pixmap = None
 
         return page_images
 
@@ -495,23 +512,29 @@ class PipelineRunner:
             ) from e
 
         img = Image.open(io.BytesIO(png_bytes))
+        img_resized = None
+        try:
+            # Calculate new size maintaining aspect ratio
+            width, height = img.size
+            if width > height:
+                new_width = max_dimension
+                new_height = int(height * max_dimension / width)
+            else:
+                new_height = max_dimension
+                new_width = int(width * max_dimension / height)
 
-        # Calculate new size maintaining aspect ratio
-        width, height = img.size
-        if width > height:
-            new_width = max_dimension
-            new_height = int(height * max_dimension / width)
-        else:
-            new_height = max_dimension
-            new_width = int(width * max_dimension / height)
+            # Resize with high quality
+            img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-        # Resize with high quality
-        img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-
-        # Convert back to bytes
-        output = io.BytesIO()
-        img_resized.save(output, format="PNG", optimize=True)
-        return output.getvalue()
+            # Convert back to bytes
+            output = io.BytesIO()
+            img_resized.save(output, format="PNG", optimize=True)
+            return output.getvalue()
+        finally:
+            # Close PIL images to prevent memory/handle leak
+            if img_resized is not None:
+                img_resized.close()
+            img.close()
 
     def _calculate_file_hash(self, file_path: str) -> str:
         """

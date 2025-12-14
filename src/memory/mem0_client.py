@@ -13,6 +13,8 @@ from typing import Any
 from pathlib import Path
 import json
 import hashlib
+import tempfile
+import threading
 
 from src.config import get_logger, get_settings
 
@@ -126,6 +128,9 @@ class Mem0Client:
         self._memories_file = self._data_dir / "memories.json"
         self._memories: dict[str, MemoryEntry] = {}
 
+        # File access lock for thread safety
+        self._file_lock = threading.RLock()
+
         # Load existing memories
         self._load_memories()
 
@@ -140,29 +145,58 @@ class Mem0Client:
         )
 
     def _load_memories(self) -> None:
-        """Load memories from persistent storage."""
-        if self._memories_file.exists():
-            try:
-                with self._memories_file.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self._memories = {
-                        k: MemoryEntry.from_dict(v)
-                        for k, v in data.items()
-                    }
-                self._logger.debug("memories_loaded", count=len(self._memories))
-            except Exception as e:
-                self._logger.warning("memories_load_failed", error=str(e))
-                self._memories = {}
+        """Load memories from persistent storage with locking."""
+        with self._file_lock:
+            if self._memories_file.exists():
+                try:
+                    with self._memories_file.open("r", encoding="utf-8") as f:
+                        data = json.load(f)
+                        self._memories = {
+                            k: MemoryEntry.from_dict(v)
+                            for k, v in data.items()
+                        }
+                    self._logger.debug("memories_loaded", count=len(self._memories))
+                except Exception as e:
+                    self._logger.warning("memories_load_failed", error=str(e))
+                    self._memories = {}
 
     def _save_memories(self) -> None:
-        """Save memories to persistent storage."""
-        try:
-            data = {k: v.to_dict() for k, v in self._memories.items()}
-            with self._memories_file.open("w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            self._logger.debug("memories_saved", count=len(self._memories))
-        except Exception as e:
-            self._logger.error("memories_save_failed", error=str(e))
+        """
+        Save memories to persistent storage with atomic write.
+
+        Uses atomic write pattern (temp file + rename) to prevent
+        data corruption if crash occurs mid-write. Thread-safe
+        via locking.
+        """
+        with self._file_lock:
+            try:
+                data = {k: v.to_dict() for k, v in self._memories.items()}
+
+                # Atomic write: write to temp file, then rename
+                # This prevents data loss if crash occurs mid-write
+                fd, temp_path = tempfile.mkstemp(
+                    dir=self._data_dir,
+                    prefix=".memories_",
+                    suffix=".tmp"
+                )
+                try:
+                    with open(fd, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                        f.flush()  # Ensure data is written
+
+                    # Atomic rename (on most filesystems)
+                    temp_file = Path(temp_path)
+                    temp_file.replace(self._memories_file)
+                    self._logger.debug("memories_saved", count=len(self._memories))
+                except Exception:
+                    # Clean up temp file on failure
+                    try:
+                        Path(temp_path).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    raise
+            except Exception as e:
+                self._logger.error("memories_save_failed", error=str(e))
 
     def _get_embedder(self):
         """Lazy load the sentence transformer embedder."""

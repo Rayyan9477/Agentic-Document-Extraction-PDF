@@ -339,10 +339,13 @@ class ImageEnhancer:
         # Convert to PIL Image
         pil_image = Image.fromarray(rgb_img)
 
-        # Save to bytes
-        img_buffer = io.BytesIO()
-        pil_image.save(img_buffer, format="PNG", optimize=True)
-        img_bytes = img_buffer.getvalue()
+        # Save to bytes, then close PIL image to prevent leak
+        try:
+            img_buffer = io.BytesIO()
+            pil_image.save(img_buffer, format="PNG", optimize=True)
+            img_bytes = img_buffer.getvalue()
+        finally:
+            pil_image.close()
 
         # Determine orientation
         if img.shape[1] > img.shape[0]:

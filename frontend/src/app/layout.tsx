@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 import { Toaster } from 'react-hot-toast';
+import { PageErrorBoundary } from '@/components/ErrorBoundary';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -37,7 +38,9 @@ export default function RootLayout({
     <html lang="en" className={inter.variable}>
       <body className="min-h-screen bg-surface-50 font-sans antialiased">
         <Providers>
-          {children}
+          <PageErrorBoundary>
+            {children}
+          </PageErrorBoundary>
           <Toaster
             position="top-right"
             toastOptions={{

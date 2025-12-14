@@ -152,6 +152,9 @@ class ValidatorAgent(BaseAgent):
         Returns:
             Updated state with validation results and routing decision.
         """
+        # Reset metrics to prevent accumulation across documents
+        self.reset_metrics()
+
         start_time = self.log_operation_start(
             "validation",
             processing_id=state.get("processing_id", ""),
@@ -603,12 +606,23 @@ class ValidatorAgent(BaseAgent):
                 else target_data
             )
 
-            passed = self._evaluate_rule(rule, source_value, target_value)
+            passed, status = self._evaluate_rule(rule, source_value, target_value)
+
+            # Determine message based on status
+            if status == "skipped":
+                message = f"Skipped: missing value(s) for {rule.source_field}/{rule.target_field}"
+            elif status == "inconclusive":
+                message = "Validation inconclusive due to missing data"
+            elif not passed:
+                message = rule.get_error_message()
+            else:
+                message = "OK"
 
             results.append({
                 "rule": f"{rule.source_field} {rule.operator.value} {rule.target_field}",
                 "passed": passed,
-                "message": rule.get_error_message() if not passed else "OK",
+                "status": status,  # "passed", "failed", "skipped", "inconclusive"
+                "message": message,
                 "source_value": source_value,
                 "target_value": target_value,
             })
@@ -620,7 +634,7 @@ class ValidatorAgent(BaseAgent):
         rule: CrossFieldRule,
         source_value: Any,
         target_value: Any,
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """
         Evaluate a single cross-field rule.
 
@@ -630,66 +644,98 @@ class ValidatorAgent(BaseAgent):
             target_value: Value of target field.
 
         Returns:
-            True if rule passes, False otherwise.
+            Tuple of (passed: bool, status: str).
+            Status can be: "passed", "failed", "skipped", "inconclusive"
         """
-        # Skip if either value is None
+        # Handle REQUIRES operators specially - they check for presence
+        if rule.operator == RuleOperator.REQUIRES:
+            # If source has value, target must also have value
+            if source_value is None:
+                # Source is missing, so requirement doesn't apply
+                return (True, "skipped")
+            if target_value is None:
+                # Source present but target missing - FAIL
+                return (False, "failed")
+            return (True, "passed")
+
+        if rule.operator == RuleOperator.REQUIRES_IF:
+            # If source matches rule.value, target must have value
+            if source_value is None:
+                return (True, "skipped")
+            if source_value == rule.value:
+                if target_value is None:
+                    return (False, "failed")
+                return (True, "passed")
+            return (True, "passed")
+
+        # For other operators, handle missing values
+        if source_value is None and target_value is None:
+            # Both missing - skip validation but flag as inconclusive
+            return (True, "skipped")
+
         if source_value is None or target_value is None:
-            return True  # Can't validate if values missing
+            # One value missing - mark as inconclusive (not a pass!)
+            # This prevents masking extraction failures
+            return (False, "inconclusive")
 
         try:
             if rule.operator == RuleOperator.EQUALS:
-                return source_value == target_value
+                result = source_value == target_value
+                return (result, "passed" if result else "failed")
 
             elif rule.operator == RuleOperator.NOT_EQUALS:
-                return source_value != target_value
+                result = source_value != target_value
+                return (result, "passed" if result else "failed")
 
             elif rule.operator == RuleOperator.GREATER_THAN:
-                return float(source_value) > float(target_value)
+                result = float(source_value) > float(target_value)
+                return (result, "passed" if result else "failed")
 
             elif rule.operator == RuleOperator.LESS_THAN:
-                return float(source_value) < float(target_value)
+                result = float(source_value) < float(target_value)
+                return (result, "passed" if result else "failed")
 
             elif rule.operator == RuleOperator.GREATER_EQUAL:
-                return float(source_value) >= float(target_value)
+                result = float(source_value) >= float(target_value)
+                return (result, "passed" if result else "failed")
 
             elif rule.operator == RuleOperator.LESS_EQUAL:
-                return float(source_value) <= float(target_value)
+                result = float(source_value) <= float(target_value)
+                return (result, "passed" if result else "failed")
 
             elif rule.operator == RuleOperator.DATE_BEFORE:
                 from src.utils.date_utils import parse_date
                 source_date = parse_date(str(source_value))
                 target_date = parse_date(str(target_value))
                 if source_date and target_date:
-                    return source_date < target_date
-                return True  # Can't validate if parsing fails
+                    result = source_date < target_date
+                    return (result, "passed" if result else "failed")
+                return (False, "inconclusive")  # Can't validate if parsing fails
 
             elif rule.operator == RuleOperator.DATE_AFTER:
                 from src.utils.date_utils import parse_date
                 source_date = parse_date(str(source_value))
                 target_date = parse_date(str(target_value))
                 if source_date and target_date:
-                    return source_date > target_date
-                return True
-
-            elif rule.operator == RuleOperator.REQUIRES:
-                # If source has value, target must also have value
-                return target_value is not None
-
-            elif rule.operator == RuleOperator.REQUIRES_IF:
-                # If source matches rule.value, target must have value
-                if source_value == rule.value:
-                    return target_value is not None
-                return True
+                    result = source_date > target_date
+                    return (result, "passed" if result else "failed")
+                return (False, "inconclusive")
 
             elif rule.operator == RuleOperator.SUM_EQUALS:
                 # Source is list of fields, target is expected sum
-                # This would need special handling
-                return True
+                # TODO: Implement proper sum validation
+                return (True, "skipped")
 
-        except (ValueError, TypeError):
-            return True  # Can't validate if conversion fails
+        except (ValueError, TypeError) as e:
+            # Conversion failed - mark as inconclusive
+            self._logger.warning(
+                "rule_evaluation_error",
+                rule=str(rule.operator.value),
+                error=str(e),
+            )
+            return (False, "inconclusive")
 
-        return True
+        return (True, "skipped")
 
     def _check_repetitive_values(
         self,

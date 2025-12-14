@@ -11,10 +11,22 @@ from fastapi import APIRouter, HTTPException, Request
 
 from src.api.models import SchemaInfo, SchemaListResponse
 from src.config import get_logger
+from src.security.path_validator import (
+    SecurePathValidator,
+    PathTraversalError,
+    PathValidationError,
+)
 
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+# SECURITY: Initialize path validator for PDF paths
+_pdf_validator = SecurePathValidator(
+    allowed_extensions=[".pdf"],
+    allow_absolute_paths=True,
+    resolve_symlinks=True,
+)
 
 
 def _get_schema_info(schema_name: str, schema_def: dict[str, Any]) -> SchemaInfo:
@@ -258,7 +270,27 @@ async def detect_schema(
 
     from pathlib import Path
 
-    if not Path(pdf_path).exists():
+    # SECURITY: Validate path for traversal attacks before any file operations
+    try:
+        validated_path = _pdf_validator.validate(pdf_path)
+    except PathTraversalError as e:
+        logger.warning(
+            "detect_schema_path_traversal",
+            request_id=request_id,
+            path=pdf_path[:100],  # Truncate for safe logging
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file path",  # Generic message to prevent info disclosure
+        )
+    except PathValidationError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file path: {e}",
+        )
+
+    if not validated_path.exists():
         raise HTTPException(
             status_code=404,
             detail=f"PDF file not found: {pdf_path}",
@@ -268,10 +300,10 @@ async def detect_schema(
         from src.agents.classifier import DocumentClassifier
 
         classifier = DocumentClassifier()
-        result = classifier.classify(pdf_path)
+        result = classifier.classify(str(validated_path))
 
         return {
-            "pdf_path": pdf_path,
+            "pdf_path": str(validated_path),
             "detected_type": result.get("document_type", "unknown"),
             "confidence": result.get("confidence", 0.0),
             "suggested_schema": result.get("suggested_schema"),
@@ -282,7 +314,7 @@ async def detect_schema(
         logger.error(
             "detect_schema_error",
             request_id=request_id,
-            pdf_path=pdf_path,
+            pdf_path=str(validated_path),
             error=str(e),
         )
         raise HTTPException(

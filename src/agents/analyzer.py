@@ -93,6 +93,9 @@ class AnalyzerAgent(BaseAgent):
         Returns:
             Updated state with analysis results.
         """
+        # Reset metrics to prevent accumulation across documents
+        self.reset_metrics()
+
         start_time = self.log_operation_start(
             "document_analysis",
             processing_id=state.get("processing_id", ""),

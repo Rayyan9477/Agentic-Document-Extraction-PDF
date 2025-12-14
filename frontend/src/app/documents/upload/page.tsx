@@ -10,7 +10,7 @@ import { AppLayout } from '@/components/layout';
 import { FileUploader, UploadOptions } from '@/components/documents';
 import type { UploadFile } from '@/components/documents';
 import { Card, CardHeader, CardContent, Button, StepProgress } from '@/components/ui';
-import { documentsApi, schemaApi } from '@/lib/api';
+import { documentsApi, schemasApi } from '@/lib/api';
 import { generateId } from '@/lib/utils';
 import type { ExportFormat, ProcessingPriority } from '@/types/api';
 
@@ -36,7 +36,7 @@ export default function DocumentUploadPage() {
   // Fetch available schemas
   const { data: schemas = [] } = useQuery({
     queryKey: ['schemas'],
-    queryFn: () => schemaApi.list(),
+    queryFn: () => schemasApi.list(),
   });
 
   // Upload mutation
@@ -88,20 +88,30 @@ export default function DocumentUploadPage() {
   const handleUpload = async () => {
     setCurrentStep(2);
 
-    for (const file of files.filter((f) => f.status === 'pending')) {
+    // Track uploaded count for step progression
+    const pendingFiles = files.filter((f) => f.status === 'pending');
+    let successCount = files.filter((f) => f.status === 'success').length;
+    const totalFiles = files.length;
+
+    for (const file of pendingFiles) {
       setFiles((prev) =>
         prev.map((f) =>
           f.id === file.id ? { ...f, status: 'uploading', progress: 30 } : f
         )
       );
-      await uploadMutation.mutateAsync(file);
+
+      try {
+        await uploadMutation.mutateAsync(file);
+        successCount++;
+      } catch {
+        // Error is handled in onError callback
+        // Don't count as success
+      }
     }
 
-    // Check if all files are successfully uploaded
-    const allSuccess = files.every(
-      (f) => f.status === 'success' || f.status === 'uploading'
-    );
-    if (allSuccess) {
+    // Move to completion step only when ALL files have succeeded
+    // NOTE: This check uses tracked counts since React state is async
+    if (successCount === totalFiles && totalFiles > 0) {
       setCurrentStep(3);
     }
   };

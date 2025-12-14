@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { ProtectedRoute } from '@/components/auth';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import Header from './Header';
 import Sidebar from './Sidebar';
 import Footer from './Footer';
@@ -46,7 +47,9 @@ const AppLayout: React.FC<AppLayoutProps> = ({
         {/* Page Content */}
         <main className="flex-1 overflow-auto">
           <div className="container mx-auto p-4 lg:p-6">
-            {children}
+            <ErrorBoundary>
+              {children}
+            </ErrorBoundary>
           </div>
         </main>
 

@@ -88,6 +88,9 @@ class ExtractorAgent(BaseAgent):
         Returns:
             Updated state with extraction results.
         """
+        # Reset metrics to prevent accumulation across documents
+        self.reset_metrics()
+
         start_time = self.log_operation_start(
             "dual_pass_extraction",
             processing_id=state.get("processing_id", ""),
@@ -541,6 +544,9 @@ class ExtractorAgent(BaseAgent):
         """
         Merge extractions from multiple pages into final result.
 
+        For LIST/TABLE fields: Merges values across pages into arrays.
+        For scalar fields: Keeps value with highest confidence.
+
         Args:
             page_extractions: List of serialized PageExtraction dicts.
             schema: Document schema.
@@ -548,7 +554,20 @@ class ExtractorAgent(BaseAgent):
         Returns:
             Merged extraction dictionary.
         """
+        from src.schemas.field_types import FieldType
+
         merged: dict[str, Any] = {}
+
+        # Build field type lookup from schema
+        field_types: dict[str, FieldType] = {}
+        if schema and hasattr(schema, "fields"):
+            for field_def in schema.fields:
+                field_types[field_def.name] = field_def.field_type
+
+        def is_mergeable_type(field_name: str) -> bool:
+            """Check if field should merge values instead of overwrite."""
+            field_type = field_types.get(field_name)
+            return field_type in (FieldType.LIST, FieldType.TABLE)
 
         # For single-page documents, use page 1 directly
         if len(page_extractions) == 1:
@@ -561,27 +580,65 @@ class ExtractorAgent(BaseAgent):
                 }
             return merged
 
-        # For multi-page, merge based on confidence
+        # For multi-page documents, apply intelligent merging
         for page in page_extractions:
+            page_number = page.get("page_number", 1)
             for field_name, field_data in page.get("merged_fields", {}).items():
                 current_value = field_data.get("value")
                 current_confidence = field_data.get("confidence", 0.0)
 
                 if field_name not in merged:
-                    merged[field_name] = {
-                        "value": current_value,
-                        "confidence": current_confidence,
-                        "source_page": page.get("page_number", 1),
-                    }
-                else:
-                    # Keep value with higher confidence
-                    existing_confidence = merged[field_name].get("confidence", 0.0)
-                    if current_confidence > existing_confidence and current_value is not None:
+                    # First occurrence - initialize
+                    if is_mergeable_type(field_name):
+                        # For list/table types, wrap in list if not already
+                        value_list = current_value if isinstance(current_value, list) else [current_value]
+                        merged[field_name] = {
+                            "value": value_list,
+                            "confidence": current_confidence,
+                            "source_pages": [page_number],
+                        }
+                    else:
                         merged[field_name] = {
                             "value": current_value,
                             "confidence": current_confidence,
-                            "source_page": page.get("page_number", 1),
+                            "source_page": page_number,
                         }
+                else:
+                    # Field exists - merge or overwrite based on type
+                    if is_mergeable_type(field_name):
+                        # Merge list/table values
+                        existing_value = merged[field_name].get("value", [])
+                        if not isinstance(existing_value, list):
+                            existing_value = [existing_value]
+
+                        if current_value is not None:
+                            if isinstance(current_value, list):
+                                existing_value.extend(current_value)
+                            else:
+                                existing_value.append(current_value)
+
+                        # Average confidence for merged values
+                        existing_confidence = merged[field_name].get("confidence", 0.0)
+                        avg_confidence = (existing_confidence + current_confidence) / 2
+
+                        source_pages = merged[field_name].get("source_pages", [])
+                        if page_number not in source_pages:
+                            source_pages.append(page_number)
+
+                        merged[field_name] = {
+                            "value": existing_value,
+                            "confidence": avg_confidence,
+                            "source_pages": source_pages,
+                        }
+                    else:
+                        # For scalar types, keep value with higher confidence
+                        existing_confidence = merged[field_name].get("confidence", 0.0)
+                        if current_confidence > existing_confidence and current_value is not None:
+                            merged[field_name] = {
+                                "value": current_value,
+                                "confidence": current_confidence,
+                                "source_page": page_number,
+                            }
 
         return merged
 

@@ -164,8 +164,21 @@ class OrchestratorAgent(BaseAgent):
                     "Install with: pip install langgraph-checkpoint-sqlite"
                 ) from e
 
-            db_path = self._sqlite_path or ":memory:"
-            self._logger.info("using_sqlite_checkpointer", path=str(db_path))
+            if self._sqlite_path:
+                db_path = self._sqlite_path
+                self._logger.info("using_sqlite_checkpointer", path=str(db_path))
+            else:
+                # IMPORTANT: Warn about non-persistent storage
+                # In-memory SQLite won't survive process restarts
+                db_path = ":memory:"
+                self._logger.warning(
+                    "sqlite_checkpointer_using_memory",
+                    message=(
+                        "No sqlite_path provided - using in-memory database. "
+                        "Checkpoints will NOT persist across restarts. "
+                        "Set sqlite_path for persistent checkpointing."
+                    ),
+                )
             return SqliteSaver.from_conn_string(str(db_path))
 
         elif self._checkpointer_type == CheckpointerType.POSTGRES:
@@ -207,6 +220,9 @@ class OrchestratorAgent(BaseAgent):
         Returns:
             Updated state after orchestration decisions.
         """
+        # Reset metrics to prevent accumulation across documents
+        self.reset_metrics()
+
         start_time = self.log_operation_start(
             "orchestration",
             processing_id=state.get("processing_id", ""),
@@ -248,6 +264,9 @@ class OrchestratorAgent(BaseAgent):
         """
         Make routing decision based on validation results.
 
+        NOTE: This method delegates to _determine_route() for routing logic
+        to ensure single source of truth. Only this method should modify state.
+
         Args:
             state: Current extraction state with validation results.
 
@@ -265,31 +284,31 @@ class OrchestratorAgent(BaseAgent):
             retry_count=retry_count,
         )
 
-        if confidence_level == ConfidenceLevel.HIGH.value:
-            # Auto-accept high confidence results
-            return complete_extraction(state)
+        # Use centralized routing logic - single source of truth
+        route = self._determine_route(state)
 
-        elif confidence_level == ConfidenceLevel.MEDIUM.value:
-            # Medium confidence - retry if attempts remaining
-            if retry_count < self._max_retries:
-                return request_retry(state, "Medium confidence extraction - retrying")
-            else:
-                # Max retries reached, complete with warning
+        if route == ROUTE_COMPLETE:
+            # Add warning for medium confidence completions at max retries
+            if confidence_level == ConfidenceLevel.MEDIUM.value and retry_count >= self._max_retries:
                 state = add_warning(
                     state,
                     f"Medium confidence ({overall_confidence:.2f}) after {retry_count} retries",
                 )
-                return complete_extraction(state)
+            return complete_extraction(state)
 
-        else:  # LOW confidence
-            # Low confidence - retry once, then human review
-            if retry_count < 1:
-                return request_retry(state, "Low confidence extraction - retrying")
-            else:
-                return request_human_review(
-                    state,
-                    f"Low confidence ({overall_confidence:.2f}) requires human review",
-                )
+        elif route == ROUTE_RETRY:
+            reason = (
+                f"{confidence_level} confidence extraction - retrying"
+                if confidence_level != ConfidenceLevel.HIGH.value
+                else "Extraction retry requested"
+            )
+            return request_retry(state, reason)
+
+        else:  # ROUTE_HUMAN_REVIEW
+            return request_human_review(
+                state,
+                f"Low confidence ({overall_confidence:.2f}) requires human review",
+            )
 
     def _handle_failure(self, state: ExtractionState) -> ExtractionState:
         """
