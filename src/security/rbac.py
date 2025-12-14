@@ -9,18 +9,22 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum, auto
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, ClassVar, TypeVar
 
 import structlog
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
 
 logger = structlog.get_logger(__name__)
+
+# Thread lock for singleton pattern (module-level for proper initialization)
+_rbac_singleton_lock = threading.Lock()
 
 
 class Permission(str, Enum):
@@ -876,9 +880,12 @@ class RBACManager:
 
     Provides unified access to authentication, authorization,
     and token management.
+
+    Thread-safe singleton pattern implementation using double-checked locking.
     """
 
-    _instance: RBACManager | None = None
+    _instance: ClassVar[RBACManager | None] = None
+    _initialized: bool = False
 
     def __init__(
         self,
@@ -900,6 +907,10 @@ class RBACManager:
             user_storage_path: Path to user storage file (for testing isolation).
             revocation_storage_path: Path to revoked tokens file (for testing isolation).
         """
+        # Prevent re-initialization if already initialized via singleton
+        if self._initialized:
+            return
+
         self._token_manager = TokenManager(
             secret_key=secret_key,
             algorithm=algorithm,
@@ -909,6 +920,7 @@ class RBACManager:
         )
         self._user_store = UserStore(storage_path=user_storage_path)
         self._password_manager = PasswordManager()
+        self._initialized = True
 
     @classmethod
     def get_instance(
@@ -916,17 +928,49 @@ class RBACManager:
         secret_key: str | None = None,
         **kwargs: Any,
     ) -> RBACManager:
-        """Get or create singleton instance."""
-        if cls._instance is None:
-            if secret_key is None:
-                raise ValueError("secret_key is required for first initialization")
-            cls._instance = cls(secret_key, **kwargs)
+        """
+        Get or create singleton instance using thread-safe double-checked locking.
+
+        This implementation is safe for concurrent access from multiple threads,
+        which is important for FastAPI with multiple worker threads.
+
+        Args:
+            secret_key: Secret key for JWT signing (required for first initialization).
+            **kwargs: Additional arguments passed to __init__.
+
+        Returns:
+            The singleton RBACManager instance.
+
+        Raises:
+            ValueError: If secret_key is not provided on first initialization.
+        """
+        # First check without lock (fast path)
+        if cls._instance is not None:
+            return cls._instance
+
+        # Acquire lock for initialization
+        with _rbac_singleton_lock:
+            # Double-check after acquiring lock
+            if cls._instance is None:
+                if secret_key is None:
+                    raise ValueError("secret_key is required for first initialization")
+                cls._instance = cls(secret_key, **kwargs)
+                logger.info("rbac_manager_initialized", thread_safe=True)
+
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Reset singleton instance (for testing)."""
-        cls._instance = None
+        """
+        Reset singleton instance (for testing only).
+
+        Thread-safe reset of the singleton instance.
+        """
+        with _rbac_singleton_lock:
+            if cls._instance is not None:
+                cls._instance._initialized = False
+            cls._instance = None
+            logger.debug("rbac_manager_reset")
 
     @property
     def users(self) -> UserStore:

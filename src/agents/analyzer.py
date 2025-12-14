@@ -262,28 +262,97 @@ class AnalyzerAgent(BaseAgent):
 
     def _analyze_structure(self, image_data: str) -> dict[str, Any]:
         """
-        Analyze document structure.
+        Analyze document structure using VLM.
 
-        Note: This uses the same VLM call as classification for efficiency.
-        In production, this could be a separate call for more detailed analysis.
+        Detects structural elements in the document including:
+        - Tables and their locations
+        - Form fields and checkboxes
+        - Handwritten vs printed text
+        - Signature areas
+        - Headers/footers
+        - Barcodes/QR codes
 
         Args:
             image_data: Base64-encoded image or data URI.
 
         Returns:
-            Structure analysis result.
+            Structure analysis result with detected elements.
         """
-        # For efficiency, we perform a simplified structure analysis
-        # The full structure analysis prompt is available if needed
+        self._logger.debug("analyzing_document_structure")
 
-        # Default structure analysis based on common patterns
-        return {
-            "structures": ["form_fields", "text_blocks"],
-            "has_tables": True,  # Most medical forms have tables
-            "has_handwriting": False,  # Default, can be refined
-            "has_signatures": True,  # Most forms have signature areas
-            "regions_of_interest": [],
-        }
+        system_prompt = build_grounded_system_prompt(
+            additional_context=(
+                "You are analyzing the visual structure of a document. "
+                "Focus on identifying structural elements like tables, form fields, "
+                "handwritten areas, signatures, and regions of interest. "
+                "Be precise about what you can see."
+            ),
+            include_forbidden=False,
+            include_confidence_scale=False,
+        )
+
+        structure_prompt = build_structure_analysis_prompt()
+
+        try:
+            result = self.send_vision_request_with_json(
+                image_data=image_data,
+                prompt=structure_prompt,
+                system_prompt=system_prompt,
+                temperature=0.1,
+            )
+
+            # Normalize and validate the result
+            structures = result.get("structures", [])
+            if not isinstance(structures, list):
+                structures = []
+
+            # Ensure boolean values
+            has_tables = bool(result.get("has_tables", False))
+            has_handwriting = bool(result.get("has_handwriting", False))
+            has_signatures = bool(result.get("has_signatures", False))
+            has_barcodes = bool(result.get("has_barcodes", False))
+
+            # Get regions of interest with validation
+            regions = result.get("regions_of_interest", [])
+            if not isinstance(regions, list):
+                regions = []
+
+            # Get table count if available
+            table_count = result.get("table_count", 1 if has_tables else 0)
+            if not isinstance(table_count, int):
+                table_count = 0
+
+            return {
+                "structures": structures,
+                "has_tables": has_tables,
+                "table_count": table_count,
+                "has_handwriting": has_handwriting,
+                "has_signatures": has_signatures,
+                "has_barcodes": has_barcodes,
+                "regions_of_interest": regions,
+                "detected_fields": result.get("detected_fields", []),
+                "layout_type": result.get("layout_type", "form"),  # form, letter, report
+                "text_density": result.get("text_density", "medium"),  # low, medium, high
+            }
+
+        except Exception as e:
+            self._logger.warning(
+                "structure_analysis_fallback",
+                error=str(e),
+            )
+            # Return conservative defaults on failure
+            return {
+                "structures": ["form_fields", "text_blocks"],
+                "has_tables": True,
+                "table_count": 1,
+                "has_handwriting": False,
+                "has_signatures": False,
+                "has_barcodes": False,
+                "regions_of_interest": [],
+                "detected_fields": [],
+                "layout_type": "form",
+                "text_density": "medium",
+            }
 
     def _analyze_page_relationships(
         self,

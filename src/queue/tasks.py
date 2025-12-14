@@ -359,6 +359,14 @@ def process_document_task(
         return result.to_dict()
 
 
+# Default timeout per document for result collection (seconds)
+DEFAULT_RESULT_TIMEOUT_PER_DOC = 30
+# Minimum timeout for batch result collection
+MIN_BATCH_RESULT_TIMEOUT = 60
+# Maximum timeout for batch result collection
+MAX_BATCH_RESULT_TIMEOUT = 3600  # 1 hour
+
+
 @celery_app.task(
     bind=True,
     base=DocumentProcessingTask,
@@ -373,6 +381,7 @@ def batch_process_task(
     export_format: str = "json",
     mask_phi: bool = False,
     stop_on_error: bool = False,
+    result_timeout: int | None = None,
 ) -> dict[str, Any]:
     """
     Process multiple documents in batch.
@@ -385,6 +394,9 @@ def batch_process_task(
         export_format: Export format (json/excel/both).
         mask_phi: Whether to mask PHI fields.
         stop_on_error: Stop processing on first error.
+        result_timeout: Timeout in seconds for collecting each result.
+                        If not provided, calculated based on batch size
+                        (30 seconds per document, min 60s, max 3600s).
 
     Returns:
         Batch processing result with individual task results.
@@ -436,11 +448,28 @@ def batch_process_task(
         import time
         time.sleep(1)  # Check every second
 
+    # Calculate result collection timeout if not provided
+    if result_timeout is None:
+        # Scale timeout based on batch size: 30 seconds per document
+        calculated_timeout = len(pdf_paths) * DEFAULT_RESULT_TIMEOUT_PER_DOC
+        # Apply min/max bounds
+        result_timeout = max(
+            MIN_BATCH_RESULT_TIMEOUT,
+            min(calculated_timeout, MAX_BATCH_RESULT_TIMEOUT)
+        )
+
+    logger.debug(
+        "batch_result_collection_start",
+        task_id=task_id,
+        result_timeout=result_timeout,
+        document_count=len(pdf_paths),
+    )
+
     # Collect results
     for idx, (pdf_path, async_result) in enumerate(zip(pdf_paths, async_results.results)):
         try:
             if async_result.successful():
-                doc_result = async_result.get(timeout=5)
+                doc_result = async_result.get(timeout=result_timeout)
                 results.append(doc_result)
 
                 if doc_result.get("status") == TaskStatus.COMPLETED.value:
@@ -507,6 +536,10 @@ def reprocess_failed_task(
     """
     Reprocess a previously failed document.
 
+    This task performs the reprocessing inline rather than delegating to another
+    task to avoid blocking worker threads. The processing logic is identical to
+    process_document_task but with reprocessing metadata.
+
     Args:
         self: Task instance (bound).
         original_task_id: Original failed task ID.
@@ -517,9 +550,10 @@ def reprocess_failed_task(
         mask_phi: Whether to mask PHI fields.
 
     Returns:
-        TaskResult as dictionary.
+        TaskResult as dictionary with reprocessing metadata.
     """
     task_id = self.request.id or "unknown"
+    started_at = datetime.now(timezone.utc)
 
     logger.info(
         "reprocess_task_start",
@@ -528,29 +562,166 @@ def reprocess_failed_task(
         pdf_path=pdf_path,
     )
 
-    # Use the main processing task
-    result = process_document_task.apply(
-        args=[pdf_path],
-        kwargs={
-            "output_dir": output_dir,
-            "schema_name": schema_name,
-            "export_format": export_format,
-            "mask_phi": mask_phi,
-        },
-    ).get()
-
-    # Add reprocessing metadata
-    result["original_task_id"] = original_task_id
-    result["reprocess_task_id"] = task_id
-
-    logger.info(
-        "reprocess_task_complete",
+    result = TaskResult(
         task_id=task_id,
-        original_task_id=original_task_id,
-        status=result.get("status"),
+        processing_id="",
+        status=TaskStatus.STARTED,
+        pdf_path=pdf_path,
+        started_at=started_at.isoformat(),
+        retry_count=self.request.retries or 0,
     )
 
-    return result
+    try:
+        # Validate input file
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        if not pdf_file.suffix.lower() == ".pdf":
+            raise ValueError(f"Invalid file type: {pdf_file.suffix}")
+
+        _update_task_state("PROCESSING", {"status": TaskStatus.PROCESSING.value})
+
+        # Import pipeline here to avoid circular imports
+        from src.pipeline.runner import PipelineRunner
+
+        # Run the extraction pipeline
+        runner = PipelineRunner(enable_checkpointing=False)
+        pipeline_result = runner.extract_from_pdf(
+            pdf_path=pdf_path,
+            custom_schema=None,
+        )
+
+        # Validate pipeline result
+        if pipeline_result is None:
+            raise RuntimeError("Pipeline returned no result")
+
+        result.processing_id = pipeline_result.get("processing_id", "")
+        result.status = TaskStatus.VALIDATING
+
+        _update_task_state("VALIDATING", {"status": TaskStatus.VALIDATING.value})
+
+        # Handle export
+        result.status = TaskStatus.EXPORTING
+        _update_task_state("EXPORTING", {"status": TaskStatus.EXPORTING.value})
+
+        output_path = ""
+        if output_dir:
+            output_base = Path(output_dir) / result.processing_id
+
+            if export_format in ("json", "both"):
+                from src.export import export_to_json, ExportFormat
+
+                json_path = output_base.with_suffix(".json")
+                export_to_json(
+                    pipeline_result,
+                    output_path=json_path,
+                    format=ExportFormat.DETAILED,
+                    include_metadata=True,
+                    include_confidence=True,
+                )
+                output_path = str(json_path)
+
+            if export_format in ("excel", "both"):
+                from src.export import export_to_excel
+
+                excel_path = output_base.with_suffix(".xlsx")
+                export_to_excel(
+                    pipeline_result,
+                    output_path=excel_path,
+                    mask_phi=mask_phi,
+                )
+                if export_format == "excel":
+                    output_path = str(excel_path)
+                else:
+                    output_path = f"{json_path}; {excel_path}"
+
+        # Build final result
+        completed_at = datetime.now(timezone.utc)
+        duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+
+        result.status = TaskStatus.COMPLETED
+        result.output_path = output_path
+        result.completed_at = completed_at.isoformat()
+        result.duration_ms = duration_ms
+        result.field_count = len(pipeline_result.get("merged_extraction", {}))
+        result.overall_confidence = pipeline_result.get("overall_confidence", 0.0)
+        result.requires_human_review = pipeline_result.get("requires_human_review", False)
+        result.human_review_reason = pipeline_result.get("human_review_reason", "")
+        result.warnings = pipeline_result.get("warnings", [])
+
+        # Convert to dict and add reprocessing metadata
+        result_dict = result.to_dict()
+        result_dict["original_task_id"] = original_task_id
+        result_dict["reprocess_task_id"] = task_id
+        result_dict["is_reprocess"] = True
+
+        logger.info(
+            "reprocess_task_complete",
+            task_id=task_id,
+            original_task_id=original_task_id,
+            processing_id=result.processing_id,
+            duration_ms=duration_ms,
+            field_count=result.field_count,
+        )
+
+        return result_dict
+
+    except SoftTimeLimitExceeded:
+        result.status = TaskStatus.FAILED
+        result.errors = ["Reprocess task exceeded time limit"]
+        result.completed_at = datetime.now(timezone.utc).isoformat()
+        logger.error("reprocess_task_timeout", task_id=task_id, original_task_id=original_task_id)
+        result_dict = result.to_dict()
+        result_dict["original_task_id"] = original_task_id
+        result_dict["reprocess_task_id"] = task_id
+        result_dict["is_reprocess"] = True
+        return result_dict
+
+    except MaxRetriesExceededError:
+        result.status = TaskStatus.FAILED
+        result.errors = ["Reprocess maximum retries exceeded"]
+        result.completed_at = datetime.now(timezone.utc).isoformat()
+        logger.error("reprocess_task_max_retries", task_id=task_id, original_task_id=original_task_id)
+        result_dict = result.to_dict()
+        result_dict["original_task_id"] = original_task_id
+        result_dict["reprocess_task_id"] = task_id
+        result_dict["is_reprocess"] = True
+        return result_dict
+
+    except FileNotFoundError as e:
+        result.status = TaskStatus.FAILED
+        result.errors = [str(e)]
+        result.completed_at = datetime.now(timezone.utc).isoformat()
+        logger.error("reprocess_task_file_not_found", task_id=task_id, original_task_id=original_task_id, error=str(e))
+        result_dict = result.to_dict()
+        result_dict["original_task_id"] = original_task_id
+        result_dict["reprocess_task_id"] = task_id
+        result_dict["is_reprocess"] = True
+        return result_dict
+
+    except Exception as e:
+        # Attempt retry for transient errors
+        if self.request.retries < self.max_retries:
+            result.status = TaskStatus.RETRYING
+            logger.warning(
+                "reprocess_task_retrying",
+                task_id=task_id,
+                original_task_id=original_task_id,
+                error=str(e),
+                retry_count=self.request.retries,
+            )
+            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+        result.status = TaskStatus.FAILED
+        result.errors = [str(e)]
+        result.completed_at = datetime.now(timezone.utc).isoformat()
+        logger.error("reprocess_task_error", task_id=task_id, original_task_id=original_task_id, error=str(e))
+        result_dict = result.to_dict()
+        result_dict["original_task_id"] = original_task_id
+        result_dict["reprocess_task_id"] = task_id
+        result_dict["is_reprocess"] = True
+        return result_dict
 
 
 def get_task_status(task_id: str) -> dict[str, Any]:

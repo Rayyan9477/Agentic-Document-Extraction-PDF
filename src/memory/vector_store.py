@@ -195,7 +195,29 @@ class VectorStoreManager:
             try:
                 with self._simple_file.open("r") as f:
                     self._store = json.load(f)
-            except Exception:
+            except json.JSONDecodeError as e:
+                self._logger.warning(
+                    "simple_store_load_failed",
+                    error=str(e),
+                    file=str(self._simple_file),
+                    reason="Invalid JSON format",
+                )
+                self._store = []
+            except (OSError, IOError) as e:
+                self._logger.warning(
+                    "simple_store_load_failed",
+                    error=str(e),
+                    file=str(self._simple_file),
+                    reason="File read error",
+                )
+                self._store = []
+            except Exception as e:
+                self._logger.error(
+                    "simple_store_load_unexpected_error",
+                    error=str(e),
+                    error_type=type(e).__name__,
+                    file=str(self._simple_file),
+                )
                 self._store = []
 
         self._logger.info("simple_store_initialized")

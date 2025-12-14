@@ -19,7 +19,9 @@
       "Bash(test:*)",
       "Bash(timeout:*)",
       "Bash(cat:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(file:*)",
+      "Bash(grep:*)"
     ],
     "deny": [],
     "ask": []

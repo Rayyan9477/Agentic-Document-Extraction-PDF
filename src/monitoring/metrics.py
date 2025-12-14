@@ -877,6 +877,49 @@ class MetricsCollector:
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+# Decorator-specific Prometheus metrics (lazily initialized)
+_decorator_duration_histogram: Histogram | None = None
+_decorator_calls_counter: Counter | None = None
+_decorator_errors_counter: Counter | None = None
+
+
+def _get_decorator_duration_histogram() -> Histogram:
+    """Get or create the decorator duration histogram."""
+    global _decorator_duration_histogram
+    if _decorator_duration_histogram is None:
+        _decorator_duration_histogram = Histogram(
+            "function_duration_seconds",
+            "Function execution duration in seconds (via @track_duration decorator)",
+            ["metric_name", "function_name", "module"],
+            buckets=DURATION_BUCKETS,
+        )
+    return _decorator_duration_histogram
+
+
+def _get_decorator_calls_counter() -> Counter:
+    """Get or create the decorator calls counter."""
+    global _decorator_calls_counter
+    if _decorator_calls_counter is None:
+        _decorator_calls_counter = Counter(
+            "function_calls_total",
+            "Total function calls (via @count_calls decorator)",
+            ["metric_name", "function_name", "module", "status"],
+        )
+    return _decorator_calls_counter
+
+
+def _get_decorator_errors_counter() -> Counter:
+    """Get or create the decorator errors counter."""
+    global _decorator_errors_counter
+    if _decorator_errors_counter is None:
+        _decorator_errors_counter = Counter(
+            "function_errors_total",
+            "Total function errors (via decorators)",
+            ["metric_name", "function_name", "module", "error_type"],
+        )
+    return _decorator_errors_counter
+
+
 def track_duration(
     metric_name: str,
     labels: dict[str, str] | None = None,
@@ -884,26 +927,64 @@ def track_duration(
     """
     Decorator to track function duration.
 
+    Records duration to Prometheus histogram and logs debug info.
+
     Args:
         metric_name: Name of the duration metric.
         labels: Static labels to apply.
 
     Returns:
         Decorated function.
+
+    Example:
+        @track_duration("extraction_validate")
+        def validate_document(doc_id: str) -> bool:
+            ...
     """
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
+            histogram = _get_decorator_duration_histogram()
+            error_counter = _get_decorator_errors_counter()
+            module_name = func.__module__ or "unknown"
+
             start_time = time.time()
+            error_occurred = False
+            error_type = ""
+
             try:
                 return func(*args, **kwargs)
+            except Exception as e:
+                error_occurred = True
+                error_type = type(e).__name__
+                raise
             finally:
                 duration = time.time() - start_time
+
+                # Record to Prometheus histogram
+                histogram.labels(
+                    metric_name=metric_name,
+                    function_name=func.__name__,
+                    module=module_name,
+                ).observe(duration)
+
+                # Record error if occurred
+                if error_occurred:
+                    error_counter.labels(
+                        metric_name=metric_name,
+                        function_name=func.__name__,
+                        module=module_name,
+                        error_type=error_type,
+                    ).inc()
+
+                # Also log for debugging
                 logger.debug(
                     "function_duration",
                     metric=metric_name,
                     function=func.__name__,
+                    module=module_name,
                     duration_seconds=duration,
+                    error=error_occurred,
                     **(labels or {}),
                 )
 
@@ -915,28 +996,83 @@ def track_duration(
 def count_calls(
     metric_name: str,
     labels: dict[str, str] | None = None,
+    track_status: bool = True,
 ) -> Callable[[F], F]:
     """
     Decorator to count function calls.
 
+    Records call count to Prometheus counter and logs debug info.
+
     Args:
         metric_name: Name of the counter metric.
+        labels: Static labels to apply.
+        track_status: Whether to track success/error status.
+
+    Returns:
+        Decorated function.
+
+    Example:
+        @count_calls("api_document_upload")
+        def upload_document(file: UploadFile) -> str:
+            ...
+    """
+    def decorator(func: F) -> F:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            counter = _get_decorator_calls_counter()
+            module_name = func.__module__ or "unknown"
+
+            try:
+                result = func(*args, **kwargs)
+                status = "success"
+                return result
+            except Exception:
+                status = "error"
+                raise
+            finally:
+                # Record to Prometheus counter
+                counter.labels(
+                    metric_name=metric_name,
+                    function_name=func.__name__,
+                    module=module_name,
+                    status=status if track_status else "counted",
+                ).inc()
+
+                # Also log for debugging
+                logger.debug(
+                    "function_called",
+                    metric=metric_name,
+                    function=func.__name__,
+                    module=module_name,
+                    status=status if track_status else "counted",
+                    **(labels or {}),
+                )
+
+        return wrapper  # type: ignore
+
+    return decorator
+
+
+def track_duration_and_count(
+    metric_name: str,
+    labels: dict[str, str] | None = None,
+) -> Callable[[F], F]:
+    """
+    Combined decorator to track both duration and call count.
+
+    Convenience decorator that applies both @track_duration and @count_calls.
+
+    Args:
+        metric_name: Name of the metric.
         labels: Static labels to apply.
 
     Returns:
         Decorated function.
     """
     def decorator(func: F) -> F:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            logger.debug(
-                "function_called",
-                metric=metric_name,
-                function=func.__name__,
-                **(labels or {}),
-            )
-            return func(*args, **kwargs)
-
-        return wrapper  # type: ignore
+        # Apply both decorators
+        decorated = track_duration(metric_name, labels)(func)
+        decorated = count_calls(metric_name, labels)(decorated)
+        return decorated  # type: ignore
 
     return decorator

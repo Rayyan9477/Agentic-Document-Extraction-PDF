@@ -21,9 +21,399 @@ from typing import Any, Callable
 from urllib.parse import urljoin
 
 import httpx
+import operator
+import re
 import structlog
 
 logger = structlog.get_logger(__name__)
+
+
+# ============================================================================
+# Alert Rule Evaluation Engine (CRIT-003 Fix)
+# ============================================================================
+
+class AlertConditionEvaluator:
+    """
+    Evaluates alert condition expressions against metric values.
+
+    Supports expressions like:
+    - "error_rate > 0.05"
+    - "accuracy < 0.90"
+    - "vlm_available == 0"
+    - "queue_depth > 100"
+    - "phi_access_rate > normal_rate * 2"
+    - "security_event == 'breach_attempt'"
+    """
+
+    # Supported operators with their operator functions
+    OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
+        ">": operator.gt,
+        "<": operator.lt,
+        ">=": operator.ge,
+        "<=": operator.le,
+        "==": operator.eq,
+        "!=": operator.ne,
+    }
+
+    # Pattern to match condition expressions
+    # Matches: metric_name operator value (with optional arithmetic)
+    CONDITION_PATTERN = re.compile(
+        r"^\s*"
+        r"(?P<left>[\w.]+(?:\s*[+\-*/]\s*[\w.]+)*)"  # Left side (metric or expression)
+        r"\s*(?P<operator>>=|<=|==|!=|>|<)\s*"        # Operator
+        r"(?P<right>[\w.'\"]+(?:\s*[+\-*/]\s*[\w.'\"]+)*)"  # Right side (value or expression)
+        r"\s*$"
+    )
+
+    # Pattern to match arithmetic expressions
+    ARITHMETIC_PATTERN = re.compile(
+        r"(?P<var>[\w.]+)\s*(?P<op>[+\-*/])\s*(?P<val>[\w.]+)"
+    )
+
+    def __init__(self, metrics: dict[str, Any] | None = None) -> None:
+        """
+        Initialize the evaluator.
+
+        Args:
+            metrics: Dictionary of metric name -> value mappings.
+        """
+        self._metrics = metrics or {}
+
+    def set_metrics(self, metrics: dict[str, Any]) -> None:
+        """Update the metrics dictionary."""
+        self._metrics = metrics
+
+    def update_metric(self, name: str, value: Any) -> None:
+        """Update a single metric value."""
+        self._metrics[name] = value
+
+    def evaluate(self, condition: str) -> tuple[bool, str | None]:
+        """
+        Evaluate a condition expression.
+
+        Args:
+            condition: Condition string to evaluate (e.g., "error_rate > 0.05")
+
+        Returns:
+            Tuple of (result: bool, error: str | None)
+            - result: True if condition is met, False otherwise
+            - error: Error message if evaluation failed, None otherwise
+        """
+        if not condition or not condition.strip():
+            return False, "Empty condition"
+
+        try:
+            match = self.CONDITION_PATTERN.match(condition.strip())
+            if not match:
+                return False, f"Invalid condition syntax: {condition}"
+
+            left_expr = match.group("left")
+            op_str = match.group("operator")
+            right_expr = match.group("right")
+
+            # Get operator function
+            op_func = self.OPERATORS.get(op_str)
+            if op_func is None:
+                return False, f"Unsupported operator: {op_str}"
+
+            # Evaluate left side
+            left_value = self._evaluate_expression(left_expr)
+            if left_value is None:
+                return False, f"Cannot evaluate left expression: {left_expr}"
+
+            # Evaluate right side
+            right_value = self._evaluate_expression(right_expr)
+            if right_value is None:
+                return False, f"Cannot evaluate right expression: {right_expr}"
+
+            # Perform comparison
+            result = op_func(left_value, right_value)
+            return bool(result), None
+
+        except Exception as e:
+            return False, f"Evaluation error: {str(e)}"
+
+    def _evaluate_expression(self, expr: str) -> Any:
+        """
+        Evaluate a single expression (variable, literal, or arithmetic).
+
+        Args:
+            expr: Expression to evaluate
+
+        Returns:
+            Evaluated value or None if evaluation fails
+        """
+        expr = expr.strip()
+
+        # Check for string literal (single or double quoted)
+        if (expr.startswith("'") and expr.endswith("'")) or \
+           (expr.startswith('"') and expr.endswith('"')):
+            return expr[1:-1]
+
+        # Check for arithmetic expression
+        arith_match = self.ARITHMETIC_PATTERN.match(expr)
+        if arith_match:
+            var_name = arith_match.group("var")
+            arith_op = arith_match.group("op")
+            arith_val = arith_match.group("val")
+
+            # Get variable value
+            var_value = self._get_value(var_name)
+            if var_value is None:
+                return None
+
+            # Get arithmetic operand value
+            arith_operand = self._get_value(arith_val)
+            if arith_operand is None:
+                return None
+
+            # Perform arithmetic
+            try:
+                var_value = float(var_value)
+                arith_operand = float(arith_operand)
+
+                if arith_op == "+":
+                    return var_value + arith_operand
+                elif arith_op == "-":
+                    return var_value - arith_operand
+                elif arith_op == "*":
+                    return var_value * arith_operand
+                elif arith_op == "/":
+                    if arith_operand == 0:
+                        return None
+                    return var_value / arith_operand
+            except (ValueError, TypeError):
+                return None
+
+        # Simple value (variable or literal)
+        return self._get_value(expr)
+
+    def _get_value(self, name: str) -> Any:
+        """
+        Get a value by name (from metrics) or parse as literal.
+
+        Args:
+            name: Variable name or literal value
+
+        Returns:
+            The value or None if not found/parseable
+        """
+        name = name.strip()
+
+        # Check if it's in metrics
+        if name in self._metrics:
+            return self._metrics[name]
+
+        # Try to parse as number
+        try:
+            if "." in name:
+                return float(name)
+            return int(name)
+        except ValueError:
+            pass
+
+        # Check for boolean literals
+        if name.lower() == "true":
+            return True
+        if name.lower() == "false":
+            return False
+
+        # Not found
+        return None
+
+    def get_threshold_from_condition(self, condition: str) -> float | None:
+        """
+        Extract the threshold value from a condition.
+
+        Args:
+            condition: Condition string
+
+        Returns:
+            Threshold value or None
+        """
+        try:
+            match = self.CONDITION_PATTERN.match(condition.strip())
+            if match:
+                right_expr = match.group("right")
+                value = self._evaluate_expression(right_expr)
+                if isinstance(value, (int, float)):
+                    return float(value)
+        except Exception:
+            pass
+        return None
+
+    def get_metric_name_from_condition(self, condition: str) -> str | None:
+        """
+        Extract the metric name from a condition.
+
+        Args:
+            condition: Condition string
+
+        Returns:
+            Metric name or None
+        """
+        try:
+            match = self.CONDITION_PATTERN.match(condition.strip())
+            if match:
+                left_expr = match.group("left").strip()
+                # Handle arithmetic expressions
+                arith_match = self.ARITHMETIC_PATTERN.match(left_expr)
+                if arith_match:
+                    return arith_match.group("var")
+                return left_expr
+        except Exception:
+            pass
+        return None
+
+
+class AlertRuleEvaluator:
+    """
+    Evaluates alert rules against current metrics and fires alerts.
+    """
+
+    def __init__(self, alert_manager: "AlertManager") -> None:
+        """
+        Initialize the rule evaluator.
+
+        Args:
+            alert_manager: AlertManager instance to fire alerts.
+        """
+        self._alert_manager = alert_manager
+        self._condition_evaluator = AlertConditionEvaluator()
+        self._pending_conditions: dict[str, datetime] = {}  # rule_name -> first_true_time
+
+    def check_rules(self, metrics: dict[str, Any]) -> list[Alert]:
+        """
+        Check all rules against provided metrics and fire alerts.
+
+        Args:
+            metrics: Dictionary of metric name -> value mappings
+
+        Returns:
+            List of alerts that were fired
+        """
+        self._condition_evaluator.set_metrics(metrics)
+        fired_alerts: list[Alert] = []
+
+        for rule in self._alert_manager.get_rules():
+            if not rule.enabled:
+                continue
+
+            try:
+                alert = self._evaluate_rule(rule, metrics)
+                if alert:
+                    fired_alerts.append(alert)
+            except Exception as e:
+                logger.error(
+                    "rule_evaluation_error",
+                    rule=rule.name,
+                    error=str(e),
+                )
+
+        return fired_alerts
+
+    def _evaluate_rule(
+        self,
+        rule: AlertRule,
+        metrics: dict[str, Any],
+    ) -> Alert | None:
+        """
+        Evaluate a single rule.
+
+        Args:
+            rule: Alert rule to evaluate
+            metrics: Current metrics
+
+        Returns:
+            Alert if fired, None otherwise
+        """
+        # Evaluate condition
+        condition_met, error = self._condition_evaluator.evaluate(rule.condition)
+
+        if error:
+            logger.debug(
+                "rule_condition_error",
+                rule=rule.name,
+                condition=rule.condition,
+                error=error,
+            )
+            return None
+
+        now = datetime.now(timezone.utc)
+
+        if condition_met:
+            # Check for_duration
+            if rule.for_duration.total_seconds() > 0:
+                if rule.name not in self._pending_conditions:
+                    # Start tracking
+                    self._pending_conditions[rule.name] = now
+                    return None
+
+                elapsed = now - self._pending_conditions[rule.name]
+                if elapsed < rule.for_duration:
+                    # Not enough time elapsed
+                    return None
+
+            # Clear pending state
+            self._pending_conditions.pop(rule.name, None)
+
+            # Get metric value and threshold for alert
+            metric_name = self._condition_evaluator.get_metric_name_from_condition(
+                rule.condition
+            )
+            current_value = metrics.get(metric_name) if metric_name else None
+            threshold = self._condition_evaluator.get_threshold_from_condition(
+                rule.condition
+            )
+
+            # Format message
+            message = rule.message_template
+            if current_value is not None:
+                message = message.replace("{value}", str(current_value))
+                message = message.replace("{value:.2%}", f"{current_value:.2%}")
+                message = message.replace("{value:.1f}", f"{current_value:.1f}")
+            if threshold is not None:
+                message = message.replace("{threshold}", str(threshold))
+                message = message.replace("{threshold:.2%}", f"{threshold:.2%}")
+
+            # Add source from metrics if available
+            source = metrics.get("source", "metrics")
+            if "{source}" in message:
+                message = message.replace("{source}", str(source))
+
+            # Fire alert
+            alert = self._alert_manager.fire_alert(
+                name=rule.name,
+                message=message,
+                severity=rule.severity,
+                source=str(source),
+                labels=rule.labels,
+                annotations=rule.annotations,
+                value=float(current_value) if isinstance(current_value, (int, float)) else None,
+                threshold=threshold,
+                channels=rule.channels,
+            )
+
+            logger.info(
+                "alert_rule_fired",
+                rule=rule.name,
+                value=current_value,
+                threshold=threshold,
+            )
+
+            return alert
+        else:
+            # Condition not met - clear pending state and potentially resolve
+            self._pending_conditions.pop(rule.name, None)
+
+            # Check if there's an active alert for this rule that should be resolved
+            active_alerts = self._alert_manager.get_active_alerts()
+            for alert in active_alerts:
+                if alert.name == rule.name:
+                    self._alert_manager.resolve_alert(alert.fingerprint)
+                    logger.info("alert_auto_resolved", rule=rule.name)
+
+        return None
 
 
 class AlertSeverity(str, Enum):
@@ -695,21 +1085,48 @@ class AlertManager:
 
         return alert
 
-    def resolve_alert(self, fingerprint: str) -> Alert | None:
+    def resolve_alert(
+        self,
+        fingerprint: str,
+        channels: list[AlertChannel] | None = None,
+    ) -> Alert | None:
         """
-        Resolve an alert.
+        Resolve an alert and notify all original channels.
 
         Args:
             fingerprint: Alert fingerprint.
+            channels: Optional override channels for notification.
+                      If not provided, uses channels from the associated rule.
 
         Returns:
             Resolved alert or None.
         """
         alert = self._store.resolve(fingerprint)
         if alert:
-            # Send resolve notification
-            channels = [AlertChannel.LOG]
+            # Determine notification channels
+            if channels is None:
+                # Look up the rule to get the original channels
+                rule = self._rules.get(alert.name)
+                if rule:
+                    channels = rule.channels
+                else:
+                    # Fallback to LOG if no rule found
+                    channels = [AlertChannel.LOG]
+
+            # Ensure LOG is always included for audit trail
+            if AlertChannel.LOG not in channels:
+                channels = list(channels) + [AlertChannel.LOG]
+
+            # Send resolution notification to all channels
             self._notification_queue.put((alert, channels))
+
+            logger.info(
+                "alert_resolved_notification_queued",
+                fingerprint=fingerprint,
+                alert_name=alert.name,
+                channels=[c.value for c in channels],
+            )
+
         return alert
 
     def acknowledge_alert(
@@ -834,6 +1251,52 @@ class AlertManager:
     def get_alert_counts(self) -> dict[AlertSeverity, int]:
         """Get counts of active alerts by severity."""
         return self._store.count_by_severity()
+
+    def check_rules(self, metrics: dict[str, Any]) -> list[Alert]:
+        """
+        Check all registered alert rules against provided metrics.
+
+        This is the main entry point for rule-based alerting. Call this method
+        periodically with current system metrics to evaluate all rules and
+        fire alerts when conditions are met.
+
+        Args:
+            metrics: Dictionary of metric name -> value mappings.
+                     Example: {
+                         "error_rate": 0.08,
+                         "accuracy": 0.92,
+                         "queue_depth": 150,
+                         "vlm_available": 1,
+                     }
+
+        Returns:
+            List of alerts that were fired.
+
+        Example:
+            >>> manager = AlertManager.get_instance()
+            >>> manager.add_rule(AlertRule(
+            ...     name="high_error_rate",
+            ...     condition="error_rate > 0.05",
+            ...     severity=AlertSeverity.ERROR,
+            ...     message_template="Error rate: {value:.2%}",
+            ... ))
+            >>> metrics = {"error_rate": 0.08, "source": "extraction"}
+            >>> alerts = manager.check_rules(metrics)
+            >>> len(alerts)  # Alert fired because 0.08 > 0.05
+            1
+        """
+        evaluator = AlertRuleEvaluator(self)
+        return evaluator.check_rules(metrics)
+
+    def load_default_rules(self) -> None:
+        """
+        Load the default alert rules for the extraction system.
+
+        This registers all pre-defined rules from get_default_alert_rules().
+        """
+        for rule in get_default_alert_rules():
+            self.add_rule(rule)
+        logger.info("default_rules_loaded", count=len(self._rules))
 
 
 # Pre-defined alert rules for the extraction system

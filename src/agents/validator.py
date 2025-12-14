@@ -181,6 +181,7 @@ class ValidatorAgent(BaseAgent):
                 field_metadata=field_metadata,
                 schema=schema,
                 document_type=state.get("document_type", "OTHER"),
+                retry_count=state.get("retry_count", 0),
             )
 
             # Calculate processing time
@@ -343,6 +344,7 @@ class ValidatorAgent(BaseAgent):
         field_metadata: dict[str, Any],
         schema: DocumentSchema | None,
         document_type: str,
+        retry_count: int = 0,
     ) -> ValidationResult:
         """
         Perform comprehensive validation of extraction results.
@@ -358,6 +360,7 @@ class ValidatorAgent(BaseAgent):
             field_metadata: Field metadata from extraction.
             schema: Document schema (if available).
             document_type: Type of document.
+            retry_count: Current retry attempt count for confidence scoring.
 
         Returns:
             ValidationResult with all validation details.
@@ -459,7 +462,7 @@ class ValidatorAgent(BaseAgent):
             extraction_confidences=extraction_confidences,
             validation_results=validation_results,
             pattern_flags=set(result.hallucination_flags),
-            retry_count=0,  # Retry count is tracked in state
+            retry_count=retry_count,
         )
 
         result.overall_confidence = conf_result.overall_confidence

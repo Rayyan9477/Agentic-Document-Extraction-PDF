@@ -100,9 +100,34 @@ def create_celery_app(config: CeleryConfig | None = None) -> Celery:
         settings = get_settings()
         if hasattr(settings, "redis_url") and settings.redis_url:
             config.broker_url = settings.redis_url
-            config.result_backend = settings.redis_url.replace("/0", "/1")
-    except Exception:
-        pass
+            # Parse and modify Redis URL safely for result backend
+            result_url = settings.redis_url
+            if "/0" in result_url:
+                result_url = result_url.replace("/0", "/1")
+            elif result_url.endswith("/"):
+                result_url = result_url + "1"
+            elif not result_url[-1].isdigit():
+                result_url = result_url + "/1"
+            config.result_backend = result_url
+    except ImportError as e:
+        logger.warning(
+            "celery_settings_import_failed",
+            error=str(e),
+            message="Using default Celery configuration - settings module not available",
+        )
+    except AttributeError as e:
+        logger.warning(
+            "celery_settings_attribute_error",
+            error=str(e),
+            message="Settings missing redis_url attribute - using default configuration",
+        )
+    except Exception as e:
+        logger.error(
+            "celery_settings_config_error",
+            error=str(e),
+            error_type=type(e).__name__,
+            message="Failed to load Redis settings for Celery - using default configuration",
+        )
 
     app = Celery(
         "pdf_extraction",

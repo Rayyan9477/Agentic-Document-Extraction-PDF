@@ -530,11 +530,30 @@ class AsyncAuditQueue:
 
     def _flush_batch(self, batch: list[AuditEvent]) -> None:
         """Flush a batch of events to the writer."""
+        failed_count = 0
+        last_error = None
+
         for event in batch:
             try:
                 self._writer.write(event)
-            except Exception:
-                pass  # Log errors silently to avoid infinite loops
+            except OSError as e:
+                # File system errors - track but don't log to avoid loops
+                failed_count += 1
+                last_error = e
+            except Exception as e:
+                # Unexpected errors - track for debugging
+                failed_count += 1
+                last_error = e
+
+        # Report aggregate failures using stderr to avoid infinite loops
+        # (writing to audit log would trigger more audit writes)
+        if failed_count > 0:
+            import sys
+            print(
+                f"[AUDIT WARNING] Failed to write {failed_count}/{len(batch)} "
+                f"audit events. Last error: {type(last_error).__name__}: {last_error}",
+                file=sys.stderr,
+            )
 
 
 class AuditLogger:

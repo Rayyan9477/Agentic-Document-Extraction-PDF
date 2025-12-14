@@ -365,12 +365,30 @@ class JSONExporter:
         return obj
 
     def _mask_value(self, field_name: str, value: Any) -> str:
-        """Mask a PHI value."""
-        if value is None:
-            return self.config.phi_mask_pattern
-        # Preserve value length hint for some fields
-        if isinstance(value, str) and len(value) > 4:
-            return f"{value[:2]}{self.config.phi_mask_pattern}{value[-2:]}"
+        """
+        Mask a PHI value completely for HIPAA compliance.
+
+        IMPORTANT: Never expose any part of PHI data, including:
+        - First/last characters (previous implementation was non-compliant)
+        - Value length (can enable inference attacks)
+        - Any derivable information
+
+        Args:
+            field_name: Name of the field being masked.
+            value: Value to mask.
+
+        Returns:
+            Fully masked value with no PHI exposure.
+        """
+        # Log PHI masking for audit trail
+        logger.debug(
+            "phi_field_masked",
+            field_name=field_name,
+            had_value=value is not None,
+        )
+
+        # Return consistent mask - no partial exposure of any kind
+        # Do NOT reveal length, first/last chars, or any other derivable info
         return self.config.phi_mask_pattern
 
     def _serialize_extraction_data(self, data: dict[str, Any]) -> str:

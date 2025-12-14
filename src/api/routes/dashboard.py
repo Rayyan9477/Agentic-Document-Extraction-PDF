@@ -33,7 +33,30 @@ def _get_system_metrics() -> dict[str, Any]:
             "memory_usage": memory.percent,
             "disk_usage": disk.percent,
         }
-    except Exception:
+    except ImportError:
+        # psutil not installed - return zeros silently as this is optional
+        return {
+            "cpu_usage": 0,
+            "memory_usage": 0,
+            "disk_usage": 0,
+        }
+    except PermissionError as e:
+        logger.warning(
+            "system_metrics_permission_error",
+            error=str(e),
+            message="Insufficient permissions to read system metrics",
+        )
+        return {
+            "cpu_usage": 0,
+            "memory_usage": 0,
+            "disk_usage": 0,
+        }
+    except Exception as e:
+        logger.error(
+            "system_metrics_error",
+            error=str(e),
+            error_type=type(e).__name__,
+        )
         return {
             "cpu_usage": 0,
             "memory_usage": 0,

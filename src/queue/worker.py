@@ -326,13 +326,16 @@ class WorkerManager:
 
     def purge_queue(self, queue_name: str) -> dict[str, Any]:
         """
-        Purge all messages from a queue.
+        Purge all messages from a specific queue.
+
+        Note: This only purges the specified queue, not all queues.
+        Uses the broker connection to target the specific queue.
 
         Args:
             queue_name: Name of queue to purge.
 
         Returns:
-            Purge result.
+            Purge result with count of purged messages.
         """
         if queue_name not in self.config.queues:
             return {
@@ -341,7 +344,19 @@ class WorkerManager:
             }
 
         try:
-            count = celery_app.control.purge()
+            # Use broker connection to purge only the specific queue
+            # This avoids the issue where celery_app.control.purge() purges ALL queues
+            with celery_app.connection_or_acquire() as conn:
+                # Get channel from connection
+                channel = conn.channel()
+
+                # Purge only the specified queue
+                # queue_purge returns the number of messages deleted
+                count = channel.queue_purge(queue_name)
+
+                # Ensure we get a valid count
+                if count is None:
+                    count = 0
 
             self._logger.info(
                 "queue_purged",
@@ -356,9 +371,15 @@ class WorkerManager:
             }
 
         except Exception as e:
-            self._logger.error("queue_purge_failed", queue=queue_name, error=str(e))
+            self._logger.error(
+                "queue_purge_failed",
+                queue=queue_name,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
             return {
                 "status": "error",
+                "queue": queue_name,
                 "error": str(e),
             }
 

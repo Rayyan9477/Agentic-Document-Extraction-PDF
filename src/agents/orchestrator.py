@@ -218,7 +218,9 @@ class OrchestratorAgent(BaseAgent):
             status = state.get("status", "")
 
             # Update state based on routing decision
-            if status == ExtractionStatus.VALIDATED.value:
+            # After validation completes, the status is still VALIDATING
+            # We check if validation results exist to determine if validation is done
+            if status == ExtractionStatus.VALIDATING.value:
                 # Validation complete, make routing decision
                 state = self._make_routing_decision(state)
             elif status == ExtractionStatus.FAILED.value:

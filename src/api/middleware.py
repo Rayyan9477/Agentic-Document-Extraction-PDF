@@ -43,6 +43,136 @@ from src.security.rbac import (
 logger = structlog.get_logger(__name__)
 
 
+# ============================================================================
+# Secure Client IP Extraction (HIGH-009 Fix)
+# ============================================================================
+
+# Trusted proxy IP ranges - only trust X-Forwarded-For from these IPs
+# Configure based on your infrastructure (load balancers, reverse proxies)
+TRUSTED_PROXY_RANGES = {
+    "127.0.0.1",      # localhost
+    "10.0.0.0/8",     # Private network
+    "172.16.0.0/12",  # Private network
+    "192.168.0.0/16", # Private network
+}
+
+
+def _is_trusted_proxy(client_ip: str) -> bool:
+    """
+    Check if the request comes from a trusted proxy.
+
+    Args:
+        client_ip: Direct client IP from the connection.
+
+    Returns:
+        True if the IP is in the trusted proxy list.
+    """
+    import ipaddress
+
+    if not client_ip or client_ip == "unknown":
+        return False
+
+    try:
+        ip = ipaddress.ip_address(client_ip)
+
+        for trusted in TRUSTED_PROXY_RANGES:
+            if "/" in trusted:
+                # Network range
+                if ip in ipaddress.ip_network(trusted, strict=False):
+                    return True
+            else:
+                # Single IP
+                if ip == ipaddress.ip_address(trusted):
+                    return True
+
+        return False
+    except ValueError:
+        # Invalid IP address format
+        return False
+
+
+def _validate_ip_format(ip_str: str) -> bool:
+    """
+    Validate that a string is a properly formatted IP address.
+
+    Args:
+        ip_str: String to validate.
+
+    Returns:
+        True if valid IP address format.
+    """
+    import ipaddress
+
+    try:
+        ipaddress.ip_address(ip_str.strip())
+        return True
+    except ValueError:
+        return False
+
+
+def get_secure_client_ip(request: Request, trust_proxy: bool = True) -> str:
+    """
+    Securely extract client IP address from request.
+
+    Security measures:
+    - Only trusts X-Forwarded-For when behind a known proxy
+    - Validates IP address format
+    - Logs suspicious header manipulation attempts
+    - Falls back to direct connection IP when not behind proxy
+
+    Args:
+        request: FastAPI request object.
+        trust_proxy: Whether to trust X-Forwarded-For headers at all.
+
+    Returns:
+        Client IP address string.
+    """
+    # Get direct connection IP
+    direct_ip = request.client.host if request.client else "unknown"
+
+    if not trust_proxy:
+        return direct_ip
+
+    # Only trust X-Forwarded-For if request comes from a trusted proxy
+    if not _is_trusted_proxy(direct_ip):
+        # Request not from trusted proxy - log if X-Forwarded-For was attempted
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            logger.warning(
+                "untrusted_forwarded_header",
+                direct_ip=direct_ip,
+                forwarded_for=forwarded[:100],  # Truncate to prevent log injection
+                message="X-Forwarded-For header ignored - request not from trusted proxy",
+            )
+        return direct_ip
+
+    # Request from trusted proxy - extract and validate X-Forwarded-For
+    forwarded = request.headers.get("X-Forwarded-For")
+    if not forwarded:
+        return direct_ip
+
+    # X-Forwarded-For format: "client, proxy1, proxy2, ..."
+    # The leftmost (first) IP is the original client
+    ips = [ip.strip() for ip in forwarded.split(",")]
+
+    if not ips:
+        return direct_ip
+
+    client_ip = ips[0]
+
+    # Validate the IP format to prevent injection attacks
+    if not _validate_ip_format(client_ip):
+        logger.warning(
+            "invalid_forwarded_ip_format",
+            invalid_ip=client_ip[:50],  # Truncate
+            direct_ip=direct_ip,
+            message="X-Forwarded-For contains invalid IP format",
+        )
+        return direct_ip
+
+    return client_ip
+
+
 @dataclass(slots=True)
 class RateLimitConfig:
     """Rate limiting configuration."""
@@ -327,11 +457,13 @@ class AuditMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_ip(self, request: Request) -> str:
-        """Get client IP address from request."""
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        """
+        Get client IP address from request securely.
+
+        Uses secure IP extraction that validates X-Forwarded-For
+        only when behind a trusted proxy.
+        """
+        return get_secure_client_ip(request, trust_proxy=True)
 
 
 class AuthenticationMiddleware(BaseHTTPMiddleware):
@@ -522,18 +654,20 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_id(self, request: Request) -> str:
-        """Get client identifier for rate limiting."""
-        # Use user ID if authenticated
+        """
+        Get client identifier for rate limiting.
+
+        Uses secure IP extraction to prevent rate limit bypass via
+        X-Forwarded-For header spoofing.
+        """
+        # Use user ID if authenticated (most reliable)
         user_id = getattr(request.state, "user_id", None)
         if user_id:
             return f"user:{user_id}"
 
-        # Fall back to IP address
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return f"ip:{forwarded.split(',')[0].strip()}"
-
-        return f"ip:{request.client.host if request.client else 'unknown'}"
+        # Fall back to secure IP address extraction
+        client_ip = get_secure_client_ip(request, trust_proxy=True)
+        return f"ip:{client_ip}"
 
 
 def get_current_user(request: Request) -> dict[str, Any] | None:
