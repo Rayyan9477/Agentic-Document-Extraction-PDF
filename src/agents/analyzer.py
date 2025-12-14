@@ -87,6 +87,18 @@ class AnalyzerAgent(BaseAgent):
 
         This is the main entry point for the LangGraph workflow.
 
+        STATE TRANSITION NOTE:
+        This agent sets ``status`` to ``ANALYZING`` for observability, but the
+        actual workflow transition to the next node (extractor) is controlled by
+        the LangGraph workflow edges defined in ``orchestrator.py``. The status
+        field is informational only - the workflow graph determines execution
+        order via its edge definitions (e.g., ``add_edge(NODE_ANALYZE, NODE_EXTRACT)``).
+
+        This pattern applies to all agents:
+        - AnalyzerAgent sets ANALYZING -> workflow routes to ExtractorAgent
+        - ExtractorAgent sets EXTRACTING -> workflow routes to ValidatorAgent
+        - ValidatorAgent sets VALIDATING -> workflow routes to RouteNode
+
         Args:
             state: Current extraction state.
 
@@ -363,25 +375,125 @@ class AnalyzerAgent(BaseAgent):
         document_type: str,
     ) -> dict[int, str]:
         """
-        Analyze relationships between pages in multi-page documents.
+        Analyze relationships between pages in multi-page documents using VLM.
+
+        Uses vision language model to determine each page's role and relationship
+        to other pages in the document. Detects continuation markers, page numbers,
+        and unique content on each page.
 
         Args:
-            page_images: List of page image data.
-            document_type: Classified document type.
+            page_images: List of page image data with 'image' key containing
+                        base64-encoded image data.
+            document_type: Classified document type for context.
 
         Returns:
-            Mapping of page number to relationship description.
+            Mapping of page number to detailed relationship description.
         """
         relationships = {}
         total_pages = len(page_images)
 
+        # For single-page documents, no relationship analysis needed
+        if total_pages == 1:
+            return {1: "single_page"}
+
+        # Build system prompt for page analysis
+        system_prompt = build_grounded_system_prompt(
+            additional_context=(
+                f"You are analyzing pages of a {document_type} document "
+                f"that has {total_pages} total pages. Determine each page's "
+                "role and relationship to other pages."
+            ),
+            include_forbidden=False,
+            include_confidence_scale=False,
+        )
+
+        # Get the page relationship prompt
+        relationship_prompt = build_page_relationship_prompt(total_pages)
+
         for i, page in enumerate(page_images, start=1):
-            if i == 1:
-                relationships[i] = "primary"
-            elif i == total_pages:
-                relationships[i] = "final"
-            else:
-                relationships[i] = "continuation"
+            image_data = page.get("image", "")
+
+            if not image_data:
+                # Fallback to basic role assignment if no image
+                if i == 1:
+                    relationships[i] = "primary"
+                elif i == total_pages:
+                    relationships[i] = "final"
+                else:
+                    relationships[i] = "continuation"
+                continue
+
+            try:
+                # Increment VLM call counter
+                self._vlm_calls += 1
+
+                # Add page context to prompt
+                page_prompt = (
+                    f"This is page {i} of {total_pages}.\n\n"
+                    f"{relationship_prompt}"
+                )
+
+                # Call VLM to analyze page relationship
+                result = self.send_vision_request_with_json(
+                    image_data=image_data,
+                    prompt=page_prompt,
+                    system_prompt=system_prompt,
+                    temperature=0.1,
+                )
+
+                # Extract relationship information from VLM response
+                page_role = result.get("page_role", "unknown")
+                continues_from = result.get("continues_from_previous", False)
+                continues_to = result.get("continues_to_next", False)
+                unique_content = result.get("unique_content", [])
+                relationship_notes = result.get("relationship_notes", "")
+
+                # Build detailed relationship string
+                relationship_parts = [page_role]
+
+                if continues_from:
+                    relationship_parts.append("continues_from_previous")
+                if continues_to:
+                    relationship_parts.append("continues_to_next")
+
+                if unique_content:
+                    # Summarize unique content types
+                    content_summary = ", ".join(unique_content[:3])  # Limit to 3 items
+                    relationship_parts.append(f"contains:{content_summary}")
+
+                if relationship_notes:
+                    # Add abbreviated notes
+                    notes_summary = relationship_notes[:50]
+                    if len(relationship_notes) > 50:
+                        notes_summary += "..."
+                    relationship_parts.append(f"notes:{notes_summary}")
+
+                relationships[i] = " | ".join(relationship_parts)
+
+                self._logger.debug(
+                    "page_relationship_analyzed",
+                    page=i,
+                    total_pages=total_pages,
+                    role=page_role,
+                    continues_from=continues_from,
+                    continues_to=continues_to,
+                )
+
+            except Exception as e:
+                # On VLM error, fall back to basic role assignment
+                self._logger.warning(
+                    "page_relationship_analysis_failed",
+                    page=i,
+                    error=str(e),
+                    error_type=type(e).__name__,
+                )
+
+                if i == 1:
+                    relationships[i] = "primary (fallback)"
+                elif i == total_pages:
+                    relationships[i] = "final (fallback)"
+                else:
+                    relationships[i] = "continuation (fallback)"
 
         return relationships
 

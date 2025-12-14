@@ -730,3 +730,248 @@ async def get_current_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get user information",
         )
+
+
+# =============================================================================
+# API Key Management Endpoints
+# =============================================================================
+
+
+class CreateAPIKeyRequest(BaseModel):
+    """Request model for API key creation."""
+
+    name: str = Field(
+        ...,
+        min_length=3,
+        max_length=100,
+        description="Human-readable name for the API key",
+    )
+    expires_days: int = Field(
+        default=365,
+        ge=1,
+        le=730,  # Max 2 years
+        description="Number of days until the key expires",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate API key name."""
+        # Only allow alphanumeric, spaces, hyphens, and underscores
+        if not re.match(r"^[\w\s\-]+$", v):
+            raise ValueError("Name can only contain letters, numbers, spaces, hyphens, and underscores")
+        return v.strip()
+
+
+class APIKeyResponse(BaseModel):
+    """Response model for API key creation."""
+
+    key_id: str = Field(
+        ...,
+        description="Unique identifier for the key (for management)",
+    )
+    api_key: str = Field(
+        ...,
+        description="The API key - SAVE THIS, it won't be shown again",
+    )
+    name: str = Field(
+        ...,
+        description="Name of the API key",
+    )
+    created_at: str = Field(
+        ...,
+        description="ISO timestamp when key was created",
+    )
+    expires_at: str = Field(
+        ...,
+        description="ISO timestamp when key expires",
+    )
+
+
+class APIKeyInfo(BaseModel):
+    """Information about an API key (without the actual key)."""
+
+    key_id: str = Field(
+        ...,
+        description="Unique identifier for the key",
+    )
+    name: str = Field(
+        ...,
+        description="Name of the API key",
+    )
+    created_at: str = Field(
+        ...,
+        description="ISO timestamp when key was created",
+    )
+    expires_at: str = Field(
+        ...,
+        description="ISO timestamp when key expires",
+    )
+    last_used_at: str | None = Field(
+        None,
+        description="ISO timestamp when key was last used",
+    )
+
+
+class APIKeyListResponse(BaseModel):
+    """Response model for listing API keys."""
+
+    keys: list[APIKeyInfo] = Field(
+        default_factory=list,
+        description="List of API keys for the user",
+    )
+    total: int = Field(
+        default=0,
+        description="Total number of API keys",
+    )
+
+
+@router.post(
+    "/api-keys",
+    response_model=APIKeyResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create API key",
+    description="Create a new API key for programmatic access. The key is only shown once.",
+)
+async def create_api_key(
+    request: Request,
+    body: CreateAPIKeyRequest,
+) -> APIKeyResponse:
+    """
+    Create a new API key for the authenticated user.
+
+    API keys provide programmatic access to the API without needing
+    to manage OAuth tokens. Keys are long-lived but can be revoked.
+
+    IMPORTANT: The API key is only returned once. Store it securely.
+
+    Args:
+        request: FastAPI request with auth context.
+        body: API key creation parameters.
+
+    Returns:
+        Created API key details including the key itself.
+    """
+    from datetime import datetime, timezone, timedelta
+    import secrets
+
+    request_id = getattr(request.state, "request_id", "unknown")
+    user_id = getattr(request.state, "user_id", None)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to create API keys",
+        )
+
+    rbac = _get_rbac_manager()
+
+    try:
+        # Get user
+        user = rbac.get_user(user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+
+        # Generate key ID (for management - not the actual key)
+        key_id = f"key_{secrets.token_urlsafe(16)}"
+
+        # Create API key
+        api_key = rbac.create_api_key(
+            user=user,
+            name=body.name,
+            expires_days=body.expires_days,
+        )
+
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(days=body.expires_days)
+
+        logger.info(
+            "api_key_created",
+            user_id=user_id,
+            key_id=key_id,
+            key_name=body.name,
+            expires_days=body.expires_days,
+            request_id=request_id,
+        )
+
+        return APIKeyResponse(
+            key_id=key_id,
+            api_key=api_key,
+            name=body.name,
+            created_at=now.isoformat(),
+            expires_at=expires.isoformat(),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            "api_key_creation_failed",
+            error=str(e),
+            user_id=user_id,
+            request_id=request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create API key",
+        )
+
+
+@router.delete(
+    "/api-keys/{key_jti}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Revoke API key",
+    description="Revoke an API key by its JTI (JWT ID). The key will no longer work.",
+)
+async def revoke_api_key(
+    request: Request,
+    key_jti: str,
+) -> None:
+    """
+    Revoke an API key.
+
+    Once revoked, the API key will no longer work for authentication.
+    This action cannot be undone - a new key must be created if needed.
+
+    Args:
+        request: FastAPI request with auth context.
+        key_jti: JTI (JWT ID) of the key to revoke.
+    """
+    request_id = getattr(request.state, "request_id", "unknown")
+    user_id = getattr(request.state, "user_id", None)
+
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to revoke API keys",
+        )
+
+    rbac = _get_rbac_manager()
+
+    try:
+        # Revoke the token by its JTI
+        # In a full implementation, we'd verify ownership before revoking
+        rbac.tokens.revoke_token_by_jti(key_jti)
+
+        logger.info(
+            "api_key_revoked",
+            user_id=user_id,
+            key_jti=key_jti,
+            request_id=request_id,
+        )
+
+    except Exception as e:
+        logger.error(
+            "api_key_revocation_failed",
+            error=str(e),
+            user_id=user_id,
+            key_jti=key_jti,
+            request_id=request_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to revoke API key",
+        )

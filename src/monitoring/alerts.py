@@ -801,6 +801,398 @@ class LogHandler(NotificationHandler):
         return True
 
 
+class EmailHandler(NotificationHandler):
+    """
+    Email notification handler using SMTP.
+
+    Sends alert notifications via email with HTML formatting
+    and proper severity-based styling.
+
+    Supports:
+    - SMTP with TLS/SSL encryption
+    - HTML and plain text emails
+    - Multiple recipients
+    - Custom sender name
+    - Severity-based color coding
+    """
+
+    def __init__(
+        self,
+        smtp_host: str,
+        smtp_port: int = 587,
+        smtp_user: str | None = None,
+        smtp_password: str | None = None,
+        use_tls: bool = True,
+        use_ssl: bool = False,
+        sender_email: str = "alerts@example.com",
+        sender_name: str = "Document Extraction Alerts",
+        recipients: list[str] | None = None,
+        timeout: float = 30.0,
+    ) -> None:
+        """
+        Initialize email handler.
+
+        Args:
+            smtp_host: SMTP server hostname.
+            smtp_port: SMTP server port (587 for TLS, 465 for SSL, 25 for plain).
+            smtp_user: SMTP username for authentication.
+            smtp_password: SMTP password for authentication.
+            use_tls: Use STARTTLS encryption (port 587).
+            use_ssl: Use SSL encryption (port 465). Mutually exclusive with use_tls.
+            sender_email: Sender email address.
+            sender_name: Sender display name.
+            recipients: List of recipient email addresses.
+            timeout: Connection timeout in seconds.
+        """
+        self._smtp_host = smtp_host
+        self._smtp_port = smtp_port
+        self._smtp_user = smtp_user
+        self._smtp_password = smtp_password
+        self._use_tls = use_tls and not use_ssl  # TLS and SSL are mutually exclusive
+        self._use_ssl = use_ssl
+        self._sender_email = sender_email
+        self._sender_name = sender_name
+        self._recipients = recipients or []
+        self._timeout = timeout
+
+    def add_recipient(self, email: str) -> None:
+        """Add a recipient email address."""
+        if email not in self._recipients:
+            self._recipients.append(email)
+
+    def remove_recipient(self, email: str) -> None:
+        """Remove a recipient email address."""
+        if email in self._recipients:
+            self._recipients.remove(email)
+
+    def _get_severity_color(self, severity: AlertSeverity) -> str:
+        """Get HTML color for severity level."""
+        color_map = {
+            AlertSeverity.INFO: "#17a2b8",      # Blue
+            AlertSeverity.WARNING: "#ffc107",   # Yellow/Amber
+            AlertSeverity.ERROR: "#dc3545",     # Red
+            AlertSeverity.CRITICAL: "#721c24",  # Dark Red
+        }
+        return color_map.get(severity, "#6c757d")  # Gray default
+
+    def _get_status_icon(self, status: AlertStatus) -> str:
+        """Get text icon for status."""
+        icon_map = {
+            AlertStatus.FIRING: "🔥",
+            AlertStatus.RESOLVED: "✅",
+            AlertStatus.ACKNOWLEDGED: "👁",
+            AlertStatus.SILENCED: "🔇",
+        }
+        return icon_map.get(status, "📢")
+
+    def _format_html_message(self, alert: Alert) -> str:
+        """Format alert as HTML email body."""
+        severity_color = self._get_severity_color(alert.severity)
+        status_icon = self._get_status_icon(alert.status)
+
+        # Format labels as a list
+        labels_html = ""
+        if alert.labels:
+            labels_list = "".join(
+                f"<li><strong>{k}:</strong> {v}</li>"
+                for k, v in alert.labels.items()
+            )
+            labels_html = f"""
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Labels</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">
+                    <ul style="margin: 0; padding-left: 20px;">{labels_list}</ul>
+                </td>
+            </tr>
+            """
+
+        # Format value and threshold if present
+        value_html = ""
+        if alert.value is not None:
+            value_str = f"{alert.value:.2f}" if isinstance(alert.value, float) else str(alert.value)
+            value_html = f"""
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Current Value</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{value_str}</td>
+            </tr>
+            """
+
+        threshold_html = ""
+        if alert.threshold is not None:
+            threshold_str = f"{alert.threshold:.2f}" if isinstance(alert.threshold, float) else str(alert.threshold)
+            threshold_html = f"""
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Threshold</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{threshold_str}</td>
+            </tr>
+            """
+
+        # Resolution info if resolved
+        resolution_html = ""
+        if alert.status == AlertStatus.RESOLVED and alert.resolved_at:
+            duration = alert.resolved_at - alert.fired_at
+            resolution_html = f"""
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Resolved At</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{alert.resolved_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Duration</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{str(duration).split('.')[0]}</td>
+            </tr>
+            """
+
+        html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background-color: {severity_color}; color: white; padding: 20px; border-radius: 5px 5px 0 0;">
+        <h1 style="margin: 0; font-size: 24px;">
+            {status_icon} [{alert.severity.value.upper()}] {alert.name}
+        </h1>
+        <p style="margin: 10px 0 0 0; opacity: 0.9;">
+            Status: {alert.status.value.upper()}
+        </p>
+    </div>
+
+    <div style="background-color: #f8f9fa; padding: 20px; border: 1px solid #ddd; border-top: none;">
+        <h2 style="margin-top: 0; color: #333; font-size: 18px;">Alert Message</h2>
+        <p style="background-color: white; padding: 15px; border-radius: 5px; border-left: 4px solid {severity_color};">
+            {alert.message}
+        </p>
+
+        <h2 style="color: #333; font-size: 18px;">Details</h2>
+        <table style="width: 100%; border-collapse: collapse; background-color: white; border-radius: 5px;">
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd; width: 30%;"><strong>Alert ID</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd; font-family: monospace;">{alert.alert_id}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Source</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{alert.source}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Fired At</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #ddd;">{alert.fired_at.strftime('%Y-%m-%d %H:%M:%S UTC')}</td>
+            </tr>
+            {value_html}
+            {threshold_html}
+            {labels_html}
+            {resolution_html}
+            <tr>
+                <td style="padding: 8px;"><strong>Fingerprint</strong></td>
+                <td style="padding: 8px; font-family: monospace;">{alert.fingerprint}</td>
+            </tr>
+        </table>
+    </div>
+
+    <div style="background-color: #e9ecef; padding: 15px; text-align: center; font-size: 12px; color: #6c757d; border-radius: 0 0 5px 5px;">
+        <p style="margin: 0;">
+            This is an automated alert from the Document Extraction System.
+            <br>
+            Do not reply to this email.
+        </p>
+    </div>
+</body>
+</html>
+"""
+        return html
+
+    def _format_text_message(self, alert: Alert) -> str:
+        """Format alert as plain text email body."""
+        status_icon = self._get_status_icon(alert.status)
+
+        lines = [
+            f"{status_icon} [{alert.severity.value.upper()}] {alert.name}",
+            f"Status: {alert.status.value.upper()}",
+            "",
+            "=" * 50,
+            "",
+            "ALERT MESSAGE:",
+            alert.message,
+            "",
+            "=" * 50,
+            "",
+            "DETAILS:",
+            f"  Alert ID: {alert.alert_id}",
+            f"  Source: {alert.source}",
+            f"  Fired At: {alert.fired_at.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+        ]
+
+        if alert.value is not None:
+            value_str = f"{alert.value:.2f}" if isinstance(alert.value, float) else str(alert.value)
+            lines.append(f"  Current Value: {value_str}")
+
+        if alert.threshold is not None:
+            threshold_str = f"{alert.threshold:.2f}" if isinstance(alert.threshold, float) else str(alert.threshold)
+            lines.append(f"  Threshold: {threshold_str}")
+
+        if alert.labels:
+            lines.append("  Labels:")
+            for key, value in alert.labels.items():
+                lines.append(f"    - {key}: {value}")
+
+        if alert.status == AlertStatus.RESOLVED and alert.resolved_at:
+            duration = alert.resolved_at - alert.fired_at
+            lines.append(f"  Resolved At: {alert.resolved_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+            lines.append(f"  Duration: {str(duration).split('.')[0]}")
+
+        lines.extend([
+            f"  Fingerprint: {alert.fingerprint}",
+            "",
+            "=" * 50,
+            "",
+            "This is an automated alert from the Document Extraction System.",
+            "Do not reply to this email.",
+        ])
+
+        return "\n".join(lines)
+
+    async def send(self, alert: Alert) -> bool:
+        """
+        Send email notification.
+
+        Args:
+            alert: Alert to send notification for.
+
+        Returns:
+            True if email was sent successfully, False otherwise.
+        """
+        if not self._recipients:
+            logger.warning(
+                "email_notification_skipped",
+                alert_id=alert.alert_id,
+                reason="No recipients configured",
+            )
+            return False
+
+        try:
+            # Import email modules here to avoid import overhead when not using email
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            from email.utils import formataddr, formatdate
+
+            # Create message
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = f"[{alert.severity.value.upper()}] {alert.name} - {alert.status.value}"
+            msg["From"] = formataddr((self._sender_name, self._sender_email))
+            msg["To"] = ", ".join(self._recipients)
+            msg["Date"] = formatdate(localtime=True)
+            msg["X-Priority"] = "1" if alert.severity == AlertSeverity.CRITICAL else "3"
+
+            # Add custom headers for tracking
+            msg["X-Alert-ID"] = alert.alert_id
+            msg["X-Alert-Severity"] = alert.severity.value
+            msg["X-Alert-Fingerprint"] = alert.fingerprint or ""
+
+            # Attach plain text version
+            text_body = self._format_text_message(alert)
+            msg.attach(MIMEText(text_body, "plain", "utf-8"))
+
+            # Attach HTML version
+            html_body = self._format_html_message(alert)
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+            # Send email asynchronously using run_in_executor
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self._send_smtp,
+                msg,
+            )
+
+            logger.info(
+                "email_notification_sent",
+                alert_id=alert.alert_id,
+                recipients=len(self._recipients),
+                severity=alert.severity.value,
+            )
+            return True
+
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(
+                "email_authentication_failed",
+                alert_id=alert.alert_id,
+                error=str(e),
+            )
+            return False
+
+        except smtplib.SMTPRecipientsRefused as e:
+            logger.error(
+                "email_recipients_refused",
+                alert_id=alert.alert_id,
+                recipients=list(e.recipients.keys()),
+            )
+            return False
+
+        except smtplib.SMTPException as e:
+            logger.error(
+                "email_smtp_error",
+                alert_id=alert.alert_id,
+                error=str(e),
+            )
+            return False
+
+        except Exception as e:
+            logger.error(
+                "email_notification_failed",
+                alert_id=alert.alert_id,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            return False
+
+    def _send_smtp(self, msg: "MIMEMultipart") -> None:
+        """
+        Send email via SMTP (synchronous, run in executor).
+
+        Args:
+            msg: Email message to send.
+        """
+        import smtplib
+        import ssl
+
+        # Create SSL context for secure connections
+        context = ssl.create_default_context()
+
+        if self._use_ssl:
+            # Direct SSL connection (port 465)
+            with smtplib.SMTP_SSL(
+                self._smtp_host,
+                self._smtp_port,
+                context=context,
+                timeout=self._timeout,
+            ) as server:
+                if self._smtp_user and self._smtp_password:
+                    server.login(self._smtp_user, self._smtp_password)
+                server.sendmail(
+                    self._sender_email,
+                    self._recipients,
+                    msg.as_string(),
+                )
+        else:
+            # Plain or STARTTLS connection
+            with smtplib.SMTP(
+                self._smtp_host,
+                self._smtp_port,
+                timeout=self._timeout,
+            ) as server:
+                if self._use_tls:
+                    server.starttls(context=context)
+                if self._smtp_user and self._smtp_password:
+                    server.login(self._smtp_user, self._smtp_password)
+                server.sendmail(
+                    self._sender_email,
+                    self._recipients,
+                    msg.as_string(),
+                )
+
+
 class AlertStore:
     """
     In-memory alert store with deduplication.

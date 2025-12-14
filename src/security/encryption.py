@@ -205,7 +205,7 @@ class KeyManager:
             key: Master key as bytes or hex/base64 encoded string.
 
         Raises:
-            KeyDerivationError: If key is invalid.
+            KeyDerivationError: If key is invalid or weak.
         """
         if isinstance(key, str):
             # Try hex decoding first
@@ -216,6 +216,8 @@ class KeyManager:
                 try:
                     key_bytes = base64.urlsafe_b64decode(key)
                 except Exception:
+                    # Validate passphrase strength before using it
+                    self._validate_passphrase_strength(key)
                     # Use as passphrase for key derivation
                     key_bytes = self._derive_key_from_passphrase(key)
         else:
@@ -226,7 +228,182 @@ class KeyManager:
                 f"Master key must be {AES_KEY_SIZE} bytes, got {len(key_bytes)}"
             )
 
+        # Validate key strength (entropy check)
+        self._validate_key_strength(key_bytes)
+
         self._master_key = key_bytes
+
+    def _validate_key_strength(self, key: bytes) -> None:
+        """
+        Validate encryption key has sufficient entropy.
+
+        Checks for:
+        - All-zero or all-same-byte keys
+        - Low entropy (repeating patterns)
+        - Known weak keys
+
+        Args:
+            key: Key bytes to validate.
+
+        Raises:
+            KeyDerivationError: If key is weak.
+        """
+        # Check for all-zero key
+        if key == bytes(len(key)):
+            raise KeyDerivationError(
+                "Encryption key cannot be all zeros"
+            )
+
+        # Check for single repeating byte
+        if len(set(key)) == 1:
+            raise KeyDerivationError(
+                "Encryption key cannot be a single repeating byte"
+            )
+
+        # Check for very low entropy (less than 4 unique bytes)
+        unique_bytes = len(set(key))
+        if unique_bytes < 4:
+            raise KeyDerivationError(
+                f"Encryption key has insufficient entropy: only {unique_bytes} unique bytes"
+            )
+
+        # Check for repeating patterns (e.g., "abcabc...")
+        for pattern_len in [2, 4, 8]:
+            if len(key) >= pattern_len * 2:
+                pattern = key[:pattern_len]
+                repeats = key[:pattern_len * (len(key) // pattern_len)]
+                if repeats == pattern * (len(repeats) // pattern_len):
+                    raise KeyDerivationError(
+                        f"Encryption key has repeating pattern of length {pattern_len}"
+                    )
+
+        # Check for sequential bytes (ascending or descending)
+        ascending = all(key[i] == (key[0] + i) % 256 for i in range(len(key)))
+        descending = all(key[i] == (key[0] - i) % 256 for i in range(len(key)))
+        if ascending or descending:
+            raise KeyDerivationError(
+                "Encryption key cannot be sequential bytes"
+            )
+
+        # Calculate Shannon entropy
+        entropy = self._calculate_entropy(key)
+        # Minimum entropy threshold: 3.0 bits per byte (good keys have ~7.5-8 bits)
+        min_entropy = 3.0
+        if entropy < min_entropy:
+            raise KeyDerivationError(
+                f"Encryption key entropy too low: {entropy:.2f} bits/byte "
+                f"(minimum {min_entropy} required)"
+            )
+
+    def _calculate_entropy(self, data: bytes) -> float:
+        """
+        Calculate Shannon entropy of data in bits per byte.
+
+        Args:
+            data: Bytes to analyze.
+
+        Returns:
+            Entropy in bits per byte (0 to 8).
+        """
+        import math
+        from collections import Counter
+
+        if not data:
+            return 0.0
+
+        counter = Counter(data)
+        length = len(data)
+        entropy = 0.0
+
+        for count in counter.values():
+            if count > 0:
+                probability = count / length
+                entropy -= probability * math.log2(probability)
+
+        return entropy
+
+    def _validate_passphrase_strength(self, passphrase: str) -> None:
+        """
+        Validate passphrase meets minimum security requirements.
+
+        Requirements:
+        - Minimum 12 characters
+        - At least 1 uppercase letter
+        - At least 1 lowercase letter
+        - At least 1 digit
+        - Not a common weak passphrase
+
+        Args:
+            passphrase: Passphrase to validate.
+
+        Raises:
+            KeyDerivationError: If passphrase is weak.
+        """
+        # Minimum length check
+        min_length = 12
+        if len(passphrase) < min_length:
+            raise KeyDerivationError(
+                f"Passphrase must be at least {min_length} characters, "
+                f"got {len(passphrase)}"
+            )
+
+        # Character class checks
+        has_upper = any(c.isupper() for c in passphrase)
+        has_lower = any(c.islower() for c in passphrase)
+        has_digit = any(c.isdigit() for c in passphrase)
+
+        if not (has_upper and has_lower and has_digit):
+            missing = []
+            if not has_upper:
+                missing.append("uppercase letter")
+            if not has_lower:
+                missing.append("lowercase letter")
+            if not has_digit:
+                missing.append("digit")
+            raise KeyDerivationError(
+                f"Passphrase must contain at least one: {', '.join(missing)}"
+            )
+
+        # Check against common weak passphrases
+        weak_passphrases = frozenset([
+            "password", "password1", "password123", "password1234",
+            "123456789012", "qwertyuiopas", "abcdefghijkl",
+            "letmein12345", "welcome12345", "admin1234567",
+            "master123456", "changeme1234", "secret123456",
+            "passw0rd1234", "p@ssw0rd1234", "test12345678",
+            "default12345", "trustno12345", "sunshine1234",
+            "iloveyou1234", "princess1234", "football1234",
+            "baseball1234", "dragon123456", "monkey123456",
+            "shadow123456", "michael12345", "jennifer1234",
+            "superman1234", "batman123456", "starwars1234",
+        ])
+
+        # Normalize and check
+        normalized = passphrase.lower().strip()
+        if normalized in weak_passphrases:
+            raise KeyDerivationError(
+                "Passphrase is too common/weak. Please use a stronger passphrase."
+            )
+
+        # Check for keyboard patterns
+        keyboard_patterns = [
+            "qwertyuiop", "asdfghjkl", "zxcvbnm",
+            "1234567890", "0987654321",
+            "qazwsxedc", "rfvtgbyhn",
+        ]
+        for pattern in keyboard_patterns:
+            if pattern in normalized:
+                raise KeyDerivationError(
+                    "Passphrase contains keyboard pattern. "
+                    "Please use a stronger passphrase."
+                )
+
+        # Check for excessive repetition
+        for i in range(len(passphrase) - 3):
+            if passphrase[i] == passphrase[i+1] == passphrase[i+2] == passphrase[i+3]:
+                raise KeyDerivationError(
+                    "Passphrase contains too many consecutive repeated characters"
+                )
 
     def _derive_key_from_passphrase(self, passphrase: str) -> bytes:
         """Derive a key from a passphrase using the configured KDF."""

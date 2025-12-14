@@ -213,6 +213,51 @@ class Mem0Client:
                 return None
         return self._embedder
 
+    def unload_embedder(self) -> None:
+        """
+        Unload the sentence transformer model to free memory.
+
+        Call this when the embedder is no longer needed, especially
+        in memory-constrained environments or when switching models.
+        The model will be lazily reloaded on next use if needed.
+        """
+        if self._embedder is not None:
+            # Clear reference to allow garbage collection
+            self._embedder = None
+            self._logger.info("embedder_unloaded", model=self._embedding_model)
+
+            # Force garbage collection to free GPU/CPU memory
+            import gc
+            gc.collect()
+
+            # If PyTorch is available, clear CUDA cache
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass  # PyTorch not installed
+
+    def close(self) -> None:
+        """
+        Clean up resources held by this client.
+
+        Saves memories and unloads the embedding model.
+        Call this when done using the client.
+        """
+        self._save_memories()
+        self.unload_embedder()
+        self._logger.info("mem0_client_closed")
+
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures cleanup."""
+        self.close()
+        return False
+
     def _compute_embedding(self, text: str) -> list[float] | None:
         """Compute embedding for text."""
         embedder = self._get_embedder()

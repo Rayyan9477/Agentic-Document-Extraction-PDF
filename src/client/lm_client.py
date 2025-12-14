@@ -305,18 +305,11 @@ class LMStudioClient:
         self._retry_max_wait = retry_max_wait or settings.lm_studio.retry_max_wait
 
         # Thread-local storage for OpenAI clients (thread-safety for concurrent requests)
+        # Each thread gets its own client to avoid connection pool conflicts
         self._thread_local = threading.local()
 
         # Lock for thread-safe initialization
         self._client_lock = threading.Lock()
-
-        # Initialize main OpenAI client for LM Studio (used in main thread)
-        self._client = OpenAI(
-            base_url=self._base_url,
-            api_key="not-needed",  # LM Studio doesn't require API key
-            timeout=float(self._timeout),
-            max_retries=0,  # We handle retries ourselves
-        )
 
         # Async client for async operations (created lazily)
         self._async_client: AsyncOpenAI | None = None
@@ -344,6 +337,28 @@ class LMStudioClient:
             model=self._model,
             timeout=self._timeout,
         )
+
+    def _get_client(self) -> OpenAI:
+        """
+        Get a thread-local OpenAI client.
+
+        Each thread gets its own client instance to avoid connection pool
+        conflicts under concurrent access. Clients are lazily created.
+
+        Returns:
+            Thread-local OpenAI client instance.
+        """
+        if not hasattr(self._thread_local, "client"):
+            with self._client_lock:
+                # Double-check after acquiring lock
+                if not hasattr(self._thread_local, "client"):
+                    self._thread_local.client = OpenAI(
+                        base_url=self._base_url,
+                        api_key="not-needed",  # LM Studio doesn't require API key
+                        timeout=float(self._timeout),
+                        max_retries=0,  # We handle retries ourselves
+                    )
+        return self._thread_local.client
 
     def is_healthy(self) -> bool:
         """
@@ -493,8 +508,9 @@ class LMStudioClient:
             "content": user_content,
         })
 
-        # Send request
-        response = self._client.chat.completions.create(
+        # Send request using thread-local client for thread safety
+        client = self._get_client()
+        response = client.chat.completions.create(
             model=self._model,
             messages=messages,
             max_tokens=request.max_tokens,
@@ -702,15 +718,55 @@ class LMStudioClient:
         # Close async client if initialized
         if self._async_client is not None:
             try:
-                # AsyncOpenAI client cleanup
-                asyncio.get_event_loop().run_until_complete(self._async_client.close())
-            except RuntimeError:
-                # No event loop running, client will be cleaned up by GC
-                pass
+                # Try to get a running loop first (Python 3.10+ compliant)
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we're in an async context, schedule the cleanup
+                    loop.create_task(self._async_client.close())
+                except RuntimeError:
+                    # No running loop - try to create one for cleanup
+                    try:
+                        # Create new event loop for cleanup (works in sync context)
+                        loop = asyncio.new_event_loop()
+                        try:
+                            loop.run_until_complete(self._async_client.close())
+                        finally:
+                            loop.close()
+                    except Exception:
+                        # If all else fails, let GC handle it
+                        # The client will eventually be cleaned up
+                        pass
             except Exception:
                 pass  # Best effort cleanup
 
         logger.debug("lm_client_closed")
+
+    async def close_async(self) -> None:
+        """
+        Async close for proper cleanup when called from async context.
+
+        Use this method instead of close() when in an async function
+        to ensure proper async resource cleanup.
+        """
+        if self._closed:
+            return
+
+        self._closed = True
+
+        # Close HTTP client (sync)
+        try:
+            self._http_client.close()
+        except Exception:
+            pass
+
+        # Close async client properly with await
+        if self._async_client is not None:
+            try:
+                await self._async_client.close()
+            except Exception:
+                pass
+
+        logger.debug("lm_client_closed_async")
 
     def __del__(self) -> None:
         """Destructor to ensure resources are released."""

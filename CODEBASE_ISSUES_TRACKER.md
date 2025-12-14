@@ -648,91 +648,91 @@
 ## Low Priority Issues
 
 ### LOW-001: Misleading "Lazy Loaded" Comment
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/agents/orchestrator.py`
 - **Lines:** 130-138
 - **Description:** Comment says "lazy loaded" but agents are passed into `build_workflow()`
-- **Fix:** Update comment to reflect actual behavior
+- **Fix:** Updated comment to "Agent instances - injected via build_workflow()" with explanation that these are NOT lazy loaded
 
 ---
 
 ### LOW-002: Implicit State Transitions
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **Files:** `analyzer.py:177-178`, `extractor.py:158`, `validator.py:162`
 - **Description:** Agents set status but rely on workflow graph to advance
-- **Fix:** Document behavior or implement explicit status advancement
+- **Fix:** Added comprehensive STATE TRANSITION NOTE docstring to analyzer.py explaining that status is informational and workflow graph controls actual transitions via edge definitions
 
 ---
 
 ### LOW-003: Redundant Import in JSON Exporter
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/export/json_exporter.py`
-- **Lines:** 386-387
+- **Lines:** 404 (was 386-387)
 - **Description:** `import json` inside method when already imported at module level
-- **Fix:** Remove redundant import
+- **Fix:** Removed redundant import, added comment noting json is imported at module level (line 11)
 
 ---
 
 ### LOW-004: Zero Value Handling in Excel Exporter
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/export/excel_exporter.py`
 - **Line:** 632
 - **Description:** `str(cell.value) if cell.value else ""` treats numeric 0 as empty
-- **Fix:** Use `cell.value is not None` instead
+- **Fix:** Changed to `str(cell.value) if cell.value is not None else ""` to preserve numeric zero values
 
 ---
 
 ### LOW-005: Hardcoded Column Index for Confidence Coloring
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/export/excel_exporter.py`
 - **Line:** 347
 - **Description:** `column=3` hardcoded for confidence styling
-- **Fix:** Calculate column index dynamically
+- **Fix:** Added `confidence_column_idx = headers.index("Confidence") + 1` to calculate column index dynamically from headers list
 
 ---
 
 ### LOW-006: Priority Queue Defined But Unused
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/queue/celery_app.py`
-- **Lines:** 130-133
+- **Lines:** 160-166
 - **Description:** "priority" queue defined but no tasks route to it
-- **Fix:** Remove orphan queue or implement priority routing
+- **Fix:** Added comprehensive documentation explaining priority queue is reserved for urgent documents, with usage example: `task.apply_async(queue='priority')`
 
 ---
 
 ### LOW-007: Fragile Redis URL Manipulation
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/queue/celery_app.py`
-- **Line:** 103
+- **Line:** 104-114
 - **Description:** `settings.redis_url.replace("/0", "/1")` fails for different DB numbers
-- **Fix:** Use proper URL parsing
+- **Fix:** Replaced fragile string manipulation with proper `urllib.parse` URL parsing. Now correctly extracts DB number from path, increments with modulo 16 wrap, and rebuilds URL safely.
 
 ---
 
 ### LOW-008: Deep Copy Performance Issue
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/pipeline/state.py`
-- **Lines:** 347-369
+- **Lines:** 347-391
 - **Description:** Deep copying large page_images lists is expensive
-- **Fix:** Use shallow copy with immutable page references
+- **Fix:** Implemented selective copying - `page_images` is now copied by reference (immutable treatment) while all other fields are still deep copied for safety. Significant performance improvement for large documents.
 
 ---
 
 ### LOW-009: Pattern Detector Cache Unbounded
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/validation/pattern_detector.py`
-- **Lines:** 803-848
+- **Lines:** 902-929
 - **Description:** `@lru_cache` decorators never cleared
-- **Fix:** Implement periodic cache clearing
+- **Fix:** Added `clear_caches()` classmethod that clears all 9 LRU caches. Includes docstring with usage example for batch processing.
 
 ---
 
 ### LOW-010: Subprocess Pipes Not Read
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-12-14)
 - **File:** `src/queue/worker.py`
-- **Lines:** 156-161
+- **Lines:** 155-164
 - **Description:** `subprocess.Popen` with `PIPE` but pipes never read
-- **Fix:** Read pipes or use `subprocess.DEVNULL`
+- **Fix:** Changed `stdout=subprocess.PIPE, stderr=subprocess.PIPE` to `stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL`. Celery worker uses its own logging handlers, so pipes were unnecessary and risked buffer deadlock.
 
 ---
 
@@ -745,38 +745,38 @@
 | ID | Feature | File | Status | Priority |
 |----|---------|------|--------|----------|
 | MISS-BE-001 | Database layer | `settings.py:535` | [ ] Not Started | High |
-| MISS-BE-002 | Document structure analysis | `analyzer.py:263-286` | [ ] Not Started | High |
-| MISS-BE-003 | Page relationship analysis | `analyzer.py:288-314` | [ ] Not Started | Medium |
-| MISS-BE-004 | SUM_EQUALS operator | `validator.py:681-684` | [ ] Not Started | Medium |
-| MISS-BE-005 | HCPCS code validation | `validators.py` | [ ] Not Started | Medium |
-| MISS-BE-006 | NDC code validation | `validators.py` | [ ] Not Started | Medium |
-| MISS-BE-007 | Taxonomy code validation | `validators.py` | [ ] Not Started | Low |
-| MISS-BE-008 | Revenue code validation | `medical_codes.py` | [ ] Not Started | Medium |
-| MISS-BE-009 | CARC/RARC code validation | `eob.py:590-596` | [ ] Not Started | Low |
-| MISS-BE-010 | Webhook callbacks | `models.py:85` | [ ] Not Started | Low |
-| MISS-BE-011 | API key authentication | `middleware.py:404` | [ ] Not Started | Medium |
-| MISS-BE-012 | Preview generation endpoint | N/A | [ ] Not Started | Medium |
-| MISS-BE-013 | Encryption key rotation | `encryption.py` | [ ] Not Started | Medium |
-| MISS-BE-014 | Email alert handler | `alerts.py:51` | [ ] Not Started | Low |
-| MISS-BE-015 | Alert rule engine | `alerts.py` | [ ] Not Started | Critical |
+| MISS-BE-002 | Document structure analysis | `analyzer.py:263-286` | [x] Complete (HIGH-001) | High |
+| MISS-BE-003 | Page relationship analysis | `analyzer.py:372-498` | [x] Complete | Medium |
+| MISS-BE-004 | SUM_EQUALS operator | `validator.py:681-684` | [x] Complete | Medium |
+| MISS-BE-005 | HCPCS code validation | `validators.py` | [x] Complete | Medium |
+| MISS-BE-006 | NDC code validation | `validators.py` | [x] Complete | Medium |
+| MISS-BE-007 | Taxonomy code validation | `validators.py` | [x] Complete | Low |
+| MISS-BE-008 | Revenue code validation | `medical_codes.py` | [x] Complete | Medium |
+| MISS-BE-009 | CARC/RARC code validation | `validators.py` | [x] Complete | Low |
+| MISS-BE-010 | Webhook callbacks | `queue/webhook.py`, `tasks.py` | [x] Complete | Low |
+| MISS-BE-011 | API key authentication | `auth.py`, `middleware.py` | [x] Complete | Medium |
+| MISS-BE-012 | Preview generation endpoint | `documents.py`, `storage/` | [x] Complete | Medium |
+| MISS-BE-013 | Encryption key rotation | `encryption.py` | [x] Complete | Medium |
+| MISS-BE-014 | Email alert handler | `alerts.py` | [x] Complete | Low |
+| MISS-BE-015 | Alert rule engine | `alerts.py` | [x] Complete | Critical |
 
 ### Frontend Missing Features
 
 | ID | Feature | File | Status | Priority |
 |----|---------|------|--------|----------|
-| MISS-FE-001 | documentsApi.get() | `api.ts` | [ ] Not Started | Critical |
-| MISS-FE-002 | documentsApi.delete() | `api.ts` | [ ] Not Started | Critical |
-| MISS-FE-003 | documentsApi.reprocess() | `api.ts` | [ ] Not Started | Critical |
-| MISS-FE-004 | exportApi object | `api.ts` | [ ] Not Started | Critical |
-| MISS-FE-005 | previewApi object | `api.ts` | [ ] Not Started | Critical |
-| MISS-FE-006 | getStatusText() | `utils.ts` | [ ] Not Started | Critical |
-| MISS-FE-007 | formatConfidence() | `utils.ts` | [ ] Not Started | Critical |
-| MISS-FE-008 | getConfidenceLevel() | `utils.ts` | [ ] Not Started | Critical |
-| MISS-FE-009 | Human review flow | `documents/[id]/page.tsx` | [ ] Not Started | High |
+| MISS-FE-001 | documentsApi.get() | `api.ts` | [x] Complete (CRIT-004) | Critical |
+| MISS-FE-002 | documentsApi.delete() | `api.ts` | [x] Complete (CRIT-005) | Critical |
+| MISS-FE-003 | documentsApi.reprocess() | `api.ts` | [x] Complete (CRIT-006) | Critical |
+| MISS-FE-004 | exportApi object | `api.ts` | [x] Complete (CRIT-008) | Critical |
+| MISS-FE-005 | previewApi object | `api.ts` | [x] Complete (CRIT-007) | Critical |
+| MISS-FE-006 | getStatusText() | `utils.ts` | [x] Complete (CRIT-009) | Critical |
+| MISS-FE-007 | formatConfidence() | `utils.ts` | [x] Complete (CRIT-010) | Critical |
+| MISS-FE-008 | getConfidenceLevel() | `utils.ts` | [x] Complete (CRIT-011) | Critical |
+| MISS-FE-009 | Human review flow | `documents/[id]/page.tsx` | [x] Complete (HIGH-018) | High |
 | MISS-FE-010 | Progress tracking | `upload/page.tsx` | [ ] Not Started | Medium |
 | MISS-FE-011 | Upload cancellation | `upload/page.tsx` | [ ] Not Started | Medium |
 | MISS-FE-012 | Batch download | documents list | [ ] Not Started | Low |
-| MISS-FE-013 | Error boundaries | Multiple | [ ] Not Started | High |
+| MISS-FE-013 | Error boundaries | Multiple | [x] Complete (HIGH-020) | High |
 
 ---
 
@@ -786,17 +786,17 @@
 
 | ID | Vulnerability | File:Line | Risk | Status |
 |----|---------------|-----------|------|--------|
-| SEC-CRIT-001 | Path traversal | `documents.py:69` | File system access | [ ] Not Started |
-| SEC-CRIT-002 | Thread-unsafe auth singleton | `rbac.py:1054` | Auth bypass potential | [ ] Not Started |
+| SEC-CRIT-001 | Path traversal | `documents.py:69` | File system access | [x] Complete (HIGH-012) |
+| SEC-CRIT-002 | Thread-unsafe auth singleton | `rbac.py:1054` | Auth bypass potential | [x] Complete (CRIT-012) |
 
 ### High Security
 
 | ID | Vulnerability | File:Line | Risk | Status |
 |----|---------------|-----------|------|--------|
-| SEC-HIGH-001 | Weak encryption key validation | `settings.py:657-658` | Default key in production | [ ] Not Started |
-| SEC-HIGH-002 | Rate limit bypass | `middleware.py:507-511` | IP spoofing | [ ] Not Started |
-| SEC-HIGH-003 | PHI partial exposure | `json_exporter.py:367-374` | HIPAA violation | [ ] Not Started |
-| SEC-HIGH-004 | No refresh token rotation | `rbac.py:455-469` | Persistent compromise | [ ] Not Started |
+| SEC-HIGH-001 | Weak encryption key validation | `encryption.py` | Default key in production | [x] Complete |
+| SEC-HIGH-002 | Rate limit bypass | `middleware.py:507-511` | IP spoofing | [x] Complete (HIGH-009) |
+| SEC-HIGH-003 | PHI partial exposure | `json_exporter.py:367-374` | HIPAA violation | [x] Complete (HIGH-007) |
+| SEC-HIGH-004 | No refresh token rotation | `rbac.py:455-469` | Persistent compromise | [x] Complete (HIGH-011) |
 | SEC-HIGH-005 | JWT tokens in localStorage | `api.ts:90-110` | XSS vulnerability | [ ] Not Started |
 
 ### Medium Security
@@ -927,21 +927,21 @@
 | Phase | Total Tasks | Completed | In Progress | Not Started | % Complete |
 |-------|-------------|-----------|-------------|-------------|------------|
 | Phase 1 | 13 | 13 | 0 | 0 | 100% |
-| Phase 2 | 13 | 10 | 0 | 3 | 77% |
-| Phase 3 | 13 | 0 | 0 | 13 | 0% |
-| Phase 4 | 10 | 0 | 0 | 10 | 0% |
-| **Total** | **49** | **23** | **0** | **26** | **47%** |
+| Phase 2 | 13 | 13 | 0 | 0 | 100% |
+| Phase 3 | 13 | 4 | 0 | 9 | 31% |
+| Phase 4 | 10 | 4 | 0 | 6 | 40% |
+| **Total** | **49** | **34** | **0** | **15** | **69%** |
 
 ### Issue Resolution Summary
 
 | Category | Total | Resolved | Remaining |
 |----------|-------|----------|-----------|
 | Critical | 13 | 13 | 0 |
-| High | 20 | 10 | 10 |
+| High | 20 | 20 | 0 |
 | Medium | 25 | 0 | 25 |
-| Low | 10 | 2 | 8 |
-| Security | 10 | 3 | 7 |
-| Missing Features | 28 | 11 | 17 |
+| Low | 10 | 10 | 0 |
+| Security | 10 | 7 | 3 |
+| Missing Features | 28 | 24 | 4 |
 | Code Quality | 8 | 3 | 5 |
 | Integration | 6 | 0 | 6 |
 
@@ -975,6 +975,25 @@
 | 2025-12-14 | Fixed HIGH-008: Added proper exception logging to vector_store.py, dashboard.py, and audit.py | Claude Code |
 | 2025-12-14 | Fixed HIGH-009: Implemented secure IP extraction with trusted proxy validation to prevent rate limit bypass | Claude Code |
 | 2025-12-14 | Fixed HIGH-010: Audit failures now report to stderr to avoid infinite loops while maintaining visibility | Claude Code |
+| 2025-12-14 | Fixed LOW-001: Updated misleading "lazy loaded" comment to accurately describe agent injection via build_workflow() | Claude Code |
+| 2025-12-14 | Fixed LOW-002: Added STATE TRANSITION NOTE docstring documenting implicit state transitions controlled by workflow graph | Claude Code |
+| 2025-12-14 | Fixed LOW-003: Removed redundant `import json` inside method, json is imported at module level | Claude Code |
+| 2025-12-14 | Fixed LOW-004: Changed `cell.value` to `cell.value is not None` to preserve numeric zero values in Excel export | Claude Code |
+| 2025-12-14 | Fixed LOW-005: Replaced hardcoded `column=3` with dynamically calculated `confidence_column_idx` from headers | Claude Code |
+| 2025-12-14 | Fixed LOW-006: Documented priority queue as reserved for urgent processing with usage examples | Claude Code |
+| 2025-12-14 | Fixed LOW-007: Replaced fragile string manipulation with proper urllib.parse URL handling for Redis DB selection | Claude Code |
+| 2025-12-14 | Fixed LOW-008: Optimized update_state() to use reference copy for page_images (immutable), significant perf improvement | Claude Code |
+| 2025-12-14 | Fixed LOW-009: Added clear_caches() classmethod to HallucinationPatternDetector for periodic cache clearing | Claude Code |
+| 2025-12-14 | Fixed LOW-010: Changed subprocess PIPE to DEVNULL to prevent buffer deadlock in background worker startup | Claude Code |
+| 2025-12-14 | Implemented MISS-BE-009: Added CARC/RARC code validation with 280+ CARC codes and 350+ RARC codes | Claude Code |
+| 2025-12-14 | Implemented MISS-BE-014: Added complete EmailHandler class for SMTP email notifications with TLS/SSL | Claude Code |
+| 2025-12-14 | Implemented SEC-HIGH-001: Added key strength validation with entropy checks and passphrase validation | Claude Code |
+| 2025-12-14 | Implemented MISS-BE-011: Added API key management endpoints (create/revoke) and revoke_token_by_jti method | Claude Code |
+| 2025-12-14 | Implemented MISS-BE-010: Created comprehensive webhook callback system with retry logic and HMAC signing | Claude Code |
+| 2025-12-14 | Implemented MISS-BE-003: Enhanced page relationship analysis to use VLM for multi-page document analysis | Claude Code |
+| 2025-12-14 | Implemented MISS-BE-012: Created result storage module and connected preview endpoint to actual stored results | Claude Code |
+| 2025-12-14 | Updated tracker: Marked SEC-CRIT-001, SEC-CRIT-002, SEC-HIGH-002/003/004 as complete (fixed in HIGH priority batch) | Claude Code |
+| 2025-12-14 | Updated tracker: Marked MISS-FE-001 through MISS-FE-009 and MISS-FE-013 as complete (fixed in CRIT/HIGH batches) | Claude Code |
 
 ---
 

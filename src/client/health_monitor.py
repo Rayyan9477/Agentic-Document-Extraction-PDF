@@ -138,6 +138,10 @@ class HealthMonitor:
             timeout=self._timeout,
         )
 
+        # Async client created lazily to avoid event loop issues
+        self._async_http_client: httpx.AsyncClient | None = None
+        self._async_client_lock = asyncio.Lock()
+
         self._current_health = ServerHealth()
         self._consecutive_failures = 0
         self._lock = threading.Lock()
@@ -345,29 +349,158 @@ class HealthMonitor:
             self._monitor_thread.join(timeout=5.0)
             self._monitor_thread = None
 
+    async def _get_async_client(self) -> httpx.AsyncClient:
+        """Get or create async HTTP client."""
+        if self._async_http_client is None:
+            async with self._async_client_lock:
+                if self._async_http_client is None:
+                    self._async_http_client = httpx.AsyncClient(
+                        base_url=self._base_url,
+                        timeout=self._timeout,
+                    )
+        return self._async_http_client
+
     async def check_health_async(self) -> ServerHealth:
         """
-        Perform async health check.
+        Perform async health check using native async I/O.
+
+        Uses httpx.AsyncClient for true non-blocking I/O instead of
+        wrapping sync code in executor.
 
         Returns:
             ServerHealth with current status.
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.check_health)
+        start_time = time.perf_counter()
+        health = ServerHealth(last_check_time=datetime.now(timezone.utc))
+
+        try:
+            client = await self._get_async_client()
+            response = await client.get("/v1/models")
+            response_time_ms = int((time.perf_counter() - start_time) * 1000)
+
+            if response.status_code == 200:
+                health.is_reachable = True
+                health.response_time_ms = response_time_ms
+
+                # Parse models response
+                data = response.json()
+                models = data.get("data", [])
+                health.available_models = [m.get("id", "") for m in models]
+                health.model_loaded = len(models) > 0
+
+                if models:
+                    health.model_name = models[0].get("id")
+
+                # Determine status based on response time
+                if response_time_ms < 1000:
+                    health.status = HealthStatus.HEALTHY
+                elif response_time_ms < 5000:
+                    health.status = HealthStatus.DEGRADED
+                else:
+                    health.status = HealthStatus.DEGRADED
+                    health.error_message = f"High latency: {response_time_ms}ms"
+
+                self._consecutive_failures = 0
+
+            else:
+                health.is_reachable = True
+                health.response_time_ms = response_time_ms
+                health.status = HealthStatus.DEGRADED
+                health.error_message = f"Unexpected status code: {response.status_code}"
+                self._consecutive_failures += 1
+
+        except httpx.ConnectError as e:
+            health.is_reachable = False
+            health.status = HealthStatus.UNHEALTHY
+            health.error_message = f"Connection failed: {e}"
+            self._consecutive_failures += 1
+
+        except httpx.TimeoutException as e:
+            health.is_reachable = False
+            health.status = HealthStatus.UNHEALTHY
+            health.error_message = f"Timeout: {e}"
+            self._consecutive_failures += 1
+
+        except Exception as e:
+            health.status = HealthStatus.UNKNOWN
+            health.error_message = f"Unexpected error: {e}"
+            self._consecutive_failures += 1
+
+        # Update state
+        with self._lock:
+            old_status = self._current_health.status
+            self._current_health = health
+
+        # Fire callbacks
+        if old_status != health.status:
+            for callback in self._status_callbacks:
+                try:
+                    callback(old_status, health.status)
+                except Exception as e:
+                    logger.warning("status_callback_error", error=str(e))
+
+        for callback in self._health_callbacks:
+            try:
+                callback(health)
+            except Exception as e:
+                logger.warning("health_callback_error", error=str(e))
+
+        return health
+
+    async def close_async(self) -> None:
+        """Close async HTTP client."""
+        if self._async_http_client is not None:
+            await self._async_http_client.aclose()
+            self._async_http_client = None
 
     async def monitor_continuous(
         self,
         interval: float = 30.0,
+        stop_event: asyncio.Event | None = None,
     ) -> None:
         """
-        Async continuous health monitoring.
+        Async continuous health monitoring with cancellation support.
+
+        Can be stopped by:
+        1. Passing a stop_event and setting it
+        2. Cancelling the task (raises asyncio.CancelledError)
 
         Args:
             interval: Seconds between checks.
+            stop_event: Optional event to signal monitoring should stop.
+
+        Example:
+            stop = asyncio.Event()
+            task = asyncio.create_task(monitor.monitor_continuous(stop_event=stop))
+            # Later...
+            stop.set()  # Graceful stop
+            await task
         """
-        while True:
-            await self.check_health_async()
-            await asyncio.sleep(interval)
+        try:
+            while True:
+                # Check for stop signal
+                if stop_event is not None and stop_event.is_set():
+                    logger.info("monitor_continuous_stopped", reason="stop_event")
+                    break
+
+                await self.check_health_async()
+
+                # Use wait_for with timeout instead of sleep for responsiveness
+                if stop_event is not None:
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=interval)
+                        # If we get here, stop_event was set
+                        logger.info("monitor_continuous_stopped", reason="stop_event")
+                        break
+                    except asyncio.TimeoutError:
+                        # Normal timeout, continue monitoring
+                        pass
+                else:
+                    await asyncio.sleep(interval)
+
+        except asyncio.CancelledError:
+            logger.info("monitor_continuous_stopped", reason="cancelled")
+            raise  # Re-raise to allow proper task cleanup
 
     def wait_for_healthy(
         self,

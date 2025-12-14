@@ -899,6 +899,35 @@ class HallucinationPatternDetector:
 
         return None
 
+    @classmethod
+    def clear_caches(cls) -> None:
+        """
+        Clear all LRU caches used by the pattern detector.
+
+        Call this method periodically in long-running processes to prevent
+        unbounded memory growth from cached field type checks and date parsing.
+        Recommended to call between document batches or when memory pressure is high.
+
+        Example:
+            # Clear caches after processing a batch
+            for doc in document_batch:
+                result = detector.detect(doc.fields)
+                process_result(result)
+            HallucinationPatternDetector.clear_caches()
+        """
+        # Clear all static method caches
+        cls._is_name_field.cache_clear()
+        cls._is_address_field.cache_clear()
+        cls._is_date_field.cache_clear()
+        cls._is_currency_field.cache_clear()
+        cls._is_identifier_field.cache_clear()
+        cls._is_text_field.cache_clear()
+        cls._looks_numeric.cache_clear()
+        cls._infer_numeric_type.cache_clear()
+        cls._parse_date.cache_clear()
+
+        logger.debug("hallucination_pattern_detector_caches_cleared")
+
 
 def detect_hallucination_patterns(
     extracted_data: dict[str, Any],

@@ -5,12 +5,13 @@ Provides connection pooling, automatic reconnection, and
 circuit breaker pattern for resilient VLM communication.
 """
 
+import asyncio
 import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar, Union
 
 from src.config import get_logger, get_settings
 
@@ -419,19 +420,55 @@ class ConnectionManager:
 
             raise
 
-    async def execute_async(self, func: Callable[[], T]) -> T:
+    async def execute_async(
+        self,
+        func: Union[Callable[[], T], Callable[[], Awaitable[T]]],
+    ) -> T:
         """
-        Execute async function with circuit breaker protection.
+        Execute function with circuit breaker protection (async version).
+
+        Supports both true async callables (coroutines) and sync callables.
+        For async callables, executes directly with await.
+        For sync callables, runs in executor to avoid blocking.
 
         Args:
-            func: Async function to execute.
+            func: Async or sync function to execute.
 
         Returns:
             Function result.
         """
-        import asyncio
+        # Check if function is async (returns coroutine)
+        result = func()
 
-        loop = asyncio.get_event_loop()
+        if asyncio.iscoroutine(result):
+            # True async - await directly for proper async I/O
+            try:
+                return await result
+            except Exception:
+                with self._lock:
+                    self._metrics.total_requests += 1
+                    self._record_failure()
+                raise
+        else:
+            # Sync function already called - return result
+            # Note: For sync functions requiring circuit breaker protection,
+            # use execute() or wrap in run_in_executor externally
+            return result
+
+    async def execute_sync_in_executor(self, func: Callable[[], T]) -> T:
+        """
+        Execute synchronous function in executor with circuit breaker.
+
+        Use this for CPU-bound or blocking I/O operations that need
+        to run without blocking the event loop.
+
+        Args:
+            func: Synchronous function to execute.
+
+        Returns:
+            Function result.
+        """
+        loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, self.execute, func)
 
     def check_health(self) -> bool:

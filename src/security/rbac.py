@@ -607,6 +607,39 @@ class TokenManager:
 
         return True
 
+    def revoke_token_by_jti(
+        self,
+        jti: str,
+        expires_at: float | None = None,
+    ) -> None:
+        """
+        Revoke a token by its JTI (JWT ID) directly.
+
+        This is useful when you have the JTI but not the full token,
+        such as when revoking API keys by their identifier.
+
+        Args:
+            jti: The JWT ID to revoke.
+            expires_at: Optional expiration timestamp. If not provided,
+                       uses 1 year from now (max API key lifetime).
+        """
+        if not jti:
+            logger.warning("revoke_token_by_jti_empty_jti")
+            return
+
+        # Use provided expiration or default to 1 year from now
+        if expires_at is None:
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(days=365)
+            ).timestamp()
+
+        self._revoked_tokens[jti] = float(expires_at)
+        self._save_revoked_tokens()
+        logger.info(
+            "token_revoked_by_jti",
+            jti=jti[:8] + "..." if len(jti) > 8 else jti,
+        )
+
     def cleanup_expired_revocations(self) -> int:
         """
         Public method to clean up expired token revocations.

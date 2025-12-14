@@ -22,6 +22,9 @@ from src.config import get_logger
 from src.schemas.validators import (
     validate_cpt_code,
     validate_icd10_code,
+    validate_hcpcs_code,
+    validate_ndc_code,
+    validate_taxonomy_code,
     validate_npi,
     MedicalCodeValidator as SchemaValidator,
     ValidationInfo,
@@ -41,6 +44,8 @@ class CodeType(str, Enum):
     NPI = "npi"
     HCPCS = "hcpcs"
     NDC = "ndc"
+    REVENUE_CODE = "revenue_code"
+    TAXONOMY = "taxonomy"
     PLACE_OF_SERVICE = "pos"
     TYPE_OF_SERVICE = "tos"
     MODIFIER = "modifier"
@@ -575,6 +580,228 @@ class MedicalCodeValidationEngine:
         if total > 0:
             passed = len(result.valid_codes) + len(result.warning_codes)
             result.validation_rate = passed / total
+
+
+# =============================================================================
+# Revenue Code Validation (UB-04 Institutional Claims)
+# =============================================================================
+
+# Valid UB-04 revenue code ranges (4-digit codes, 0001-0999)
+# See https://www.cms.gov/Medicare/CMS-Forms/CMS-Forms/downloads/CMS1450.pdf
+REVENUE_CODE_CATEGORIES = {
+    "001": "Total Charges",
+    "010": "All-Inclusive Rate",
+    "011": "Room & Board - Private",
+    "012": "Room & Board - Semi-Private",
+    "013": "Room & Board - Ward",
+    "014": "Room & Board - ICU",
+    "015": "Room & Board - CCU",
+    "016": "Room & Board - Hospice",
+    "017": "Room & Board - Nursery",
+    "019": "Room & Board - Other",
+    "020": "Intensive Care",
+    "021": "Coronary Care",
+    "022": "Pulmonary Care",
+    "023": "Intermediate ICU",
+    "024": "Burn Care",
+    "029": "Other Intensive Care",
+    "030": "Pharmacy",
+    "031": "Pharmacy - General",
+    "032": "Pharmacy - IV Solutions",
+    "033": "Pharmacy - Non-Legend Drugs",
+    "034": "Pharmacy - Erythropoietin",
+    "035": "Pharmacy - Drugs Incident to Radiology",
+    "036": "Pharmacy - Drugs Incident to Other DX",
+    "037": "Pharmacy - Self-Administrable Drugs",
+    "038": "Pharmacy - IV Therapy",
+    "039": "Pharmacy - Other",
+    "040": "Medical/Surgical Supplies",
+    "041": "Supplies - Non-Sterile",
+    "042": "Supplies - Sterile",
+    "043": "Supplies - Take Home",
+    "044": "Supplies - Prosthetic/Orthotic",
+    "045": "Supplies - Pacemaker",
+    "046": "Supplies - Intraocular Lens",
+    "047": "Supplies - Oxygen",
+    "048": "Supplies - Other Implants",
+    "049": "Supplies - Other",
+    "050": "Emergency Room",
+    "051": "ER - EMTALA",
+    "052": "ER - Beyond EMTALA",
+    "053": "ER - Urgent Care",
+    "059": "ER - Other",
+    "060": "Pulmonary Function",
+    "070": "EKG/ECG",
+    "071": "EKG - Holter Monitor",
+    "072": "EKG - Telemetry",
+    "079": "EKG - Other",
+    "080": "EEG",
+    "090": "Respiratory Therapy",
+    "0100": "Professional Fees",
+    "0110": "Clinic",
+    "0120": "Free Standing Clinic",
+    "0130": "Laboratory",
+    "0140": "Radiology - Diagnostic",
+    "0150": "Radiology - Therapeutic",
+    "0160": "Nuclear Medicine",
+    "0170": "CT Scan",
+    "0180": "MRI",
+    "0200": "OR Services",
+    "0210": "OR Services - Minor",
+    "0250": "Ambulatory Surgery",
+    "0260": "Lithotripsy",
+    "0270": "MRI",
+    "0280": "PET Scan",
+    "0300": "Laboratory - Clinical",
+    "0310": "Laboratory - Pathology",
+    "0320": "Radiology - DX",
+    "0330": "Radiology - Therapeutic",
+    "0340": "Nuclear Medicine",
+    "0350": "CT Scan",
+    "0360": "OR Services",
+    "0370": "Anesthesia",
+    "0380": "Blood",
+    "0390": "Blood - Administration",
+    "0400": "Other Imaging",
+    "0410": "Respiratory Services",
+    "0420": "Physical Therapy",
+    "0430": "Occupational Therapy",
+    "0440": "Speech Therapy",
+    "0450": "Emergency Room",
+    "0460": "Pulmonary Function",
+    "0470": "Audiology",
+    "0480": "Cardiology",
+    "0490": "Ambulatory Surgery",
+    "0500": "Outpatient Services",
+    "0510": "Clinic",
+    "0520": "Free Standing Clinic",
+    "0530": "Osteopathic Services",
+    "0540": "Ambulance",
+    "0550": "Skilled Nursing",
+    "0560": "Home Health",
+    "0570": "Home IV Therapy",
+    "0580": "Home Hospice",
+    "0590": "Home DME",
+    "0600": "Outpatient Speech Pathology",
+    "0610": "MRI",
+    "0620": "Medical/Surgical Supplies - Extension",
+    "0630": "Pharmacy - Extension",
+    "0700": "Cast Room",
+    "0710": "Recovery Room",
+    "0720": "Labor Room/Delivery",
+    "0730": "EKG/ECG",
+    "0740": "EEG",
+    "0750": "Gastro-Intestinal Services",
+    "0760": "Treatment/Observation Room",
+    "0770": "Preventive Care",
+    "0780": "Telemedicine",
+    "0790": "Lithotripsy",
+    "0800": "Inpatient Renal Dialysis",
+    "0810": "Organ Acquisition",
+    "0820": "Hemodialysis - Outpatient",
+    "0830": "Peritoneal Dialysis",
+    "0840": "CAPD - Outpatient",
+    "0850": "CCPD - Outpatient",
+    "0880": "Miscellaneous Dialysis",
+    "0900": "Psychiatric/Psychological Services",
+    "0910": "Behavioral Health Treatment",
+    "0940": "Other Therapeutic Services",
+    "0960": "Professional Fees",
+    "0980": "Professional Fees - Other",
+    "0990": "Patient Convenience Items",
+}
+
+
+def validate_revenue_code(code: str | int) -> ValidationInfo:
+    """
+    Validate a UB-04 Revenue Code.
+
+    Revenue codes are 4-digit codes (0001-0999) used on institutional
+    claims (UB-04 form) to categorize services and supplies.
+
+    Args:
+        code: Revenue code to validate.
+
+    Returns:
+        ValidationInfo with result and details.
+
+    Example:
+        >>> validate_revenue_code("0250")
+        ValidationInfo(result=VALID, message="Valid revenue code - Ambulatory Surgery", ...)
+        >>> validate_revenue_code("0301")
+        ValidationInfo(result=VALID, message="Valid revenue code - Laboratory - Clinical", ...)
+    """
+    if code is None:
+        return ValidationInfo(
+            result=ValidatorResult.INVALID,
+            message="Revenue code is required",
+        )
+
+    code_str = str(code).strip()
+
+    if not code_str:
+        return ValidationInfo(
+            result=ValidatorResult.INVALID,
+            message="Revenue code is empty",
+        )
+
+    # Remove leading zeros for comparison but keep for normalization
+    # Revenue codes are typically 4 digits (0001-0999)
+    digits_only = code_str.lstrip("0") or "0"
+
+    # Pad to 4 digits for normalized form
+    normalized = code_str.zfill(4)
+
+    # Validate it's numeric
+    if not code_str.isdigit():
+        return ValidationInfo(
+            result=ValidatorResult.INVALID,
+            message="Revenue code must be numeric",
+            normalized_value=code_str,
+        )
+
+    # Validate range (0001-0999, with special handling for 0001)
+    code_int = int(code_str)
+    if code_int < 1 or code_int > 999:
+        return ValidationInfo(
+            result=ValidatorResult.INVALID,
+            message="Revenue code must be between 0001 and 0999",
+            normalized_value=normalized,
+        )
+
+    # Look up category (try exact match, then 3-digit prefix)
+    category_name = REVENUE_CODE_CATEGORIES.get(normalized)
+    if not category_name:
+        # Try 3-digit prefix (e.g., 0301 -> 030)
+        prefix_3 = normalized[:3]
+        category_name = REVENUE_CODE_CATEGORIES.get(prefix_3)
+
+    if not category_name:
+        # Try 2-digit prefix for general categories
+        prefix_2 = normalized[:2] + "0"
+        category_name = REVENUE_CODE_CATEGORIES.get(prefix_2)
+
+    if category_name:
+        return ValidationInfo(
+            result=ValidatorResult.VALID,
+            message=f"Valid revenue code - {category_name}",
+            normalized_value=normalized,
+            details={
+                "category": category_name,
+                "code_int": code_int,
+            },
+        )
+
+    # Valid range but unknown specific category
+    return ValidationInfo(
+        result=ValidatorResult.VALID,
+        message="Valid revenue code (category not in lookup table)",
+        normalized_value=normalized,
+        details={
+            "code_int": code_int,
+            "note": "Code is in valid range but specific category not found",
+        },
+    )
 
 
 def validate_medical_codes(

@@ -34,6 +34,8 @@ class FieldType(str, Enum):
     HCPCS_CODE = "hcpcs_code"
     NDC_CODE = "ndc_code"
     TAXONOMY_CODE = "taxonomy_code"
+    CARC_CODE = "carc_code"  # Claim Adjustment Reason Code
+    RARC_CODE = "rarc_code"  # Remittance Advice Remark Code
 
     # Financial
     CURRENCY = "currency"
@@ -75,6 +77,8 @@ class FieldType(str, Enum):
             FieldType.HCPCS_CODE,
             FieldType.NDC_CODE,
             FieldType.TAXONOMY_CODE,
+            FieldType.CARC_CODE,
+            FieldType.RARC_CODE,
         )
 
     @property

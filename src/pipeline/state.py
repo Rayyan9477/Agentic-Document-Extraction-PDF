@@ -349,23 +349,45 @@ def update_state(
     updates: dict[str, Any],
 ) -> ExtractionState:
     """
-    Create updated state with new values using deep copy.
+    Create updated state with new values using selective copy.
 
     This creates a new state dict with updates applied, ensuring
     nested mutable structures (lists, dicts) are not shared between states.
     Used for immutable state updates in LangGraph.
+
+    PERFORMANCE: page_images is treated as immutable (copied by reference) since
+    it contains large base64-encoded image data that is expensive to deep copy.
+    All other fields are deep copied for safety.
 
     Args:
         state: Current state.
         updates: Dictionary of updates to apply.
 
     Returns:
-        New ExtractionState with updates applied (deep copied).
+        New ExtractionState with updates applied (selectively copied).
     """
-    # Use deep copy to prevent shared mutable state between old and new states
-    new_state: ExtractionState = copy.deepcopy(dict(state))  # type: ignore
-    # Deep copy updates as well to prevent external mutation
-    new_state.update(copy.deepcopy(updates))
+    # Start with a shallow copy of the state dict
+    new_state: ExtractionState = {}  # type: ignore
+
+    # Selectively copy state fields
+    for key, value in dict(state).items():
+        if key == "page_images":
+            # page_images is large and treated as immutable - use reference copy
+            # This avoids expensive deep copy of base64 image data
+            new_state[key] = value  # type: ignore
+        else:
+            # Deep copy all other mutable fields for safety
+            new_state[key] = copy.deepcopy(value)  # type: ignore
+
+    # Apply updates - also selectively copy
+    for key, value in updates.items():
+        if key == "page_images":
+            # page_images updates are also copied by reference
+            new_state[key] = value  # type: ignore
+        else:
+            # Deep copy update values to prevent external mutation
+            new_state[key] = copy.deepcopy(value)  # type: ignore
+
     return new_state
 
 

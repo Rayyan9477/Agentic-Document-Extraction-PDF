@@ -401,7 +401,7 @@ class JSONExporter:
         Returns:
             JSON string representation of the data.
         """
-        import json
+        # Note: json module is imported at module level (line 11), no need to re-import
         return json.dumps(data, default=str, ensure_ascii=False)
 
     def _write_to_file(self, data: dict[str, Any], path: Path) -> None:

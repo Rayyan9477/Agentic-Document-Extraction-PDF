@@ -803,58 +803,28 @@ async def generate_preview(
     }
     md_style = style_map.get(request.style, MarkdownStyle.DETAILED)
 
-    # In production, this would retrieve from database
-    # For demonstration, return a sample preview
-    sample_state = {
-        "processing_id": request.processing_id,
-        "document_type": "CMS-1500",
-        "status": "completed",
-        "overall_confidence": 0.92,
-        "merged_extraction": {
-            "patient_name": {"value": "John Doe", "confidence": 0.95},
-            "patient_dob": {"value": "01/15/1980", "confidence": 0.93},
-            "diagnosis_code_1": {"value": "J06.9", "confidence": 0.91},
-        },
-        "field_metadata": {
-            "patient_name": {
-                "confidence": 0.95,
-                "confidence_level": "high",
-                "passes_agree": True,
-                "validation_passed": True,
-            },
-            "patient_dob": {
-                "confidence": 0.93,
-                "confidence_level": "high",
-                "passes_agree": True,
-                "validation_passed": True,
-            },
-            "diagnosis_code_1": {
-                "confidence": 0.91,
-                "confidence_level": "high",
-                "passes_agree": True,
-                "validation_passed": True,
-            },
-        },
-        "validation": {
-            "is_valid": True,
-            "field_validations": {},
-            "cross_field_validations": [],
-            "hallucination_flags": [],
-            "warnings": [],
-            "errors": [],
-        },
-        "start_time": datetime.now(timezone.utc).isoformat(),
-        "end_time": datetime.now(timezone.utc).isoformat(),
-        "total_vlm_calls": 4,
-        "total_processing_time_ms": 25000,
-        "retry_count": 0,
-        "page_images": [b"page1"],
-        "errors": [],
-        "warnings": [],
-    }
+    # Retrieve result from storage
+    from src.storage import get_result
 
+    stored_result = get_result(request.processing_id)
+
+    if stored_result is None:
+        logger.warning(
+            "preview_not_found",
+            request_id=request_id,
+            processing_id=request.processing_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No results found for processing ID: {request.processing_id}",
+        )
+
+    # Remove storage metadata before processing
+    stored_result.pop("_storage_metadata", None)
+
+    # Generate markdown preview
     content = export_to_markdown(
-        sample_state,
+        stored_result,
         style=md_style,
         include_confidence_indicators=request.include_confidence,
         include_validation=request.include_validation,

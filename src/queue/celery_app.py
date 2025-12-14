@@ -7,6 +7,7 @@ with optimized settings for document processing workloads.
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 from celery import Celery
 
@@ -100,14 +101,17 @@ def create_celery_app(config: CeleryConfig | None = None) -> Celery:
         settings = get_settings()
         if hasattr(settings, "redis_url") and settings.redis_url:
             config.broker_url = settings.redis_url
-            # Parse and modify Redis URL safely for result backend
-            result_url = settings.redis_url
-            if "/0" in result_url:
-                result_url = result_url.replace("/0", "/1")
-            elif result_url.endswith("/"):
-                result_url = result_url + "1"
-            elif not result_url[-1].isdigit():
-                result_url = result_url + "/1"
+            # Parse Redis URL properly to set result backend to a different DB
+            # This uses urllib.parse for robust URL handling instead of fragile string replace
+            parsed = urlparse(settings.redis_url)
+            # Extract current DB number from path (e.g., "/0" -> 0)
+            current_db = 0
+            if parsed.path and parsed.path.strip("/").isdigit():
+                current_db = int(parsed.path.strip("/"))
+            # Use next DB number for results (wrap at 15 for Redis default max)
+            result_db = (current_db + 1) % 16
+            # Rebuild URL with new DB path
+            result_url = urlunparse(parsed._replace(path=f"/{result_db}"))
             config.result_backend = result_url
     except ImportError as e:
         logger.warning(
@@ -139,6 +143,11 @@ def create_celery_app(config: CeleryConfig | None = None) -> Celery:
     app.conf.update(config.to_celery_config())
 
     # Configure task queues
+    # Each queue corresponds to a task type defined in task_routes above:
+    # - document_processing: Single document extraction tasks
+    # - batch_processing: Multi-document batch jobs
+    # - reprocessing: Failed document retry tasks
+    # - priority: Reserved for urgent documents (usage: task.apply_async(queue='priority'))
     app.conf.task_queues = {
         "document_processing": {
             "exchange": "document_processing",
@@ -152,6 +161,9 @@ def create_celery_app(config: CeleryConfig | None = None) -> Celery:
             "exchange": "reprocessing",
             "routing_key": "reprocess.#",
         },
+        # Priority queue for urgent document processing.
+        # Not used by default routing - must be explicitly specified:
+        # Example: process_document_task.apply_async(args=[...], queue='priority')
         "priority": {
             "exchange": "priority",
             "routing_key": "priority.#",

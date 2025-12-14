@@ -153,10 +153,13 @@ class WorkerManager:
 
         try:
             if background:
+                # Use DEVNULL instead of PIPE to prevent subprocess hanging
+                # when output buffers fill up (we don't read the pipes anyway).
+                # Celery worker logs to its own configured handlers, not stdout/stderr.
                 self._worker_process = subprocess.Popen(
                     cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     start_new_session=True,
                 )
 

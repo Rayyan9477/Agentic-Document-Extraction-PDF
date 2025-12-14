@@ -313,6 +313,10 @@ class ExcelExporter:
         headers = ["Field Name", "Value", "Confidence", "Confidence Level", "Location", "Passes Agree"]
         self._write_header_row(worksheet, headers)
 
+        # Calculate column index dynamically to avoid hardcoding
+        # Column indices are 1-based in openpyxl
+        confidence_column_idx = headers.index("Confidence") + 1
+
         merged = state.get("merged_extraction", {})
         field_meta = state.get("field_metadata", {})
 
@@ -342,9 +346,9 @@ class ExcelExporter:
 
             self._write_data_row(worksheet, row, row_data)
 
-            # Apply confidence coloring
+            # Apply confidence coloring using dynamically calculated column index
             if self.config.include_confidence_colors:
-                self._styler.apply_confidence_color(worksheet.cell(row=row, column=3), confidence)
+                self._styler.apply_confidence_color(worksheet.cell(row=row, column=confidence_column_idx), confidence)
 
             row += 1
 
@@ -629,7 +633,8 @@ class ExcelExporter:
 
             for cell in column_cells:
                 try:
-                    cell_value = str(cell.value) if cell.value else ""
+                    # Use 'is not None' to preserve numeric zero values (e.g., "0" for counts)
+                    cell_value = str(cell.value) if cell.value is not None else ""
                     cell_length = len(cell_value)
                     if cell_length > max_length:
                         max_length = cell_length

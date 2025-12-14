@@ -127,7 +127,9 @@ class OrchestratorAgent(BaseAgent):
         self._high_confidence_threshold = high_confidence_threshold
         self._low_confidence_threshold = low_confidence_threshold
 
-        # Agent instances (lazy loaded)
+        # Agent instances - injected via build_workflow()
+        # These are NOT lazy loaded. They're passed in when build_workflow() is called
+        # and remain None until that point. The workflow graph owns the lifecycle.
         self._analyzer: BaseAgent | None = None
         self._extractor: BaseAgent | None = None
         self._validator: BaseAgent | None = None

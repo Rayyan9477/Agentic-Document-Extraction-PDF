@@ -181,6 +181,127 @@ def _update_task_state(state: str, meta: dict[str, Any]) -> None:
         current_task.update_state(state=state, meta=meta)
 
 
+def _store_pipeline_result(
+    processing_id: str,
+    pipeline_result: dict[str, Any],
+) -> None:
+    """
+    Store pipeline result for later retrieval.
+
+    This enables preview and export operations on completed results.
+    Storage failures are logged but do not affect task completion.
+
+    Args:
+        processing_id: Document processing ID.
+        pipeline_result: Full pipeline extraction result.
+    """
+    try:
+        from src.storage import save_result
+
+        # Store the result (excludes large binary data like page_images)
+        storable_result = {
+            k: v for k, v in pipeline_result.items()
+            if k != "page_images"  # Exclude binary image data
+        }
+
+        save_result(processing_id, storable_result)
+
+        logger.debug(
+            "pipeline_result_stored",
+            processing_id=processing_id,
+        )
+
+    except Exception as e:
+        # Storage failures should not affect task completion
+        logger.error(
+            "pipeline_result_storage_error",
+            processing_id=processing_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+
+
+def _send_completion_webhook(
+    callback_url: str,
+    task_id: str,
+    processing_id: str,
+    status: str,
+    result_data: dict[str, Any],
+    error: str | None = None,
+) -> None:
+    """
+    Send webhook notification for task completion.
+
+    This function is designed to be non-blocking and failure-tolerant.
+    Webhook delivery failures are logged but do not affect task results.
+
+    Args:
+        callback_url: URL to send webhook to.
+        task_id: Celery task ID.
+        processing_id: Document processing ID.
+        status: Task status (completed/failed).
+        result_data: Full task result data.
+        error: Error message if failed.
+    """
+    try:
+        from src.queue.webhook import (
+            send_webhook_notification,
+            WebhookEventType,
+        )
+
+        # Determine event type based on status
+        event_type = (
+            WebhookEventType.PROCESSING_COMPLETED
+            if status == "completed"
+            else WebhookEventType.PROCESSING_FAILED
+        )
+
+        # Build webhook data payload
+        data = {
+            "status": status,
+            "field_count": result_data.get("field_count", 0),
+            "overall_confidence": result_data.get("overall_confidence", 0.0),
+            "requires_human_review": result_data.get("requires_human_review", False),
+            "duration_ms": result_data.get("duration_ms", 0),
+            "output_path": result_data.get("output_path", ""),
+        }
+
+        if error:
+            data["error"] = error
+
+        if result_data.get("warnings"):
+            data["warnings"] = result_data["warnings"]
+
+        # Send webhook (synchronously since we're in a Celery task)
+        delivery_result = send_webhook_notification(
+            callback_url=callback_url,
+            event_type=event_type,
+            processing_id=processing_id,
+            task_id=task_id,
+            data=data,
+        )
+
+        logger.info(
+            "webhook_delivery_result",
+            task_id=task_id,
+            processing_id=processing_id,
+            callback_url=callback_url,
+            delivery_status=delivery_result.status.value,
+            attempts=delivery_result.attempts,
+        )
+
+    except Exception as e:
+        # Webhook failures should not affect task completion
+        logger.error(
+            "webhook_send_error",
+            task_id=task_id,
+            processing_id=processing_id,
+            callback_url=callback_url,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+
+
 @celery_app.task(
     bind=True,
     base=DocumentProcessingTask,
@@ -195,6 +316,7 @@ def process_document_task(
     export_format: str = "json",
     mask_phi: bool = False,
     priority: str = "normal",
+    callback_url: str | None = None,
 ) -> dict[str, Any]:
     """
     Process a single document asynchronously.
@@ -207,6 +329,7 @@ def process_document_task(
         export_format: Export format (json/excel/both).
         mask_phi: Whether to mask PHI fields.
         priority: Processing priority (low/normal/high).
+        callback_url: URL to call on completion/failure (webhook).
 
     Returns:
         TaskResult as dictionary.
@@ -309,6 +432,9 @@ def process_document_task(
         result.human_review_reason = pipeline_result.get("human_review_reason", "")
         result.warnings = pipeline_result.get("warnings", [])
 
+        # Store result for later retrieval (preview, export)
+        _store_pipeline_result(result.processing_id, pipeline_result)
+
         logger.info(
             "document_task_complete",
             task_id=task_id,
@@ -317,6 +443,16 @@ def process_document_task(
             field_count=result.field_count,
         )
 
+        # Send webhook notification on success
+        if callback_url:
+            _send_completion_webhook(
+                callback_url=callback_url,
+                task_id=task_id,
+                processing_id=result.processing_id,
+                status="completed",
+                result_data=result.to_dict(),
+            )
+
         return result.to_dict()
 
     except SoftTimeLimitExceeded:
@@ -324,6 +460,18 @@ def process_document_task(
         result.errors = ["Task exceeded time limit"]
         result.completed_at = datetime.now(timezone.utc).isoformat()
         logger.error("task_timeout", task_id=task_id)
+
+        # Send webhook notification on timeout failure
+        if callback_url:
+            _send_completion_webhook(
+                callback_url=callback_url,
+                task_id=task_id,
+                processing_id=result.processing_id,
+                status="failed",
+                result_data=result.to_dict(),
+                error="Task exceeded time limit",
+            )
+
         return result.to_dict()
 
     except MaxRetriesExceededError:
@@ -331,6 +479,18 @@ def process_document_task(
         result.errors = ["Maximum retries exceeded"]
         result.completed_at = datetime.now(timezone.utc).isoformat()
         logger.error("task_max_retries", task_id=task_id)
+
+        # Send webhook notification on max retries
+        if callback_url:
+            _send_completion_webhook(
+                callback_url=callback_url,
+                task_id=task_id,
+                processing_id=result.processing_id,
+                status="failed",
+                result_data=result.to_dict(),
+                error="Maximum retries exceeded",
+            )
+
         return result.to_dict()
 
     except FileNotFoundError as e:
@@ -338,6 +498,18 @@ def process_document_task(
         result.errors = [str(e)]
         result.completed_at = datetime.now(timezone.utc).isoformat()
         logger.error("task_file_not_found", task_id=task_id, error=str(e))
+
+        # Send webhook notification on file not found
+        if callback_url:
+            _send_completion_webhook(
+                callback_url=callback_url,
+                task_id=task_id,
+                processing_id=result.processing_id,
+                status="failed",
+                result_data=result.to_dict(),
+                error=str(e),
+            )
+
         return result.to_dict()
 
     except Exception as e:
@@ -356,6 +528,18 @@ def process_document_task(
         result.errors = [str(e)]
         result.completed_at = datetime.now(timezone.utc).isoformat()
         logger.error("task_error", task_id=task_id, error=str(e))
+
+        # Send webhook notification on general failure
+        if callback_url:
+            _send_completion_webhook(
+                callback_url=callback_url,
+                task_id=task_id,
+                processing_id=result.processing_id,
+                status="failed",
+                result_data=result.to_dict(),
+                error=str(e),
+            )
+
         return result.to_dict()
 
 

@@ -592,21 +592,61 @@ class ValidatorAgent(BaseAgent):
         results: list[dict[str, Any]] = []
 
         for rule in rules:
-            source_data = extraction.get(rule.source_field, {})
-            target_data = extraction.get(rule.target_field, {})
+            # Handle SUM_EQUALS specially - source_field is comma-separated list of fields to sum
+            if rule.operator == RuleOperator.SUM_EQUALS:
+                source_fields = [f.strip() for f in rule.source_field.split(",")]
+                field_sum = 0.0
+                missing_fields: list[str] = []
 
-            source_value = (
-                source_data.get("value")
-                if isinstance(source_data, dict)
-                else source_data
-            )
-            target_value = (
-                target_data.get("value")
-                if isinstance(target_data, dict)
-                else target_data
-            )
+                for field_name in source_fields:
+                    field_data = extraction.get(field_name, {})
+                    value = (
+                        field_data.get("value")
+                        if isinstance(field_data, dict)
+                        else field_data
+                    )
+                    if value is None:
+                        missing_fields.append(field_name)
+                    else:
+                        try:
+                            # Handle currency formatting (remove $, commas)
+                            clean_val = str(value).replace("$", "").replace(",", "").strip()
+                            field_sum += float(clean_val)
+                        except (ValueError, TypeError):
+                            missing_fields.append(field_name)
 
-            passed, status = self._evaluate_rule(rule, source_value, target_value)
+                target_data = extraction.get(rule.target_field, {})
+                target_value = (
+                    target_data.get("value")
+                    if isinstance(target_data, dict)
+                    else target_data
+                )
+                source_value = field_sum
+
+                if missing_fields:
+                    passed = False
+                    status = "inconclusive"
+                elif target_value is None:
+                    passed = False
+                    status = "skipped"
+                else:
+                    passed, status = self._evaluate_rule(rule, source_value, target_value)
+            else:
+                source_data = extraction.get(rule.source_field, {})
+                target_data = extraction.get(rule.target_field, {})
+
+                source_value = (
+                    source_data.get("value")
+                    if isinstance(source_data, dict)
+                    else source_data
+                )
+                target_value = (
+                    target_data.get("value")
+                    if isinstance(target_data, dict)
+                    else target_data
+                )
+
+                passed, status = self._evaluate_rule(rule, source_value, target_value)
 
             # Determine message based on status
             if status == "skipped":
@@ -722,9 +762,20 @@ class ValidatorAgent(BaseAgent):
                 return (False, "inconclusive")
 
             elif rule.operator == RuleOperator.SUM_EQUALS:
-                # Source is list of fields, target is expected sum
-                # TODO: Implement proper sum validation
-                return (True, "skipped")
+                # Source value is pre-calculated sum from _validate_cross_field_rules
+                # Target value is the expected total
+                try:
+                    # Handle currency formatting in target value
+                    clean_target = str(target_value).replace("$", "").replace(",", "").strip()
+                    expected_sum = float(clean_target)
+                    actual_sum = float(source_value)
+
+                    # Allow small tolerance for floating point comparison (0.01 for currency)
+                    tolerance = 0.01
+                    result = abs(actual_sum - expected_sum) <= tolerance
+                    return (result, "passed" if result else "failed")
+                except (ValueError, TypeError):
+                    return (False, "inconclusive")
 
         except (ValueError, TypeError) as e:
             # Conversion failed - mark as inconclusive
