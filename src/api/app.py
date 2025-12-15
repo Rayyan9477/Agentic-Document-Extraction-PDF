@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from src.security.data_cleanup import TempFileManager
         temp_manager = TempFileManager()
-        await temp_manager.cleanup_async()
+        temp_manager.cleanup_all()  # Use sync method (cleanup_async doesn't exist)
         logger.info("temp_files_cleaned")
     except Exception as e:
         logger.warning("temp_cleanup_failed", error=str(e))

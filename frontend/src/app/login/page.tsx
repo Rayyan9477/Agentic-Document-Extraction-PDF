@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -10,9 +10,19 @@ import { Card, CardContent, Button, Input } from '@/components/ui';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 
+// DEV MODE: Skip login (must match authStore.ts)
+const DEV_AUTO_LOGIN = true;
+
 export default function LoginPage() {
   const router = useRouter();
   const { setUser } = useAuthStore();
+
+  // DEV MODE: Redirect to dashboard immediately
+  useEffect(() => {
+    if (DEV_AUTO_LOGIN) {
+      router.replace('/dashboard');
+    }
+  }, [router]);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     username: '',

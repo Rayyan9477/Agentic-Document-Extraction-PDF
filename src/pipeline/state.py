@@ -267,7 +267,7 @@ class ExtractionState(TypedDict, total=False):
 
     # === Memory Fields (Mem0 Integration) ===
     session_id: str | None  # Session identifier for memory grouping
-    checkpoint_id: str | None  # Checkpoint identifier for recovery
+    recovery_checkpoint: str | None  # Checkpoint identifier for recovery (renamed to avoid LangGraph reserved name)
     memory_context: dict[str, Any] | None  # Retrieved context from memory
     similar_docs: list[str]  # IDs of similar previously processed documents
     provider_patterns: dict[str, Any] | None  # Provider-specific extraction patterns
@@ -336,7 +336,7 @@ def create_initial_state(
         human_review_reason=None,
         # Memory
         session_id=secrets.token_hex(8),
-        checkpoint_id=None,
+        recovery_checkpoint=None,
         memory_context=None,
         similar_docs=[],
         provider_patterns=None,

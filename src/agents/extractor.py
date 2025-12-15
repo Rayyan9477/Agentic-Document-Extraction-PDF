@@ -203,7 +203,56 @@ class ExtractorAgent(BaseAgent):
             except ValueError:
                 self._logger.warning("schema_not_found", schema_name=schema_name)
 
-        return None
+        # Return a generic fallback schema for unknown/other documents
+        self._logger.info("using_generic_schema", reason="No specific schema found")
+        return self._create_generic_schema()
+
+    def _create_generic_schema(self) -> DocumentSchema:
+        """
+        Create a generic schema for documents without a specific schema.
+
+        Returns:
+            A generic DocumentSchema that extracts common document fields.
+        """
+        from src.schemas.schema_builder import SchemaBuilder, FieldBuilder
+        from src.schemas import DocumentType, FieldType
+
+        builder = SchemaBuilder(
+            name="generic_document",
+            document_type=DocumentType.CUSTOM,
+        )
+
+        builder.display_name("Generic Document")
+        builder.description("Generic schema for extracting common document information")
+
+        # Add common fields using fluent API
+        schema = (builder
+            .field(FieldBuilder("title")
+                .display_name("Document Title")
+                .type(FieldType.STRING)
+                .description("Main title or heading of the document")
+                .location_hint("top of page, header area"))
+            .field(FieldBuilder("date")
+                .display_name("Date")
+                .type(FieldType.DATE)
+                .description("Primary date on the document")
+                .location_hint("header, top right, or near title"))
+            .field(FieldBuilder("document_type")
+                .display_name("Document Type")
+                .type(FieldType.STRING)
+                .description("Type or category of the document"))
+            .field(FieldBuilder("summary")
+                .display_name("Summary")
+                .type(FieldType.STRING)
+                .description("Brief summary of the document content"))
+            .field(FieldBuilder("key_information")
+                .display_name("Key Information")
+                .type(FieldType.STRING)
+                .description("Important facts, figures, or data from the document"))
+            .build()
+        )
+
+        return schema
 
     def _build_custom_schema(self, schema_def: dict[str, Any]) -> DocumentSchema:
         """

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
@@ -9,9 +9,19 @@ import { FileText, Mail, Lock, User, ArrowRight } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@/components/ui';
 import { authApi } from '@/lib/api';
 
+// DEV MODE: Skip signup (must match authStore.ts)
+const DEV_AUTO_LOGIN = true;
+
 export default function SignupPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+
+  // DEV MODE: Redirect to dashboard immediately
+  useEffect(() => {
+    if (DEV_AUTO_LOGIN) {
+      router.replace('/dashboard');
+    }
+  }, [router]);
   const [formData, setFormData] = useState({
     username: '',
     email: '',

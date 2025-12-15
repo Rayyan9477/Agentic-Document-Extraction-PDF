@@ -21,7 +21,9 @@
       "Bash(cat:*)",
       "Bash(wc:*)",
       "Bash(file:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(set \"PYTHONPATH=d:/Repo/PDF\")",
+      "Bash(netstat:*)"
     ],
     "deny": [],
     "ask": []

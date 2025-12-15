@@ -5,6 +5,9 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { PageLoader } from '@/components/ui';
 
+// DEV MODE: Skip auth check entirely (must match authStore.ts)
+const DEV_AUTO_LOGIN = true;
+
 interface ProtectedRouteProps {
   children: React.ReactNode;
   redirectTo?: string;
@@ -26,6 +29,11 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const router = useRouter();
   const { isAuthenticated, isLoading } = useAuth();
   const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // DEV MODE: Skip all auth checks
+  if (DEV_AUTO_LOGIN) {
+    return <>{children}</>;
+  }
 
   // Handle redirect when not authenticated
   useEffect(() => {

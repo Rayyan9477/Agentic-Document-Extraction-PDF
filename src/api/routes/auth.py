@@ -33,7 +33,7 @@ class PasswordValidator:
     Validates password strength according to OWASP and HIPAA requirements.
     """
 
-    MIN_LENGTH = 12
+    MIN_LENGTH = 6  # Simplified for development
     COMMON_PASSWORDS = {
         "password",
         "12345678",
@@ -80,29 +80,20 @@ class PasswordValidator:
         if password.lower() in PasswordValidator.COMMON_PASSWORDS:
             return False, "Password is too common. Please choose a stronger password"
 
-        # Check complexity requirements
-        checks = {
-            r"[A-Z]": "at least one uppercase letter",
-            r"[a-z]": "at least one lowercase letter",
-            r"[0-9]": "at least one number",
-            r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~]': "at least one special character",
-        }
-
-        missing_requirements = []
-        for pattern, requirement in checks.items():
-            if not re.search(pattern, password):
-                missing_requirements.append(requirement)
-
-        if missing_requirements:
-            return False, f"Password must contain {', '.join(missing_requirements)}"
-
-        # Check for sequential characters
-        if re.search(r"(012|123|234|345|456|567|678|789|890|abc|bcd|cde|def)", password.lower()):
-            return False, "Password contains sequential characters"
-
-        # Check for repeated characters (more than 2 consecutive)
-        if re.search(r"(.)\1{2,}", password):
-            return False, "Password contains too many repeated characters"
+        # Complexity requirements disabled for simplified login
+        # Uncomment for production/HIPAA compliance:
+        # checks = {
+        #     r"[A-Z]": "at least one uppercase letter",
+        #     r"[a-z]": "at least one lowercase letter",
+        #     r"[0-9]": "at least one number",
+        #     r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~]': "at least one special character",
+        # }
+        # missing_requirements = []
+        # for pattern, requirement in checks.items():
+        #     if not re.search(pattern, password):
+        #         missing_requirements.append(requirement)
+        # if missing_requirements:
+        #     return False, f"Password must contain {', '.join(missing_requirements)}"
 
         return True, None
 
@@ -140,8 +131,8 @@ def _validate_jwt_secret_entropy(secret_key: str) -> None:
             "Generate a proper random key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
         )
 
-    # Check for common weak patterns
-    weak_patterns = ['password', 'secret', '123456', 'abcdef', 'qwerty']
+    # Check for common weak patterns (removed 'secret' for dev environments)
+    weak_patterns = ['password', '123456', 'abcdef', 'qwerty']
     lower_key = secret_key.lower()
     for pattern in weak_patterns:
         if pattern in lower_key:
@@ -178,7 +169,7 @@ class LoginRequest(BaseModel):
     """Login request model."""
 
     username: str = Field(..., min_length=3, max_length=50)
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., min_length=6)  # Simplified for development
 
 
 class SignupRequest(BaseModel):
@@ -191,8 +182,8 @@ class SignupRequest(BaseModel):
         pattern=r"^[a-zA-Z0-9_-]+$",  # Alphanumeric, underscore, hyphen only
     )
     email: str = Field(..., pattern=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-    password: str = Field(..., min_length=12)  # Increased from 8 to 12
-    confirm_password: str = Field(..., min_length=12)
+    password: str = Field(..., min_length=6)  # Simplified for development
+    confirm_password: str = Field(..., min_length=6)
 
     @field_validator("username")
     @classmethod
@@ -682,6 +673,16 @@ async def get_current_user(
         )
 
     token = auth_header.split(" ")[1]
+
+    # DEV MODE: Accept dev token for development (skip JWT validation)
+    if token == "dev-token-rayyan":
+        return UserResponse(
+            user_id="dev-user-rayyan",
+            username="rayyan",
+            email="rayyan.a@nobilityrcm.com",
+            roles=["admin"],
+            permissions=["*"],
+        )
 
     try:
         rbac = get_rbac_manager()

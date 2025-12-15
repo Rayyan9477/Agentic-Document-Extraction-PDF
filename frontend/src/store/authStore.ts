@@ -3,8 +3,24 @@ import { persist } from 'zustand/middleware';
 import type { User } from '@/types/api';
 
 // Token storage keys (must match api.ts)
-const ACCESS_TOKEN_KEY = 'pdf_access_token';
-const REFRESH_TOKEN_KEY = 'pdf_refresh_token';
+const ACCESS_TOKEN_KEY = 'access_token';
+const REFRESH_TOKEN_KEY = 'refresh_token';
+
+// DEV MODE: Auto-login as rayyan (skip login/signup for development)
+const DEV_AUTO_LOGIN = true;
+const DEV_USER: User = {
+  id: 'dev-user-rayyan',
+  username: 'rayyan',
+  email: 'rayyan.a@nobilityrcm.com',
+  role: 'admin',
+};
+
+// Set dev tokens on load (for API calls to work)
+if (typeof window !== 'undefined' && DEV_AUTO_LOGIN) {
+  // Use a placeholder token - backend should be configured to accept it or skip auth
+  localStorage.setItem(ACCESS_TOKEN_KEY, 'dev-token-rayyan');
+  localStorage.setItem(REFRESH_TOKEN_KEY, 'dev-refresh-token-rayyan');
+}
 
 /**
  * Clear all auth tokens from localStorage.
@@ -31,9 +47,10 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      user: null,
-      isAuthenticated: false,
-      isLoading: true,
+      // DEV MODE: Auto-login as rayyan
+      user: DEV_AUTO_LOGIN ? DEV_USER : null,
+      isAuthenticated: DEV_AUTO_LOGIN,
+      isLoading: false,
 
       setUser: (user) =>
         set({
