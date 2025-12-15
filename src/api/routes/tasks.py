@@ -47,11 +47,20 @@ async def list_active_tasks(
         request_id=request_id,
     )
 
+    # Quick Redis availability check (avoids 5+ second timeout)
+    from src.queue import is_redis_available
+    if not is_redis_available():
+        logger.debug(
+            "list_active_tasks_redis_unavailable",
+            request_id=request_id,
+        )
+        return []  # Return empty list immediately if Redis not available
+
     try:
         from src.queue.celery_app import celery_app
 
-        # Get active tasks from all workers
-        inspect = celery_app.control.inspect()
+        # Get active tasks from all workers with timeout
+        inspect = celery_app.control.inspect(timeout=2.0)
 
         active_tasks = []
 

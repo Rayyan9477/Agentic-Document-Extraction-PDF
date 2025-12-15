@@ -43,6 +43,19 @@ async def get_queue_stats(
         request_id=request_id,
     )
 
+    # Quick Redis availability check (avoids 5+ second timeout)
+    from src.queue import is_redis_available
+    if not is_redis_available():
+        logger.debug(
+            "queue_stats_redis_unavailable",
+            request_id=request_id,
+        )
+        return [
+            {"name": "default", "pending": 0, "active": 0, "completed": 0, "failed": 0},
+            {"name": "high_priority", "pending": 0, "active": 0, "completed": 0, "failed": 0},
+            {"name": "low_priority", "pending": 0, "active": 0, "completed": 0, "failed": 0},
+        ]
+
     try:
         from src.queue.worker import WorkerManager
 
@@ -108,6 +121,15 @@ async def get_workers(
         request_id=request_id,
     )
 
+    # Quick Redis availability check (avoids 5+ second timeout)
+    from src.queue import is_redis_available
+    if not is_redis_available():
+        logger.debug(
+            "queue_workers_redis_unavailable",
+            request_id=request_id,
+        )
+        return []
+
     try:
         from src.queue.worker import WorkerManager
 
@@ -165,6 +187,14 @@ async def purge_queue(
         request_id=request_id,
         queue_name=queue_name,
     )
+
+    # Quick Redis availability check (avoids 5+ second timeout)
+    from src.queue import is_redis_available
+    if not is_redis_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Redis is not available. Cannot purge queue.",
+        )
 
     try:
         from src.queue.worker import WorkerManager
