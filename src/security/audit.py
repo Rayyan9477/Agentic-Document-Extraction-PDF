@@ -565,6 +565,7 @@ class AuditLogger:
     """
 
     _instance: AuditLogger | None = None
+    _lock: threading.Lock = threading.Lock()
     _context: threading.local = threading.local()
 
     def __init__(
@@ -606,17 +607,21 @@ class AuditLogger:
 
     @classmethod
     def get_instance(cls, **kwargs: Any) -> AuditLogger:
-        """Get or create singleton audit logger instance."""
+        """Get or create singleton audit logger instance (thread-safe)."""
         if cls._instance is None:
-            cls._instance = cls(**kwargs)
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = cls(**kwargs)
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Reset singleton instance (for testing)."""
-        if cls._instance:
-            cls._instance.shutdown()
-        cls._instance = None
+        """Reset singleton instance (thread-safe, for testing)."""
+        with cls._lock:
+            if cls._instance:
+                cls._instance.shutdown()
+            cls._instance = None
 
     def shutdown(self) -> None:
         """Shutdown the audit logger."""

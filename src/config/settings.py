@@ -297,6 +297,36 @@ class ValidationSettings(BaseSettings):
     )
 
 
+class AgentSettings(BaseSettings):
+    """Agent optimization and caching settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENT_",
+        extra="ignore",
+    )
+
+    cache_max_size: Annotated[int, Field(ge=100, le=10000)] = Field(
+        default=1000,
+        description="Maximum number of items in agent cache",
+    )
+    cache_ttl_seconds: Annotated[int, Field(ge=300, le=86400)] = Field(
+        default=3600,
+        description="Cache TTL in seconds (default 1 hour)",
+    )
+    metrics_buffer_size: Annotated[int, Field(ge=100, le=10000)] = Field(
+        default=1000,
+        description="Maximum metrics buffer size before flush",
+    )
+    alert_latency_threshold_ms: Annotated[int, Field(ge=1000, le=30000)] = Field(
+        default=5000,
+        description="Latency threshold for alerts in milliseconds",
+    )
+    max_retry_delay_ms: Annotated[int, Field(ge=1000, le=30000)] = Field(
+        default=5000,
+        description="Maximum retry delay in milliseconds",
+    )
+
+
 class APISettings(BaseSettings):
     """FastAPI server configuration settings."""
 
@@ -627,6 +657,7 @@ class Settings(BaseSettings):
     mem0: Mem0Settings = Field(default_factory=Mem0Settings)
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
     validation: ValidationSettings = Field(default_factory=ValidationSettings)
+    agent: AgentSettings = Field(default_factory=AgentSettings)
     api: APISettings = Field(default_factory=APISettings)
     celery: CelerySettings = Field(default_factory=CelerySettings)
     security: SecuritySettings = Field(default_factory=SecuritySettings)

@@ -8,6 +8,7 @@ resource usage, and extraction accuracy for production observability.
 from __future__ import annotations
 
 import functools
+import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -68,6 +69,7 @@ class MetricsRegistry:
     """
 
     _instance: MetricsRegistry | None = None
+    _lock: threading.Lock = threading.Lock()
 
     def __init__(self, labels: MetricLabels | None = None) -> None:
         """
@@ -94,15 +96,19 @@ class MetricsRegistry:
 
     @classmethod
     def get_instance(cls, labels: MetricLabels | None = None) -> MetricsRegistry:
-        """Get or create singleton instance."""
+        """Get or create singleton instance (thread-safe)."""
         if cls._instance is None:
-            cls._instance = cls(labels)
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = cls(labels)
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
         """Reset singleton instance (for testing)."""
-        cls._instance = None
+        with cls._lock:
+            cls._instance = None
 
     def _init_system_metrics(self) -> None:
         """Initialize system-level metrics."""

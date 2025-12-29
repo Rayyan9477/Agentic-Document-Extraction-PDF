@@ -1326,6 +1326,7 @@ class AlertManager:
     """
 
     _instance: AlertManager | None = None
+    _lock: threading.Lock = threading.Lock()
 
     def __init__(
         self,
@@ -1354,17 +1355,21 @@ class AlertManager:
 
     @classmethod
     def get_instance(cls, **kwargs: Any) -> AlertManager:
-        """Get or create singleton instance."""
+        """Get or create singleton instance (thread-safe)."""
         if cls._instance is None:
-            cls._instance = cls(**kwargs)
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = cls(**kwargs)
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Reset singleton instance."""
-        if cls._instance:
-            cls._instance.stop()
-        cls._instance = None
+        """Reset singleton instance (thread-safe)."""
+        with cls._lock:
+            if cls._instance:
+                cls._instance.stop()
+            cls._instance = None
 
     def start(self) -> None:
         """Start the alert manager."""

@@ -12,7 +12,7 @@ from typing import Any
 
 from src.agents.base import BaseAgent, AgentResult, AnalysisError
 from src.client.lm_client import LMStudioClient
-from src.config import get_logger
+from src.config import get_logger, get_settings
 from src.pipeline.state import (
     ExtractionState,
     ExtractionStatus,
@@ -250,10 +250,11 @@ class AnalyzerAgent(BaseAgent):
         )
 
         # Use retry with exponential backoff for VLM calls
+        settings = get_settings()
         retry_config = RetryConfig(
-            max_retries=2,
+            max_retries=settings.extraction.max_retries,
             base_delay_ms=500,
-            max_delay_ms=5000,
+            max_delay_ms=settings.agent.max_retry_delay_ms,
         )
 
         def make_classification_call() -> dict[str, Any]:

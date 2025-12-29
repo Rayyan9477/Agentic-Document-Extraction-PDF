@@ -1,0 +1,211 @@
+# =============================================================================
+# Docker Compose - Production Environment
+# =============================================================================
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml logs -f
+#   docker compose -f docker-compose.prod.yml down
+#
+# Security Notes:
+#   - Ensure SECRET_KEY and ENCRYPTION_KEY are set in environment
+#   - Do not expose Redis port externally in production
+#   - Use proper SSL termination (reverse proxy)
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Main API Service - Production
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    container_name: doc-extraction-api-prod
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/extraction.db}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - HIPAA_AUDIT_ENABLED=true
+      - HIPAA_ENCRYPT_AT_REST=true
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+      - app-output:/app/output
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - doc-extraction-prod
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker - Production
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    container_name: doc-extraction-worker-prod
+    command: celery -A src.queue.celery_app worker --loglevel=info --concurrency=4
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - LOG_FORMAT=json
+      - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/extraction.db}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+    volumes:
+      - app-data:/app/data
+      - app-logs:/app/logs
+      - app-output:/app/output
+      - app-temp:/app/temp
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - doc-extraction-prod
+    deploy:
+      mode: replicated
+      replicas: 2
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '1'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # ---------------------------------------------------------------------------
+  # Celery Beat Scheduler - Production
+  # ---------------------------------------------------------------------------
+  beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+    container_name: doc-extraction-beat-prod
+    command: celery -A src.queue.celery_app beat --loglevel=info
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - doc-extraction-prod
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Redis - Production (No external port exposure)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: doc-extraction-redis-prod
+    # Note: Port NOT exposed externally for security
+    volumes:
+      - redis-data:/data
+    networks:
+      - doc-extraction-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# -----------------------------------------------------------------------------
+# Networks
+# -----------------------------------------------------------------------------
+networks:
+  doc-extraction-prod:
+    driver: bridge
+    name: doc-extraction-prod
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# -----------------------------------------------------------------------------
+# Volumes - Named volumes for persistence
+# -----------------------------------------------------------------------------
+volumes:
+  app-data:
+    name: doc-extraction-data-prod
+  app-logs:
+    name: doc-extraction-logs-prod
+  app-output:
+    name: doc-extraction-output-prod
+  app-temp:
+    name: doc-extraction-temp-prod
+  redis-data:
+    name: doc-extraction-redis-prod

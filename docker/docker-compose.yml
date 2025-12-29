@@ -1,0 +1,167 @@
+# =============================================================================
+# Docker Compose - Development Environment
+# =============================================================================
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f api    # Follow API logs
+#   docker compose down           # Stop all services
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Main API Service
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: doc-extraction-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      - APP_ENV=development
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+      - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DATABASE_URL=sqlite:///./data/extraction.db
+    volumes:
+      - ../src:/app/src:ro
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../output:/app/output
+      - ../temp:/app/temp
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - doc-extraction-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Celery Worker
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: doc-extraction-worker
+    command: celery -A src.queue.celery_app worker --loglevel=info
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=INFO
+      - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+    volumes:
+      - ../src:/app/src:ro
+      - ../data:/app/data
+      - ../logs:/app/logs
+      - ../output:/app/output
+      - ../temp:/app/temp
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - doc-extraction-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis - Message Broker & Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: doc-extraction-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - doc-extraction-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    command: redis-server --appendonly yes
+
+  # ---------------------------------------------------------------------------
+  # Streamlit UI (Optional)
+  # ---------------------------------------------------------------------------
+  ui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: doc-extraction-ui
+    command: streamlit run frontend/app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    environment:
+      - APP_ENV=development
+      - API_URL=http://api:8000
+    volumes:
+      - ../frontend:/app/frontend:ro
+      - ../output:/app/output
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - doc-extraction-network
+    profiles:
+      - ui
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Prometheus (Monitoring - Optional)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: doc-extraction-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - doc-extraction-network
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+# -----------------------------------------------------------------------------
+# Networks
+# -----------------------------------------------------------------------------
+networks:
+  doc-extraction-network:
+    driver: bridge
+    name: doc-extraction-network
+
+# -----------------------------------------------------------------------------
+# Volumes
+# -----------------------------------------------------------------------------
+volumes:
+  redis-data:
+    name: doc-extraction-redis-data
+  prometheus-data:
+    name: doc-extraction-prometheus-data

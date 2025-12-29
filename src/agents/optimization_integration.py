@@ -22,11 +22,12 @@ from src.agents.optimization import (
     PerformanceMonitor,
     OptimizedOrchestrator,
 )
-from src.config import get_logger
+from src.config import get_logger, get_settings
 from src.pipeline.state import ExtractionState
 
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 
 # =============================================================================
@@ -384,30 +385,39 @@ def _extract_single_page(
 
 def create_optimized_orchestrator(
     monthly_budget_usd: float = 100.0,
-    cache_max_size: int = 500,
-    cache_ttl_seconds: int = 1800,
+    cache_max_size: int | None = None,
+    cache_ttl_seconds: int | None = None,
     enable_parallel: bool = True,
     parallel_workers: int = 4,
-    alert_latency_ms: int = 5000,
+    alert_latency_ms: int | None = None,
     alert_error_rate: float = 0.1,
     alert_cost_usd: float = 10.0,
 ) -> OptimizedOrchestrator:
     """
     Create a fully configured optimized orchestrator.
 
+    Uses settings from configuration for defaults.
+
     Args:
         monthly_budget_usd: Monthly cost budget.
-        cache_max_size: Maximum cache entries.
-        cache_ttl_seconds: Cache TTL.
+        cache_max_size: Maximum cache entries (default from settings).
+        cache_ttl_seconds: Cache TTL (default from settings).
         enable_parallel: Enable parallel execution.
         parallel_workers: Number of parallel workers.
-        alert_latency_ms: Latency alert threshold.
+        alert_latency_ms: Latency alert threshold (default from settings).
         alert_error_rate: Error rate alert threshold.
         alert_cost_usd: Cost alert threshold.
 
     Returns:
         Configured OptimizedOrchestrator.
     """
+    # Use settings for defaults
+    if cache_max_size is None:
+        cache_max_size = settings.agent.cache_max_size
+    if cache_ttl_seconds is None:
+        cache_ttl_seconds = settings.agent.cache_ttl_seconds
+    if alert_latency_ms is None:
+        alert_latency_ms = settings.agent.alert_latency_threshold_ms
     profiler = PerformanceProfiler()
     cost_optimizer = CostOptimizer(monthly_budget_usd=monthly_budget_usd)
     cache = IntelligentCache[dict[str, Any]](
