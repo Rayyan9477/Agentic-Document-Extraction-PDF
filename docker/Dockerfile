@@ -6,7 +6,7 @@
 # -----------------------------------------------------------------------------
 # Stage 1: Builder - Install dependencies and build artifacts
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim as builder
+FROM python:3.14-slim as builder
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -35,7 +35,7 @@ RUN pip install --upgrade pip && \
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime - Minimal production image
 # -----------------------------------------------------------------------------
-FROM python:3.12-slim as runtime
+FROM python:3.14-slim as runtime
 
 # Labels for container metadata
 LABEL maintainer="Document Extraction Team" \
