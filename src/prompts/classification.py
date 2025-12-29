@@ -3,9 +3,90 @@ Document classification prompts for the Analyzer agent.
 
 Provides prompts for document type identification, structure detection,
 and schema selection.
+
+Enhanced with:
+- Few-shot classification examples
+- Step-by-step reasoning protocol
+- Confidence calibration examples
 """
 
 from typing import Any
+
+
+# Few-shot classification examples for each document type
+CLASSIFICATION_EXAMPLES = """
+## CLASSIFICATION EXAMPLES - USE THESE AS REFERENCE
+
+### Example 1: CMS-1500 Identification ✓
+**Visual Features Observed:**
+- Red/pink colored form with numbered boxes (1-33)
+- "HEALTH INSURANCE CLAIM FORM" printed at top
+- Patient information boxes in upper section (1-13)
+- Service line grid with columns 24A-J
+- Physician signature area at bottom
+
+**Classification:** CMS-1500
+**Confidence:** 0.95
+**Reasoning:** Form matches standard CMS-1500 layout with numbered boxes, service line grid, and recognizable header.
+
+---
+
+### Example 2: UB-04 Identification ✓
+**Visual Features Observed:**
+- Dense form with many small boxes
+- "PATIENT NAME" and "ADDRESS" at top
+- Revenue code columns in middle section
+- Condition codes, occurrence codes visible
+- Principal and other diagnosis fields
+- Payer information sections
+
+**Classification:** UB-04
+**Confidence:** 0.92
+**Reasoning:** Institutional claim form layout with revenue codes and form locators typical of UB-04/CMS-1450.
+
+---
+
+### Example 3: EOB Identification ✓
+**Visual Features Observed:**
+- Insurance company logo/letterhead
+- "Explanation of Benefits" title
+- Claim number and member ID displayed
+- Table with Billed/Allowed/Paid columns
+- "Patient Responsibility" section
+- "THIS IS NOT A BILL" statement
+
+**Classification:** EOB
+**Confidence:** 0.90
+**Reasoning:** Letter-style document from insurer with benefit explanation format, payment breakdown, and not-a-bill disclaimer.
+
+---
+
+### Example 4: Superbill Identification ✓
+**Visual Features Observed:**
+- Practice name and logo at top
+- Checkboxes next to procedure descriptions
+- CPT codes listed with prices
+- Diagnosis code section
+- Patient name and date fields
+- Provider signature line
+
+**Classification:** SUPERBILL
+**Confidence:** 0.88
+**Reasoning:** Encounter form with checkbox format for selecting services, typical of medical office superbills.
+
+---
+
+### Example 5: Unknown/Other Classification ✓
+**Visual Features Observed:**
+- Appears to be a medical record or lab report
+- No standard claim form elements
+- Custom format without numbered boxes
+- May have logo but no EOB characteristics
+
+**Classification:** OTHER
+**Confidence:** 0.75
+**Reasoning:** Document does not match any standard claim form pattern. May be a custom form, medical record, or correspondence.
+"""
 
 
 DOCUMENT_TYPE_DESCRIPTIONS = {
@@ -101,6 +182,8 @@ DOCUMENT_TYPE_DESCRIPTIONS = {
 def build_classification_prompt(
     include_confidence: bool = True,
     include_reasoning: bool = True,
+    include_examples: bool = True,
+    include_step_by_step: bool = True,
 ) -> str:
     """
     Build the document classification prompt.
@@ -108,6 +191,8 @@ def build_classification_prompt(
     Args:
         include_confidence: Whether to request confidence score.
         include_reasoning: Whether to request classification reasoning.
+        include_examples: Whether to include few-shot classification examples.
+        include_step_by_step: Whether to include step-by-step reasoning protocol.
 
     Returns:
         Classification prompt for the VLM.
@@ -122,15 +207,50 @@ def build_classification_prompt(
             f"Layout: {info['typical_layout']}"
         )
 
+    step_by_step = ""
+    if include_step_by_step:
+        step_by_step = """
+## STEP-BY-STEP CLASSIFICATION PROTOCOL
+
+Follow this reasoning process for accurate classification:
+
+### Step 1: OBSERVE LAYOUT
+- Is this a structured form with numbered boxes? → Likely CMS-1500 or UB-04
+- Is this a letter-style document with tables? → Likely EOB
+- Is this a checklist-style form? → Likely Superbill
+- None of the above? → Likely OTHER
+
+### Step 2: LOOK FOR KEY IDENTIFIERS
+- "HEALTH INSURANCE CLAIM FORM" → CMS-1500
+- Revenue codes, condition codes, form locators → UB-04
+- "Explanation of Benefits", "This is not a bill" → EOB
+- CPT checkboxes, encounter form → Superbill
+
+### Step 3: VERIFY WITH SECONDARY FEATURES
+- Confirm with 2-3 additional identifiers from the descriptions below
+- Note any features that don't match
+
+### Step 4: ASSIGN CONFIDENCE
+- All key identifiers present → 0.90-1.00
+- Most identifiers present with minor variations → 0.80-0.89
+- Some identifiers but uncertain → 0.60-0.79
+- Best guess → 0.50-0.59
+
+"""
+
+    examples = ""
+    if include_examples:
+        examples = f"\n{CLASSIFICATION_EXAMPLES}\n"
+
     prompt = f"""
 ## DOCUMENT CLASSIFICATION TASK
 
 Analyze this document image and identify its type based on visual characteristics.
-
+{step_by_step}
 ## KNOWN DOCUMENT TYPES
 
 {chr(10).join(type_descriptions)}
-
+{examples}
 ## CLASSIFICATION INSTRUCTIONS
 
 1. Examine the overall layout and structure of the document

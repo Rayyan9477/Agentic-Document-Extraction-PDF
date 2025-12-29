@@ -3,6 +3,12 @@ Extraction prompts for the Extractor agent.
 
 Provides prompts for dual-pass extraction, field-specific extraction,
 and table processing.
+
+Enhanced with:
+- More differentiated dual-pass prompts
+- Chain-of-thought extraction reasoning
+- Field-specific extraction examples
+- Structured verification protocols
 """
 
 from typing import Any
@@ -14,12 +20,91 @@ from src.prompts.grounding_rules import (
 )
 
 
+# Chain-of-thought reasoning for field extraction
+EXTRACTION_REASONING_TEMPLATE = """
+## EXTRACTION REASONING PROTOCOL
+
+For EACH field you extract, follow this mental process:
+
+### 1. LOCATE the field
+- Where in the document should I look for this field?
+- Is there a label or box identifier?
+- Can I see the field location clearly?
+
+### 2. READ character-by-character
+- What exact characters do I see?
+- Is there any blur, smudge, or obstruction?
+- Could any character be misread (0 vs O, 1 vs l, 5 vs S)?
+
+### 3. VALIDATE the value
+- Does this value make sense for this field type?
+- Is it complete or partially visible?
+- Does it match the expected format?
+
+### 4. SCORE confidence honestly
+- 0.95+: I'm absolutely certain, crystal clear
+- 0.85-0.94: Clear with minor uncertainty on 1-2 characters
+- 0.70-0.84: Readable but some quality issues
+- <0.70: Too uncertain → return null instead
+"""
+
+
+# Negative examples - what NOT to do
+EXTRACTION_ANTI_PATTERNS = """
+## EXTRACTION ANTI-PATTERNS - NEVER DO THESE
+
+### ❌ DON'T: Calculate or infer values
+**Wrong:**
+- Field: Total Charges
+- Document shows: Three line items ($100, $50, $75) but total box is empty
+- BAD output: {"value": "$225.00", "confidence": 0.8}
+- Why wrong: Value was calculated, not read
+
+**Correct:** {"value": null, "confidence": 0.0, "location": "Total box is empty"}
+
+---
+
+### ❌ DON'T: Fill in expected patterns
+**Wrong:**
+- Field: Provider NPI
+- Document shows: Partially visible "123456____"
+- BAD output: {"value": "1234567890", "confidence": 0.6}
+- Why wrong: Last 4 digits were guessed based on typical NPI format
+
+**Correct:** {"value": null, "confidence": 0.0, "location": "NPI partially obscured"}
+
+---
+
+### ❌ DON'T: Complete partial dates
+**Wrong:**
+- Field: Date of Service
+- Document shows: "03/__/2024" (day is smudged)
+- BAD output: {"value": "03/15/2024", "confidence": 0.7}
+- Why wrong: Day was guessed
+
+**Correct:** {"value": null, "confidence": 0.0, "location": "Day portion unreadable"}
+
+---
+
+### ❌ DON'T: Assume typical names
+**Wrong:**
+- Field: Patient Name
+- Document shows: Handwritten name that's hard to read
+- BAD output: {"value": "John Smith", "confidence": 0.6}
+- Why wrong: Used common name when actual name was unclear
+
+**Correct:** {"value": null, "confidence": 0.0, "location": "Handwriting illegible"}
+"""
+
+
 def build_extraction_prompt(
     schema_fields: list[dict[str, Any]],
     document_type: str,
     page_number: int,
     total_pages: int,
     is_first_pass: bool = True,
+    include_reasoning: bool = True,
+    include_anti_patterns: bool = True,
 ) -> str:
     """
     Build the main extraction prompt for a document page.
@@ -30,6 +115,8 @@ def build_extraction_prompt(
         page_number: Current page number (1-indexed).
         total_pages: Total number of pages.
         is_first_pass: Whether this is the first or second extraction pass.
+        include_reasoning: Whether to include chain-of-thought reasoning protocol.
+        include_anti_patterns: Whether to include negative examples.
 
     Returns:
         Complete extraction prompt for the VLM.
@@ -37,10 +124,19 @@ def build_extraction_prompt(
     pass_instruction = _get_pass_instruction(is_first_pass)
     field_instructions = _build_field_instructions(schema_fields)
 
+    reasoning_section = ""
+    if include_reasoning:
+        reasoning_section = EXTRACTION_REASONING_TEMPLATE
+
+    anti_patterns = ""
+    if include_anti_patterns and is_first_pass:  # Only on first pass to save tokens
+        anti_patterns = EXTRACTION_ANTI_PATTERNS
+
     prompt = f"""
 ## DOCUMENT EXTRACTION TASK - {document_type}
 
 {pass_instruction}
+{reasoning_section}
 
 ### Document Context
 - Document Type: {document_type}
@@ -61,6 +157,7 @@ def build_extraction_prompt(
 
 3. If a field appears multiple times, extract the most prominent instance
 4. For multi-value fields (lists), extract all visible values
+{anti_patterns}
 
 ### REQUIRED OUTPUT FORMAT
 
@@ -117,37 +214,52 @@ def build_verification_prompt(
     # to ensure independent extraction
 
     prompt = f"""
-## VERIFICATION EXTRACTION TASK - {document_type}
+## SKEPTICAL VERIFICATION PASS - {document_type}
 
-This is a VERIFICATION pass. Your task is to independently extract data from
-this document with maximum attention to accuracy. Take extra time to verify
-each character and value you extract.
+⚠️ This is an INDEPENDENT VERIFICATION pass. You are acting as a skeptical auditor.
+Your job is to catch errors, NOT to confirm what might have been extracted before.
 
-### Verification Mindset
+### VERIFICATION MINDSET
 
-CRITICAL VERIFICATION RULES:
-- Double-check every character before reporting
-- If ANY digit or letter is unclear, report null
-- Look for crossed-out or corrected values
-- Verify handwritten entries character by character
-- Check for amendments or overwrites
+Think like a skeptical reviewer:
+- "I will not assume any value is correct until I verify it myself"
+- "I will be stricter with my confidence scores than I might normally be"
+- "When in doubt, I will return null rather than guess"
+- "I will read each character individually, not as a word I expect to see"
 
-### Fields to Extract
+### CRITICAL VERIFICATION PROTOCOL
+
+For EACH field, perform this verification:
+
+**Step 1: INDEPENDENT LOCATION**
+- Find the field location without assuming where it should be
+- Verify the field label/identifier is visible
+
+**Step 2: CHARACTER-BY-CHARACTER READING**
+- Read each character individually: "I see: S-M-I-T-H"
+- Check for easily confused characters: 0/O, 1/l/I, 5/S, 8/B
+- Look for overwrites, corrections, or amendments
+
+**Step 3: SKEPTICAL CONFIDENCE SCORING**
+Apply stricter thresholds for verification:
+| Verification Score | Meaning |
+|-------------------|---------|
+| 0.90+ | Every character crystal clear, no possible alternate reading |
+| 0.75-0.89 | Clear but 1-2 characters could theoretically be different |
+| 0.60-0.74 | Readable but would want second opinion |
+| <0.60 | Too uncertain → MUST return null |
+
+**Step 4: HALLUCINATION CHECK**
+Before reporting each value, ask:
+- "Am I reading this, or am I inferring what I expect to see?"
+- "Is this suspiciously 'perfect' (round numbers, common names)?"
+- "Would I bet money on this exact value?"
+
+### Fields to Verify
 
 {field_instructions}
 
-### VERIFICATION APPROACH
-
-For each field:
-1. Locate the field in the document
-2. Read the value character by character
-3. Verify each character is clearly legible
-4. If ANY character is uncertain, report null
-5. Report location and confidence
-
 ### REQUIRED OUTPUT FORMAT
-
-Return a JSON object with this structure:
 
 ```json
 {{
@@ -156,21 +268,38 @@ Return a JSON object with this structure:
   "verification_mode": true,
   "fields": {{
     "field_name": {{
-      "value": "extracted value or null",
-      "confidence": 0.95,
-      "location": "where found in document",
-      "verification_note": "any verification observations"
+      "value": "verified value or null",
+      "confidence": 0.85,
+      "location": "precise location in document",
+      "character_verification": "individual characters read: X-X-X-X",
+      "alternate_readings": ["other possible readings if any"]
     }}
   }},
   "verification_summary": {{
-    "fields_clearly_visible": 0,
-    "fields_partially_visible": 0,
-    "fields_not_found": 0
-  }}
+    "fields_confidently_verified": 0,
+    "fields_with_uncertainty": 0,
+    "fields_returned_null": 0
+  }},
+  "skepticism_notes": "any concerns or observations from verification"
 }}
 ```
 
-VERIFICATION STANDARD: When in doubt, return null. Accuracy over completeness.
+### VERIFICATION STANDARD
+
+🎯 **Accuracy over completeness**: It is better to return null for a field than to report
+   an uncertain value. Your role is to be the last line of defense against errors.
+
+❌ **DO NOT**:
+- Assume a value is correct because it "looks right"
+- Fill in partially visible values
+- Report values you're not confident about
+- Use typical patterns to complete unclear fields
+
+✓ **DO**:
+- Return null when uncertain
+- Note alternate possible readings
+- Apply stricter confidence thresholds
+- Report exactly what you can verify
 """
 
     return prompt

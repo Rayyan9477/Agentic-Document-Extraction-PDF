@@ -21,7 +21,10 @@ from src.pipeline.state import (
     set_status,
     add_warning,
 )
-from src.prompts.grounding_rules import build_grounded_system_prompt
+from src.prompts.grounding_rules import (
+    build_grounded_system_prompt,
+    build_enhanced_system_prompt,
+)
 from src.prompts.classification import (
     build_classification_prompt,
     build_structure_analysis_prompt,
@@ -29,6 +32,7 @@ from src.prompts.classification import (
     build_schema_selection_prompt,
     DOCUMENT_TYPE_DESCRIPTIONS,
 )
+from src.agents.utils import retry_with_backoff, RetryConfig
 from src.schemas import SchemaRegistry, DocumentType
 
 
@@ -217,7 +221,7 @@ class AnalyzerAgent(BaseAgent):
 
     def _classify_document(self, image_data: str) -> dict[str, Any]:
         """
-        Classify the document type using VLM.
+        Classify the document type using VLM with enhanced prompts and retry logic.
 
         Args:
             image_data: Base64-encoded image or data URI.
@@ -234,19 +238,41 @@ class AnalyzerAgent(BaseAgent):
             ),
             include_forbidden=False,
             include_confidence_scale=True,
+            include_chain_of_thought=True,  # Enhanced: Add reasoning protocol
         )
 
+        # Use enhanced classification prompt with few-shot examples and step-by-step reasoning
         classification_prompt = build_classification_prompt(
             include_confidence=True,
             include_reasoning=True,
+            include_examples=True,  # Enhanced: Add few-shot examples
+            include_step_by_step=True,  # Enhanced: Add step-by-step protocol
         )
 
-        try:
-            result = self.send_vision_request_with_json(
+        # Use retry with exponential backoff for VLM calls
+        retry_config = RetryConfig(
+            max_retries=2,
+            base_delay_ms=500,
+            max_delay_ms=5000,
+        )
+
+        def make_classification_call() -> dict[str, Any]:
+            return self.send_vision_request_with_json(
                 image_data=image_data,
                 prompt=classification_prompt,
                 system_prompt=system_prompt,
                 temperature=0.1,
+            )
+
+        try:
+            result = retry_with_backoff(
+                func=make_classification_call,
+                config=retry_config,
+                on_retry=lambda attempt, e: self._logger.warning(
+                    "classification_retry",
+                    attempt=attempt + 1,
+                    error=str(e),
+                ),
             )
 
             # Normalize document type

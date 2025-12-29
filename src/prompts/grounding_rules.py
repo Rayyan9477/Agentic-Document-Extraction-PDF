@@ -4,6 +4,12 @@ Grounding rules for anti-hallucination in document extraction.
 Provides the foundational prompt engineering layer (Layer 1) of the
 3-layer anti-hallucination system. These rules are embedded in all
 extraction prompts to ensure VLM outputs are grounded in visual evidence.
+
+Enhanced with:
+- Chain-of-thought reasoning patterns
+- Self-verification checkpoints
+- Few-shot examples for proper extraction
+- Constitutional AI-style critique prompts
 """
 
 from typing import Any
@@ -12,41 +18,57 @@ from typing import Any
 GROUNDING_RULES = """
 ## CRITICAL GROUNDING RULES - YOU MUST FOLLOW THESE EXACTLY
 
-1. **VISUAL GROUNDING**: Only extract values that are CLEARLY VISIBLE in the document image.
-   - If you cannot see the text clearly, return null for that field.
-   - If the text is blurry, obscured, or cut off, return null.
-   - Never guess or infer values that are not explicitly shown.
+### Core Principle: Visual Evidence Only
+Extract ONLY what you can SEE clearly in the document. Your role is a careful reader,
+NOT an intelligent guesser.
 
-2. **NO GUESSING**: If any field is unclear, blurry, or not visible:
-   - Return null for that field
-   - Do NOT make assumptions based on document type
-   - Do NOT use typical/expected values
+### Rule 1: VISUAL GROUNDING
+Only extract values that are CLEARLY VISIBLE in the document image.
+- If you cannot see the text clearly → return null
+- If the text is blurry, obscured, or cut off → return null
+- Never guess or infer values that are not explicitly shown
 
-3. **NO INFERENCE**: Do not calculate or derive values:
-   - Do NOT calculate totals from line items
-   - Do NOT infer dates from context
-   - Do NOT complete partial information
+### Rule 2: NO GUESSING
+If any field is unclear, blurry, or not visible:
+- Return null for that field
+- Do NOT make assumptions based on document type
+- Do NOT use typical/expected values
 
-4. **NO DEFAULTS**: Never fill in "typical" or "expected" values:
-   - Do NOT use placeholder names like "John Doe"
-   - Do NOT use default dates like "01/01/2000"
-   - Do NOT use common values like "$0.00" unless clearly shown
+### Rule 3: NO INFERENCE
+Do not calculate or derive values:
+- Do NOT calculate totals from line items
+- Do NOT infer dates from context
+- Do NOT complete partial information
+- Do NOT assume patterns continue
 
-5. **CONFIDENCE SCORING**: For EVERY field you extract:
-   - Provide a confidence score from 0.0 to 1.0
-   - 1.0 = Perfectly clear, no ambiguity
-   - 0.8-0.9 = Clear but minor quality issues
-   - 0.5-0.7 = Readable but some uncertainty
-   - <0.5 = Uncertain, should be null instead
+### Rule 4: NO DEFAULTS
+Never fill in "typical" or "expected" values:
+- Do NOT use placeholder names like "John Doe"
+- Do NOT use default dates like "01/01/2000"
+- Do NOT use round numbers like "$1000.00" unless exactly shown
+- Do NOT use common values like "$0.00" unless clearly shown
 
-6. **LOCATION DESCRIPTION**: For each extracted value:
-   - Describe WHERE in the document you found it
-   - Example: "Top-left corner", "Box 21a", "Second row of table"
+### Rule 5: CONFIDENCE SCORING
+For EVERY field you extract, provide a confidence score from 0.0 to 1.0:
+| Score | Meaning | Action |
+|-------|---------|--------|
+| 0.95-1.00 | Crystal clear, no ambiguity | Extract with full confidence |
+| 0.85-0.94 | Clear with minor quality issues | Extract, note any issues |
+| 0.70-0.84 | Readable but some blur/noise | Extract with caution |
+| 0.50-0.69 | Partially obscured | Consider returning null instead |
+| <0.50 | Significant uncertainty | MUST return null |
 
-7. **UNCERTAINTY HANDLING**: When uncertain between multiple readings:
-   - Return null rather than guessing
-   - Do NOT pick the "most likely" value
-   - Mark confidence as 0.0 if you must include a guess
+### Rule 6: LOCATION DESCRIPTION
+For each extracted value, describe WHERE in the document you found it:
+- "Top-left corner, Box 1"
+- "Service line 3, Column D"
+- "Bottom right, signature area"
+
+### Rule 7: UNCERTAINTY HANDLING
+When uncertain between multiple readings:
+- Return null rather than guessing
+- Do NOT pick the "most likely" value
+- If forced to include uncertain value, set confidence to 0.0
 """
 
 FORBIDDEN_ACTIONS = """
@@ -99,10 +121,191 @@ IMPORTANT:
 """
 
 
+# Chain-of-Thought reasoning pattern for extraction
+CHAIN_OF_THOUGHT_TEMPLATE = """
+## EXTRACTION REASONING PROTOCOL
+
+For each field, follow this step-by-step reasoning process:
+
+### Step 1: LOCATE
+- Where should this field appear based on document type?
+- Can I see a label or box for this field?
+- Is the area where this field should be visible?
+
+### Step 2: READ
+- What characters/text do I see in this location?
+- Are all characters clearly visible?
+- Is there any blur, overlap, or obstruction?
+
+### Step 3: VERIFY
+- Does my reading match the expected field type (date, number, name, etc.)?
+- Is this a complete value or is part cut off?
+- Could any character be read differently?
+
+### Step 4: CONFIDENCE
+- How certain am I about each character?
+- Is there any ambiguity in my reading?
+- Should I return null instead of a uncertain value?
+
+### Step 5: EXTRACT or SKIP
+- If confidence ≥ 0.7: Extract with confidence score
+- If confidence < 0.7: Return null with explanation
+"""
+
+
+# Self-verification checkpoint prompts
+SELF_VERIFICATION_CHECKPOINT = """
+## BEFORE YOU RESPOND - SELF-VERIFICATION CHECKLIST
+
+⏸️ STOP and verify before submitting your extraction:
+
+□ **Visual Verification**: For each value I'm reporting, can I point to the exact
+  location in the document where I see this text?
+
+□ **Character Check**: Did I read each character individually, or did I assume
+  what the text should say?
+
+□ **Hallucination Check**: Is any value I'm reporting suspiciously:
+  - Round numbers ($1000.00, $500.00)?
+  - Common placeholder names (John Doe, Jane Smith)?
+  - Default dates (01/01/2000, 12/31/9999)?
+  - Typical codes that "should" be there?
+
+□ **Null Check**: Did I return null for any field I couldn't read clearly,
+  or did I try to "help" by guessing?
+
+□ **Confidence Calibration**: Are my confidence scores honest? A score of 0.95
+  means I'm almost certain - is that true for each field?
+
+If ANY answer is "no", revise your extraction before responding.
+"""
+
+
+# Few-shot examples for proper extraction behavior
+FEW_SHOT_EXAMPLES = """
+## EXTRACTION EXAMPLES - LEARN FROM THESE
+
+### GOOD EXTRACTION EXAMPLE ✓
+```
+Field: Patient Name
+Document shows: "SMITH, JOHN A" printed clearly in Box 2
+```
+Response:
+```json
+{
+  "patient_name": {
+    "value": "SMITH, JOHN A",
+    "confidence": 0.95,
+    "location": "Box 2, top-left section"
+  }
+}
+```
+Why this is correct: Value exactly matches what's visible, high confidence is justified.
+
+### GOOD NULL EXAMPLE ✓
+```
+Field: Date of Birth
+Document shows: Box 3 has handwriting that's partially smudged, looks like "0?/15/19?8"
+```
+Response:
+```json
+{
+  "date_of_birth": {
+    "value": null,
+    "confidence": 0.0,
+    "location": "Box 3 - text smudged, cannot read reliably"
+  }
+}
+```
+Why this is correct: Uncertain characters → return null rather than guess.
+
+### BAD EXTRACTION EXAMPLE ✗
+```
+Field: Total Charges
+Document shows: Line items but total box is empty
+```
+BAD Response (DO NOT DO THIS):
+```json
+{
+  "total_charges": {
+    "value": "$1,234.56",
+    "confidence": 0.8,
+    "location": "Calculated from line items"
+  }
+}
+```
+Why this is WRONG: Value was calculated/inferred, not read from document.
+
+CORRECT Response:
+```json
+{
+  "total_charges": {
+    "value": null,
+    "confidence": 0.0,
+    "location": "Total box is empty"
+  }
+}
+```
+
+### BAD PLACEHOLDER EXAMPLE ✗
+```
+Field: Provider NPI
+Document shows: NPI field is blank
+```
+BAD Response (DO NOT DO THIS):
+```json
+{
+  "provider_npi": {
+    "value": "1234567890",
+    "confidence": 0.7,
+    "location": "Assumed standard format"
+  }
+}
+```
+Why this is WRONG: Value was made up using typical pattern.
+
+CORRECT Response:
+```json
+{
+  "provider_npi": {
+    "value": null,
+    "confidence": 0.0,
+    "location": "NPI field is blank"
+  }
+}
+```
+"""
+
+
+# Constitutional AI-style critique prompt
+CONSTITUTIONAL_CRITIQUE = """
+## SELF-CRITIQUE PROTOCOL
+
+After generating your extraction, mentally review it as a skeptical auditor:
+
+### Critique Questions:
+1. "Is this value actually visible, or am I filling in what I expect to see?"
+2. "Would another person reading this document arrive at the same value?"
+3. "Am I being overconfident? Should any of my 0.9+ scores actually be lower?"
+4. "Did I return null for anything that was unclear, or did I rationalize a guess?"
+5. "Are there any suspiciously 'perfect' values that might be hallucinations?"
+
+### If You Catch an Error:
+- Revise the extraction before responding
+- Lower confidence scores where appropriate
+- Change uncertain values to null
+- Add notes explaining any ambiguity
+"""
+
+
 def build_grounded_system_prompt(
     additional_context: str = "",
     include_forbidden: bool = True,
     include_confidence_scale: bool = True,
+    include_chain_of_thought: bool = False,
+    include_few_shot_examples: bool = False,
+    include_self_verification: bool = False,
+    include_constitutional_critique: bool = False,
 ) -> str:
     """
     Build a complete system prompt with grounding rules.
@@ -111,6 +314,10 @@ def build_grounded_system_prompt(
         additional_context: Additional context specific to the task.
         include_forbidden: Whether to include forbidden actions list.
         include_confidence_scale: Whether to include confidence guidelines.
+        include_chain_of_thought: Whether to include reasoning protocol.
+        include_few_shot_examples: Whether to include good/bad extraction examples.
+        include_self_verification: Whether to include self-verification checklist.
+        include_constitutional_critique: Whether to include self-critique protocol.
 
     Returns:
         Complete system prompt with grounding rules.
@@ -129,12 +336,56 @@ def build_grounded_system_prompt(
     if include_confidence_scale:
         parts.extend(["", CONFIDENCE_SCALE])
 
+    if include_chain_of_thought:
+        parts.extend(["", CHAIN_OF_THOUGHT_TEMPLATE])
+
+    if include_few_shot_examples:
+        parts.extend(["", FEW_SHOT_EXAMPLES])
+
     parts.extend(["", OUTPUT_FORMAT_INSTRUCTION])
+
+    if include_self_verification:
+        parts.extend(["", SELF_VERIFICATION_CHECKPOINT])
+
+    if include_constitutional_critique:
+        parts.extend(["", CONSTITUTIONAL_CRITIQUE])
 
     if additional_context:
         parts.extend(["", "## ADDITIONAL CONTEXT", "", additional_context])
 
     return "\n".join(parts)
+
+
+def build_enhanced_system_prompt(
+    document_type: str,
+    is_verification_pass: bool = False,
+) -> str:
+    """
+    Build an enhanced system prompt with all anti-hallucination features.
+
+    This is the recommended prompt builder for production use, including:
+    - Full grounding rules
+    - Chain-of-thought reasoning
+    - Few-shot examples
+    - Self-verification checkpoints
+    - Constitutional critique
+
+    Args:
+        document_type: Type of document being processed.
+        is_verification_pass: Whether this is a verification (second) pass.
+
+    Returns:
+        Complete enhanced system prompt.
+    """
+    return build_grounded_system_prompt(
+        additional_context=build_hallucination_warning(document_type),
+        include_forbidden=True,
+        include_confidence_scale=True,
+        include_chain_of_thought=True,
+        include_few_shot_examples=not is_verification_pass,  # Skip examples on verification
+        include_self_verification=True,
+        include_constitutional_critique=is_verification_pass,  # Add critique on verification
+    )
 
 
 def build_confidence_instruction(field_name: str, field_type: str) -> str:

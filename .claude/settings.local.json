@@ -23,7 +23,12 @@
       "Bash(file:*)",
       "Bash(grep:*)",
       "Bash(set \"PYTHONPATH=d:/Repo/PDF\")",
-      "Bash(netstat:*)"
+      "Bash(netstat:*)",
+      "Bash(redis-cli ping:*)",
+      "Bash(docker --version:*)",
+      "Bash(where:*)",
+      "Bash(docker run:*)",
+      "Bash(powershell -Command \"Get-ChildItem -Recurse -File src -Include *.py | ForEach-Object { Write-Host $_FullName '':'' \\(Get-Content $_| Measure-Object -Line\\).Lines } | Sort-Object {[int]\\($_-split '':''\\)[-1]} -Descending | Select-Object -First 20\")"
     ],
     "deny": [],
     "ask": []

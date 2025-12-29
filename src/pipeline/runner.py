@@ -595,7 +595,7 @@ class PipelineRunner:
             state,
             {
                 "merged_extraction": merged_extraction,
-                "status": ExtractionStatus.VALIDATED.value,
+                "status": ExtractionStatus.COMPLETED.value,
                 "current_step": "human_corrected",
             },
         )

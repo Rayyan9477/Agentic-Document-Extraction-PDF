@@ -28,12 +28,19 @@ from src.pipeline.state import (
 )
 from src.prompts.grounding_rules import (
     build_grounded_system_prompt,
+    build_enhanced_system_prompt,
     build_hallucination_warning,
 )
 from src.prompts.extraction import (
     build_extraction_prompt,
     build_verification_prompt,
     build_table_extraction_prompt,
+)
+from src.agents.utils import (
+    build_custom_schema,
+    retry_with_backoff,
+    RetryConfig,
+    identify_low_confidence_fields,
 )
 from src.schemas import SchemaRegistry, DocumentSchema, FieldDefinition
 from src.validation import DualPassComparator, ComparisonResult
@@ -258,105 +265,15 @@ class ExtractorAgent(BaseAgent):
         """
         Build a DocumentSchema from a custom schema definition.
 
+        Uses shared utility to eliminate code duplication.
+
         Args:
             schema_def: Custom schema definition dictionary.
 
         Returns:
             Constructed DocumentSchema.
         """
-        from src.schemas.schema_builder import SchemaBuilder, FieldBuilder, RuleBuilder
-        from src.schemas import DocumentType, FieldType, RuleOperator
-
-        builder = SchemaBuilder(
-            name=schema_def.get("name", "custom_schema"),
-            document_type=DocumentType.OTHER,
-        )
-
-        builder.description(schema_def.get("description", "Custom extraction schema"))
-
-        # Build fields
-        for field_def in schema_def.get("fields", []):
-            field_type_str = field_def.get("type", "string").upper()
-            try:
-                field_type = FieldType[field_type_str]
-            except KeyError:
-                field_type = FieldType.STRING
-
-            field_builder = (
-                FieldBuilder(field_def.get("name", "field"))
-                .display_name(field_def.get("display_name", field_def.get("name", "")))
-                .type(field_type)
-                .description(field_def.get("description", ""))
-                .required(field_def.get("required", False))
-            )
-
-            if field_def.get("examples"):
-                field_builder.examples(field_def["examples"])
-
-            if field_def.get("pattern"):
-                field_builder.pattern(field_def["pattern"])
-
-            if field_def.get("location_hint"):
-                field_builder.location_hint(field_def["location_hint"])
-
-            if field_def.get("min_value") is not None:
-                field_builder.min_value(field_def["min_value"])
-
-            if field_def.get("max_value") is not None:
-                field_builder.max_value(field_def["max_value"])
-
-            if field_def.get("allowed_values"):
-                field_builder.allowed_values(field_def["allowed_values"])
-
-            if field_def.get("nested_schema"):
-                field_builder.nested(field_def["nested_schema"])
-
-            if field_def.get("list_item_type"):
-                list_type_str = field_def["list_item_type"].upper()
-                try:
-                    list_type = FieldType[list_type_str]
-                    field_builder.list_of(list_type)
-                except KeyError:
-                    pass
-
-            builder.field(field_builder)
-
-        # Build cross-field rules
-        for rule_def in schema_def.get("rules", []):
-            source = rule_def.get("source_field", "")
-            target = rule_def.get("target_field", "")
-            operator_str = rule_def.get("operator", "equals").upper()
-
-            try:
-                operator = RuleOperator[operator_str]
-            except KeyError:
-                operator = RuleOperator.EQUALS
-
-            rule_builder = RuleBuilder(source, target)
-
-            # Set operator using fluent API
-            operator_method_map = {
-                RuleOperator.EQUALS: rule_builder.equals,
-                RuleOperator.NOT_EQUALS: rule_builder.not_equals,
-                RuleOperator.GREATER_THAN: rule_builder.greater_than,
-                RuleOperator.LESS_THAN: rule_builder.less_than,
-                RuleOperator.GREATER_EQUAL: rule_builder.greater_or_equal,
-                RuleOperator.LESS_EQUAL: rule_builder.less_or_equal,
-                RuleOperator.DATE_BEFORE: rule_builder.date_before,
-                RuleOperator.DATE_AFTER: rule_builder.date_after,
-                RuleOperator.REQUIRES: rule_builder.requires,
-                RuleOperator.REQUIRES_IF: rule_builder.requires_if,
-            }
-
-            if operator in operator_method_map:
-                operator_method_map[operator]()
-
-            if rule_def.get("error_message"):
-                rule_builder.error(rule_def["error_message"])
-
-            builder.rule(rule_builder)
-
-        return builder.build()
+        return build_custom_schema(schema_def)
 
     def _extract_page(
         self,
@@ -456,7 +373,7 @@ class ExtractorAgent(BaseAgent):
         is_first_pass: bool,
     ) -> dict[str, Any]:
         """
-        Perform a single extraction pass.
+        Perform a single extraction pass with enhanced prompts and retry logic.
 
         Args:
             image_data: Base64-encoded image.
@@ -469,14 +386,13 @@ class ExtractorAgent(BaseAgent):
         Returns:
             Extraction result dictionary.
         """
-        # Build system prompt with grounding rules
-        system_prompt = build_grounded_system_prompt(
-            additional_context=build_hallucination_warning(document_type),
-            include_forbidden=True,
-            include_confidence_scale=True,
+        # Build enhanced system prompt with chain-of-thought and anti-hallucination
+        system_prompt = build_enhanced_system_prompt(
+            document_type=document_type,
+            is_verification_pass=not is_first_pass,
         )
 
-        # Build extraction prompt
+        # Build extraction prompt with enhanced features
         if is_first_pass:
             prompt = build_extraction_prompt(
                 schema_fields=field_defs,
@@ -484,6 +400,8 @@ class ExtractorAgent(BaseAgent):
                 page_number=page_number,
                 total_pages=total_pages,
                 is_first_pass=True,
+                include_reasoning=True,
+                include_anti_patterns=True,
             )
         else:
             prompt = build_verification_prompt(
@@ -493,12 +411,31 @@ class ExtractorAgent(BaseAgent):
                 first_pass_results={},  # Don't show first pass to ensure independence
             )
 
-        try:
+        # Use retry with exponential backoff for VLM calls
+        retry_config = RetryConfig(
+            max_retries=2,
+            base_delay_ms=500,
+            max_delay_ms=5000,
+        )
+
+        def make_vlm_call() -> dict[str, Any]:
             return self.send_vision_request_with_json(
                 image_data=image_data,
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=0.1,
+            )
+
+        try:
+            return retry_with_backoff(
+                func=make_vlm_call,
+                config=retry_config,
+                on_retry=lambda attempt, e: self._logger.warning(
+                    "extraction_pass_retry",
+                    pass_number=1 if is_first_pass else 2,
+                    attempt=attempt + 1,
+                    error=str(e),
+                ),
             )
         except Exception as e:
             self._logger.warning(

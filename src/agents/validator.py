@@ -43,6 +43,12 @@ from src.schemas import (
     CrossFieldRule,
     RuleOperator,
 )
+from src.agents.utils import (
+    build_custom_schema,
+    retry_with_backoff,
+    RetryConfig,
+    calculate_extraction_quality_score,
+)
 from src.validation import (
     HallucinationPatternDetector,
     detect_hallucination_patterns,
@@ -252,94 +258,15 @@ class ValidatorAgent(BaseAgent):
         """
         Build a DocumentSchema from a custom schema definition.
 
+        Uses shared utility to eliminate code duplication.
+
         Args:
             schema_def: Custom schema definition dictionary.
 
         Returns:
             Constructed DocumentSchema.
         """
-        from src.schemas.schema_builder import SchemaBuilder, FieldBuilder, RuleBuilder
-        from src.schemas import DocumentType, FieldType, RuleOperator
-
-        builder = SchemaBuilder(
-            name=schema_def.get("name", "custom_schema"),
-            document_type=DocumentType.OTHER,
-        )
-
-        builder.description(schema_def.get("description", "Custom extraction schema"))
-
-        # Build fields
-        for field_def in schema_def.get("fields", []):
-            field_type_str = field_def.get("type", "string").upper()
-            try:
-                field_type = FieldType[field_type_str]
-            except KeyError:
-                field_type = FieldType.STRING
-
-            field_builder = (
-                FieldBuilder(field_def.get("name", "field"))
-                .display_name(field_def.get("display_name", field_def.get("name", "")))
-                .type(field_type)
-                .description(field_def.get("description", ""))
-                .required(field_def.get("required", False))
-            )
-
-            if field_def.get("examples"):
-                field_builder.examples(field_def["examples"])
-
-            if field_def.get("pattern"):
-                field_builder.pattern(field_def["pattern"])
-
-            if field_def.get("location_hint"):
-                field_builder.location_hint(field_def["location_hint"])
-
-            if field_def.get("min_value") is not None:
-                field_builder.min_value(field_def["min_value"])
-
-            if field_def.get("max_value") is not None:
-                field_builder.max_value(field_def["max_value"])
-
-            if field_def.get("allowed_values"):
-                field_builder.allowed_values(field_def["allowed_values"])
-
-            builder.field(field_builder)
-
-        # Build cross-field rules
-        for rule_def in schema_def.get("rules", []):
-            source = rule_def.get("source_field", "")
-            target = rule_def.get("target_field", "")
-            operator_str = rule_def.get("operator", "equals").upper()
-
-            try:
-                operator = RuleOperator[operator_str]
-            except KeyError:
-                operator = RuleOperator.EQUALS
-
-            rule_builder = RuleBuilder(source, target)
-
-            # Set operator using fluent API
-            operator_method_map = {
-                RuleOperator.EQUALS: rule_builder.equals,
-                RuleOperator.NOT_EQUALS: rule_builder.not_equals,
-                RuleOperator.GREATER_THAN: rule_builder.greater_than,
-                RuleOperator.LESS_THAN: rule_builder.less_than,
-                RuleOperator.GREATER_EQUAL: rule_builder.greater_or_equal,
-                RuleOperator.LESS_EQUAL: rule_builder.less_or_equal,
-                RuleOperator.DATE_BEFORE: rule_builder.date_before,
-                RuleOperator.DATE_AFTER: rule_builder.date_after,
-                RuleOperator.REQUIRES: rule_builder.requires,
-                RuleOperator.REQUIRES_IF: rule_builder.requires_if,
-            }
-
-            if operator in operator_method_map:
-                operator_method_map[operator]()
-
-            if rule_def.get("error_message"):
-                rule_builder.error(rule_def["error_message"])
-
-            builder.rule(rule_builder)
-
-        return builder.build()
+        return build_custom_schema(schema_def)
 
     def _validate_extraction(
         self,

@@ -3,15 +3,111 @@ Validation prompts for the Validator agent.
 
 Provides prompts for hallucination detection, cross-field validation,
 and final verification.
+
+Enhanced with:
+- Constitutional AI-style validation patterns
+- Structured validation reasoning
+- Confidence calibration examples
+- Systematic hallucination detection
 """
 
 from typing import Any
+
+
+# Constitutional validation principles
+CONSTITUTIONAL_VALIDATION_PRINCIPLES = """
+## CONSTITUTIONAL VALIDATION PRINCIPLES
+
+Before accepting any extraction, verify it against these principles:
+
+### Principle 1: VISUAL EVIDENCE
+"Every reported value must correspond to visible text in the document."
+- If I cannot point to where this value appears, it may be hallucinated
+
+### Principle 2: CHARACTER FIDELITY
+"Extracted values must match the exact characters visible, not interpreted meaning."
+- I must not "correct" apparent typos or formatting
+- I must not "complete" partial values
+
+### Principle 3: CONFIDENCE HONESTY
+"Confidence scores must reflect actual certainty, not optimism."
+- High confidence requires clear visibility of every character
+- Any uncertainty should reduce confidence significantly
+
+### Principle 4: SKEPTICAL DEFAULT
+"When uncertain, the default should be null rather than a guess."
+- It is better to miss a value than to report a wrong one
+- Flagging for human review is preferable to accepting uncertainty
+
+### Principle 5: PATTERN AWARENESS
+"Suspicious patterns indicate potential hallucinations."
+- Round numbers, placeholder names, default dates
+- Values that are "too perfect" or match expectations too well
+"""
+
+
+# Confidence calibration examples
+CONFIDENCE_CALIBRATION_EXAMPLES = """
+## CONFIDENCE CALIBRATION EXAMPLES
+
+Learn to score confidence accurately:
+
+### HIGH CONFIDENCE (0.90-1.00) Examples:
+```
+Field: Patient Name
+Document: Printed "JOHNSON, MARY A" in clear typeface, Box 2
+Confidence: 0.95
+Why: Every character clearly visible, no ambiguity
+```
+
+```
+Field: Date of Service
+Document: Printed "03/15/2024" in date box, all digits sharp
+Confidence: 0.92
+Why: All digits clearly visible, standard format confirmed
+```
+
+### MEDIUM CONFIDENCE (0.70-0.89) Examples:
+```
+Field: Provider NPI
+Document: "1234567890" visible but 4th digit slightly faded
+Confidence: 0.82
+Why: Most characters clear, one digit requires careful reading
+```
+
+```
+Field: Total Charges
+Document: "$1,234.56" visible but decimal point is small
+Confidence: 0.78
+Why: Amount clear but decimal placement requires verification
+```
+
+### LOW CONFIDENCE (0.50-0.69) Examples:
+```
+Field: Diagnosis Code
+Document: Handwritten "J18.9" with unclear "8"
+Confidence: 0.55
+Why: Could be J18.9 or J10.9 - ambiguous character
+→ SHOULD RETURN NULL instead
+```
+
+### TOO LOW - MUST RETURN NULL (<0.50) Examples:
+```
+Field: Patient DOB
+Document: "0_/15/19__" with smudged digits
+Confidence: 0.3
+Why: Multiple missing/unclear digits
+→ MUST RETURN NULL
+```
+"""
 
 
 def build_validation_prompt(
     extracted_data: dict[str, Any],
     document_type: str,
     schema_rules: list[dict[str, Any]],
+    include_constitutional_principles: bool = True,
+    include_calibration_examples: bool = True,
 ) -> str:
     """
     Build prompt for validating extracted data.
@@ -20,6 +116,8 @@ def build_validation_prompt(
         extracted_data: The extracted field values.
         document_type: Type of document.
         schema_rules: Cross-field validation rules from schema.
+        include_constitutional_principles: Whether to include validation principles.
+        include_calibration_examples: Whether to include confidence calibration examples.
 
     Returns:
         Validation prompt for the VLM.
@@ -27,11 +125,21 @@ def build_validation_prompt(
     rules_str = _format_validation_rules(schema_rules)
     data_str = _format_extracted_data(extracted_data)
 
-    return f"""
-## EXTRACTION VALIDATION TASK
+    constitutional = ""
+    if include_constitutional_principles:
+        constitutional = CONSTITUTIONAL_VALIDATION_PRINCIPLES
 
-Review the extracted data for a {document_type} document and validate it against
-the document image and validation rules.
+    calibration = ""
+    if include_calibration_examples:
+        calibration = CONFIDENCE_CALIBRATION_EXAMPLES
+
+    return f"""
+## EXTRACTION VALIDATION TASK - {document_type}
+
+You are a skeptical auditor validating extracted data. Your job is to catch errors
+and hallucinations, NOT to confirm extractions.
+
+{constitutional}
 
 ### Extracted Data to Validate
 
@@ -41,24 +149,38 @@ the document image and validation rules.
 
 {rules_str}
 
-### VALIDATION CHECKLIST
+{calibration}
 
-For each extracted field, verify:
+### SYSTEMATIC VALIDATION PROTOCOL
 
-1. **Visual Confirmation**: Can you see this exact value in the document?
-2. **Format Correctness**: Does the value match expected format for its type?
-3. **Logical Consistency**: Does the value make sense in context?
-4. **Cross-Field Validity**: Does it satisfy all cross-field rules?
+For each extracted field, perform these checks:
 
-### HALLUCINATION DETECTION
+**Check 1: VISUAL VERIFICATION** (Most Important)
+□ Can I point to the exact location where this value appears?
+□ Does the extracted value exactly match what I see?
+□ Are there any character discrepancies?
 
-Flag as potential hallucination if:
-- Value not visually present in document
-- Value suspiciously matches "typical" patterns
-- Round numbers ($1000.00, $500.00 exactly)
-- Placeholder patterns (N/A, TBD, XXX, 123)
-- Repetitive values across multiple fields
-- Values that seem "too perfect"
+**Check 2: HALLUCINATION PATTERNS**
+□ Is this a suspiciously round number ($1000.00, $500.00)?
+□ Is this a common placeholder (John Doe, Jane Smith, N/A, TBD)?
+□ Is this a default date (01/01/2000, 01/01/1900)?
+□ Is this value repeated in multiple fields?
+□ Is this value "too perfect" for a real document?
+
+**Check 3: FORMAT VALIDATION**
+□ Does the value match the expected field type?
+□ Is the format correct (e.g., valid date format, valid NPI format)?
+□ Are all required components present?
+
+**Check 4: CROSS-FIELD CONSISTENCY**
+□ Do related fields make sense together?
+□ Are there any logical contradictions?
+□ Do totals add up correctly?
+
+**Check 5: CONFIDENCE CALIBRATION**
+□ Is the confidence score appropriate for the visual clarity?
+□ Should high-confidence values actually be lower?
+□ Are low-confidence values being reported instead of null?
 
 ### REQUIRED OUTPUT FORMAT
 
@@ -68,32 +190,57 @@ Flag as potential hallucination if:
   "field_validations": {{
     "field_name": {{
       "valid": true,
+      "visually_confirmed": true,
       "errors": [],
       "warnings": [],
-      "visually_confirmed": true
+      "confidence_appropriate": true,
+      "hallucination_risk": "low | medium | high"
     }}
   }},
   "cross_field_validations": [
     {{
       "rule": "rule description",
       "passed": true,
-      "message": "validation message"
+      "message": "validation message",
+      "fields_involved": ["field1", "field2"]
     }}
   ],
   "hallucination_flags": [
     {{
       "field": "field_name",
-      "reason": "why flagged as potential hallucination",
-      "confidence": 0.8
+      "pattern_detected": "round_number | placeholder | default_date | repetitive | too_perfect",
+      "reason": "specific explanation",
+      "confidence_in_flag": 0.8
     }}
   ],
   "overall_assessment": {{
     "quality": "high | medium | low",
     "requires_review": false,
-    "review_reason": null
+    "review_reason": null,
+    "fields_needing_attention": [],
+    "recommended_action": "accept | review | reject"
   }}
 }}
 ```
+
+### VALIDATION OUTCOME GUIDANCE
+
+**ACCEPT** if:
+- All fields visually confirmed
+- No hallucination patterns detected
+- Cross-field rules pass
+- Confidence scores are appropriate
+
+**REVIEW** if:
+- Some fields have medium hallucination risk
+- 1-2 fields couldn't be visually confirmed
+- Minor cross-field inconsistencies
+
+**REJECT** if:
+- Multiple hallucination patterns detected
+- Fields fail visual confirmation
+- Critical cross-field rules fail
+- High-confidence values are suspicious
 """
 
 
