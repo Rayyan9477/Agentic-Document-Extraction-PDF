@@ -37,6 +37,9 @@ from src.schemas.superbill import SUPERBILL_SCHEMA
 from src.schemas.ub04 import UB04_SCHEMA
 from src.schemas.eob import EOB_SCHEMA
 
+# Import enhanced generic fallback for unknown documents
+from src.schemas.generic_fallback import ENHANCED_GENERIC_SCHEMA
+
 # Import nested schemas
 from src.schemas.nested_schemas import (
     NestedSchema,
@@ -119,6 +122,8 @@ __all__ = [
     "SUPERBILL_SCHEMA",
     "UB04_SCHEMA",
     "EOB_SCHEMA",
+    # Generic fallback for unknown documents
+    "ENHANCED_GENERIC_SCHEMA",
     # Nested schemas
     "NestedSchema",
     "NestedSchemaRegistry",

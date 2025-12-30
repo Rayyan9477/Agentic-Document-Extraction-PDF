@@ -16,6 +16,38 @@
 
 services:
   # ---------------------------------------------------------------------------
+  # Nginx Load Balancer - Production
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: doc-extraction-nginx-prod
+    ports:
+      - "80:80"
+      - "8000:8000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - doc-extraction-prod
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
   # Main API Service - Production
   # ---------------------------------------------------------------------------
   api:
@@ -23,20 +55,19 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
       target: runtime
-    container_name: doc-extraction-api-prod
-    ports:
-      - "8000:8000"
+    # Note: No external port - accessed through nginx load balancer
     environment:
       - APP_ENV=production
       - DEBUG=false
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
       - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL}
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/extraction.db}
-      - SECRET_KEY=${SECRET_KEY}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required for production}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       - HIPAA_AUDIT_ENABLED=true
       - HIPAA_ENCRYPT_AT_REST=true
     volumes:
@@ -90,11 +121,11 @@ services:
       - LOG_LEVEL=INFO
       - LOG_FORMAT=json
       - LM_STUDIO_BASE_URL=${LM_STUDIO_BASE_URL}
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/extraction.db}
-      - SECRET_KEY=${SECRET_KEY}
-      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - DATABASE_URL=${DATABASE_URL:?DATABASE_URL is required for production}
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY is required}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
     volumes:
       - app-data:/app/data
       - app-logs:/app/logs
@@ -138,8 +169,8 @@ services:
     environment:
       - APP_ENV=production
       - LOG_LEVEL=INFO
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
     depends_on:
       redis:
         condition: service_healthy
@@ -167,17 +198,19 @@ services:
       - redis-data:/data
     networks:
       - doc-extraction-prod
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --maxmemory 512mb --maxmemory-policy allkeys-lru
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 1G
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     logging:
       driver: "json-file"
       options:

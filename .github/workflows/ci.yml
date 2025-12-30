@@ -152,14 +152,28 @@ jobs:
           pip install bandit safety pip-audit
 
       - name: Run Bandit security linter
-        run: bandit -r src/ -ll -ii -x tests/ || true
-        continue-on-error: true
+        run: bandit -r src/ -ll -ii -x tests/ -f json -o bandit-report.json || bandit -r src/ -ll -ii -x tests/
+
+      - name: Upload Bandit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report
+          path: bandit-report.json
+          retention-days: 30
 
       - name: Check for vulnerable dependencies
         run: |
           pip install -r requirements.txt
-          pip-audit --desc || true
-        continue-on-error: true
+          pip-audit --desc --format json --output pip-audit-report.json || pip-audit --desc
+
+      - name: Upload pip-audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: pip-audit-report.json
+          retention-days: 30
 
   # ---------------------------------------------------------------------------
   # Job 4: Build Docker Image

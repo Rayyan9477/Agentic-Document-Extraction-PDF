@@ -668,23 +668,72 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
+    @staticmethod
+    def _is_weak_secret(secret: str) -> bool:
+        """Check if a secret is weak or uses default patterns."""
+        weak_patterns = [
+            "change-this",
+            "your-secret",
+            "your-encryption",
+            "changeme",
+            "password",
+            "secret",
+            "default",
+            "example",
+            "test",
+            "dev-",
+        ]
+        secret_lower = secret.lower()
+        return any(pattern in secret_lower for pattern in weak_patterns)
+
+    @staticmethod
+    def _has_sufficient_entropy(secret: str, min_length: int = 32) -> bool:
+        """Check if secret has sufficient length and character variety."""
+        if len(secret) < min_length:
+            return False
+        # Check for character variety (at least 3 of: upper, lower, digit, special)
+        has_upper = any(c.isupper() for c in secret)
+        has_lower = any(c.islower() for c in secret)
+        has_digit = any(c.isdigit() for c in secret)
+        has_special = any(not c.isalnum() for c in secret)
+        variety_count = sum([has_upper, has_lower, has_digit, has_special])
+        return variety_count >= 3
+
     @model_validator(mode="after")
     def validate_production_settings(self) -> "Settings":
         """Validate critical settings for production environment."""
         if self.app_env == Environment.PRODUCTION:
-            # Ensure secret key is changed from default
-            if "change-this" in self.security.secret_key.get_secret_value():
+            secret_key = self.security.secret_key.get_secret_value()
+            encryption_key = self.security.encryption_key.get_secret_value()
+
+            # Validate SECRET_KEY
+            if self._is_weak_secret(secret_key):
                 raise ValueError(
-                    "SECRET_KEY must be changed from default in production"
+                    "SECRET_KEY appears to be a default or weak value. "
+                    "Use a strong, randomly generated secret in production."
                 )
-            # Ensure encryption key is changed from default
-            if "change-this" in self.security.encryption_key.get_secret_value():
+            if not self._has_sufficient_entropy(secret_key, min_length=32):
                 raise ValueError(
-                    "ENCRYPTION_KEY must be changed from default in production"
+                    "SECRET_KEY must be at least 32 characters with mixed "
+                    "uppercase, lowercase, digits, and special characters."
                 )
+
+            # Validate ENCRYPTION_KEY
+            if self._is_weak_secret(encryption_key):
+                raise ValueError(
+                    "ENCRYPTION_KEY appears to be a default or weak value. "
+                    "Use a strong, randomly generated key in production."
+                )
+            if not self._has_sufficient_entropy(encryption_key, min_length=32):
+                raise ValueError(
+                    "ENCRYPTION_KEY must be at least 32 characters with mixed "
+                    "uppercase, lowercase, digits, and special characters."
+                )
+
             # Ensure debug is disabled
             if self.debug:
                 raise ValueError("DEBUG must be False in production")
+
         return self
 
     @property
