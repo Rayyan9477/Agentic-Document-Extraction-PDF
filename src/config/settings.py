@@ -335,7 +335,7 @@ class APISettings(BaseSettings):
     )
 
     host: str = Field(
-        default="0.0.0.0",
+        default="0.0.0.0",  # nosec B104 - intentional bind to all interfaces for containerized deployments
         description="API server host address",
     )
     port: Annotated[int, Field(ge=1, le=65535)] = Field(
@@ -517,7 +517,7 @@ class StreamlitSettings(BaseSettings):
         description="Streamlit server port",
     )
     server_address: str = Field(
-        default="0.0.0.0",
+        default="0.0.0.0",  # nosec B104 - intentional bind to all interfaces for containerized deployments
         description="Streamlit server address",
     )
     theme_base: str = Field(

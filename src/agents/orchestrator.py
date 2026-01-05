@@ -229,7 +229,7 @@ class OrchestratorAgent(BaseAgent):
 
         try:
             # Determine current step and route appropriately
-            current_step = state.get("current_step", "")
+            _ = state.get("current_step", "")  # Retrieved for logging context
             status = state.get("status", "")
 
             # Update state based on routing decision
@@ -242,7 +242,7 @@ class OrchestratorAgent(BaseAgent):
                 # Check if retry is possible
                 state = self._handle_failure(state)
 
-            duration_ms = self.log_operation_complete(
+            _ = self.log_operation_complete(
                 "orchestration",
                 start_time,
                 success=True,

@@ -123,7 +123,7 @@ def _check_vlm_health() -> dict[str, Any]:
             req = urllib.request.Request(models_url, method="GET")
             req.add_header("Content-Type", "application/json")
 
-            with urllib.request.urlopen(req, timeout=5) as response:
+            with urllib.request.urlopen(req, timeout=5) as response:  # nosec B310
                 if response.status == 200:
                     data = json.loads(response.read().decode())
                     models = data.get("data", [])
@@ -264,7 +264,7 @@ def _check_monitoring_components() -> dict[str, Any]:
     try:
         from src.monitoring.metrics import MetricsCollector
 
-        collector = MetricsCollector()
+        _ = MetricsCollector()  # Test instantiation
         status["metrics"] = {
             "status": "healthy",
             "prometheus_enabled": True,

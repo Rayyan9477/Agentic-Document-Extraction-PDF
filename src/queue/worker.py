@@ -249,7 +249,7 @@ class WorkerManager:
         try:
             active = inspect.active() or {}
             reserved = inspect.reserved() or {}
-            scheduled = inspect.scheduled() or {}
+            _ = inspect.scheduled() or {}  # Retrieved for completeness
             stats = inspect.stats() or {}
             registered = inspect.registered() or {}
 

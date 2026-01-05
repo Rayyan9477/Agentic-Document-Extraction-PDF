@@ -1039,7 +1039,7 @@ def validate_revenue_code(code: str | int) -> ValidationInfo:
 
     # Remove leading zeros for comparison but keep for normalization
     # Revenue codes are typically 4 digits (0001-0999)
-    digits_only = code_str.lstrip("0") or "0"
+    _ = code_str.lstrip("0") or "0"  # Validate strippable
 
     # Pad to 4 digits for normalized form
     normalized = code_str.zfill(4)

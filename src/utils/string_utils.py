@@ -391,15 +391,15 @@ def clean_ocr_text(text: str) -> str:
     if not text:
         return ""
 
-    # Common OCR substitutions
-    ocr_corrections = [
-        (r"0", "O"),  # Zero to O (only in specific contexts)
-        (r"l(?=[A-Z])", "I"),  # lowercase l before uppercase -> I
-        (r"(?<=[a-z])1(?=[a-z])", "l"),  # 1 between lowercase -> l
-        (r"\|", "I"),  # Pipe to I
-        (r"rn", "m"),  # Common OCR error
-        (r"vv", "w"),  # Double v to w
-    ]
+    # Common OCR substitutions (reserved for future use)
+    # ocr_corrections = [
+    #     (r"0", "O"),  # Zero to O (only in specific contexts)
+    #     (r"l(?=[A-Z])", "I"),  # lowercase l before uppercase -> I
+    #     (r"(?<=[a-z])1(?=[a-z])", "l"),  # 1 between lowercase -> l
+    #     (r"\|", "I"),  # Pipe to I
+    #     (r"rn", "m"),  # Common OCR error
+    #     (r"vv", "w"),  # Double v to w
+    # ]
 
     result = text
 

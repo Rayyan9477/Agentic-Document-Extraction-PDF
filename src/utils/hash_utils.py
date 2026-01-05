@@ -44,7 +44,7 @@ def compute_md5(data: bytes | str) -> str:
     if isinstance(data, str):
         data = data.encode("utf-8")
 
-    return hashlib.md5(data).hexdigest()
+    return hashlib.md5(data, usedforsecurity=False).hexdigest()  # nosec B324
 
 
 def compute_file_hash(
@@ -71,7 +71,7 @@ def compute_file_hash(
         "sha256": hashlib.sha256,
         "sha384": hashlib.sha384,
         "sha512": hashlib.sha512,
-        "md5": hashlib.md5,
+        "md5": lambda: hashlib.md5(usedforsecurity=False),  # nosec B324
     }
 
     if algorithm not in algorithms:

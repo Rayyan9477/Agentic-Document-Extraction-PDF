@@ -222,10 +222,9 @@ async def process_document(
         )
 
     # Validate output_dir if provided
-    validated_output_dir: Path | None = None
     if request.output_dir:
         try:
-            validated_output_dir = _output_validator.validate(request.output_dir)
+            _ = _output_validator.validate(request.output_dir)  # Validate only
         except (PathTraversalError, PathValidationError) as e:
             logger.warning(
                 "output_path_validation_failed",

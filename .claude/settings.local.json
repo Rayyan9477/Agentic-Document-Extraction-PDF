@@ -33,7 +33,8 @@
       "Skill(llm-application-dev:langchain-agent:*)",
       "Bash(cd:*)",
       "Bash(git -C \"d:/Repo/PDF\" log --oneline -10)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(LM_STUDIO_MODEL=\"qwen/qwen3-vl-8b\" python:*)"
     ],
     "deny": [],
     "ask": []

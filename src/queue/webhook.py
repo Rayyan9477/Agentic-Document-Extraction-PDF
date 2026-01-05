@@ -126,11 +126,11 @@ class WebhookClient:
     # Allowed URL schemes
     ALLOWED_SCHEMES = {"http", "https"}
 
-    # Blocked hosts (security)
+    # Blocked hosts (security) - nosec B104: these are blocked destinations, not bind addresses
     BLOCKED_HOSTS = {
         "localhost",
         "127.0.0.1",
-        "0.0.0.0",
+        "0.0.0.0",  # nosec B104
         "::1",
         "169.254.169.254",  # AWS metadata
         "metadata.google.internal",  # GCP metadata

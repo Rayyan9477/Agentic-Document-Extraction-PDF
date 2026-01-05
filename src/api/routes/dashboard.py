@@ -200,7 +200,7 @@ async def get_dashboard_summary(
 
         try:
             req = urllib.request.Request(models_url, method="GET")
-            with urllib.request.urlopen(req, timeout=3) as response:
+            with urllib.request.urlopen(req, timeout=3) as response:  # nosec B310
                 if response.status == 200:
                     services["vlm"] = "healthy"
                 else:

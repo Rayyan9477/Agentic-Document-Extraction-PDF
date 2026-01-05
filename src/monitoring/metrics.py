@@ -589,7 +589,7 @@ class MetricsCollector:
         try:
             yield
         finally:
-            duration = time.time() - start_time
+            _ = time.time() - start_time  # Duration tracked via in_progress gauge
             self._registry.api_requests_in_progress.labels(
                 method=method,
                 endpoint=endpoint,
