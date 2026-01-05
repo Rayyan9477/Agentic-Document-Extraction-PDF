@@ -675,7 +675,7 @@ class NestedSchemaRegistry:
                 for error in errors:
                     all_errors.append(f"Item {i + 1}: {error}")
         else:
-            is_valid, errors = schema.validate(value)
+            _, errors = schema.validate(value)
             all_errors.extend(errors)
 
         return len(all_errors) == 0, all_errors

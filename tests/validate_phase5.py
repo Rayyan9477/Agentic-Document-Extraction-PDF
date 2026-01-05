@@ -359,7 +359,7 @@ def main():
 
     # Test token management
     token_mgr = TokenManager(secret_key="test-secret-key-for-jwt-12345")
-    token, expiration = token_mgr.create_access_token(user)
+    token, _ = token_mgr.create_access_token(user)
     assert len(token) > 100
     print("   JWT Token Creation: PASS")
 

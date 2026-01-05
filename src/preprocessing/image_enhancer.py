@@ -214,7 +214,7 @@ class ImageEnhancer:
 
             # Calculate original metrics
             original_variance = self._calculate_variance(img)
-            original_mean, original_std = cv2.meanStdDev(
+            _, _ = cv2.meanStdDev(
                 cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
             )
 

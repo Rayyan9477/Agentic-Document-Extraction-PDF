@@ -211,7 +211,6 @@ ignore = [
     "RET504",  # unnecessary assignment before return (readability)
     "PLC0415", # import outside top-level (lazy imports are intentional)
     "PTH123",  # builtin open (style preference)
-    "UP038",   # non-pep604-isinstance (compatibility)
     "SIM102",  # collapsible-if (readability)
     "SIM105",  # suppressible-exception (explicit is better)
     "SIM108",  # if-else-block-instead-of-if-exp (readability)
@@ -258,7 +257,9 @@ ignore = [
     "S608",    # hardcoded SQL (safe internal queries)
     "SIM101",  # duplicate isinstance (readability)
     "UP035",   # deprecated import (compatibility)
+    "UP038",   # non-pep604-isinstance (removed in newer ruff, keep for local compatibility)
     "F841",    # unused variable (intentional placeholders)
+    "RUF059",  # unused unpacked variable (preview rule)
 ]
 
 [tool.ruff.lint.per-file-ignores]
