@@ -12,7 +12,6 @@ from typing import Annotated, Any
 
 from pydantic import (
     AnyHttpUrl,
-    DirectoryPath,
     Field,
     SecretStr,
     field_validator,

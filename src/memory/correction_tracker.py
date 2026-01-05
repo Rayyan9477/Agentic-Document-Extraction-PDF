@@ -7,11 +7,11 @@ to improve future extractions through pattern learning.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
-from pathlib import Path
 import json
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from src.config import get_logger, get_settings
 from src.memory.mem0_client import Mem0Client
@@ -46,7 +46,7 @@ class Correction:
     confidence_before: float = 0.0
     correction_type: str = "value"
     user_id: str = "default"
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,7 +76,7 @@ class Correction:
             confidence_before=data.get("confidence_before", 0.0),
             correction_type=data.get("correction_type", "value"),
             user_id=data.get("user_id", "default"),
-            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+            created_at=data.get("created_at", datetime.now(UTC).isoformat()),
             metadata=data.get("metadata", {}),
         )
 
@@ -132,10 +132,7 @@ class CorrectionTracker:
             try:
                 with self._corrections_file.open("r", encoding="utf-8") as f:
                     data = json.load(f)
-                    self._corrections = {
-                        k: Correction.from_dict(v)
-                        for k, v in data.items()
-                    }
+                    self._corrections = {k: Correction.from_dict(v) for k, v in data.items()}
             except Exception as e:
                 self._logger.warning("corrections_load_failed", error=str(e))
                 self._corrections = {}
@@ -153,6 +150,7 @@ class CorrectionTracker:
     def _generate_id(self, correction: Correction) -> str:
         """Generate unique ID for a correction."""
         import hashlib
+
         data = f"{correction.field_name}:{correction.document_type}:{correction.created_at}"
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
@@ -259,9 +257,7 @@ class CorrectionTracker:
                         stats["common_errors"].pop(0)
 
             # Update average confidence
-            stats["avg_confidence_before"] = (
-                stats["confidence_sum"] / stats["total_corrections"]
-            )
+            stats["avg_confidence_before"] = stats["confidence_sum"] / stats["total_corrections"]
 
     def get_field_hints(
         self,
@@ -322,10 +318,7 @@ class CorrectionTracker:
         Returns:
             List of corrections for the field.
         """
-        field_corrections = [
-            c for c in self._corrections.values()
-            if c.field_name == field_name
-        ]
+        field_corrections = [c for c in self._corrections.values() if c.field_name == field_name]
 
         # Sort by creation time (newest first)
         field_corrections.sort(key=lambda x: x.created_at, reverse=True)
@@ -366,8 +359,7 @@ class CorrectionTracker:
             "total_corrections": total_corrections,
             "fields_with_corrections": len(self._field_stats),
             "top_corrected_fields": [
-                {"field": f, "count": s["total_corrections"]}
-                for f, s in top_fields
+                {"field": f, "count": s["total_corrections"]} for f, s in top_fields
             ],
             "correction_rate_by_type": correction_types,
         }

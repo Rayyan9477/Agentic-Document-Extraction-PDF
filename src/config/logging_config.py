@@ -10,14 +10,13 @@ import logging
 import logging.handlers
 import re
 import sys
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 from structlog.types import EventDict, Processor
 
-from src.config.settings import LogFormat, LogLevel, get_settings
+from src.config.settings import LogFormat, get_settings
 
 
 # PHI patterns for masking sensitive information
@@ -41,7 +40,10 @@ PHI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Credit card numbers
     (re.compile(r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b"), "[CC-MASKED]"),
     # Patient names (common patterns - conservative approach)
-    (re.compile(r"patient[_\s]?name[:\s]+[A-Za-z]+\s+[A-Za-z]+", re.IGNORECASE), "[PATIENT-NAME-MASKED]"),
+    (
+        re.compile(r"patient[_\s]?name[:\s]+[A-Za-z]+\s+[A-Za-z]+", re.IGNORECASE),
+        "[PATIENT-NAME-MASKED]",
+    ),
 ]
 
 
@@ -65,9 +67,9 @@ def mask_phi(event_dict: EventDict) -> EventDict:
             for pattern, replacement in PHI_PATTERNS:
                 result = pattern.sub(replacement, result)
             return result
-        elif isinstance(value, dict):
+        if isinstance(value, dict):
             return {k: mask_value(v) for k, v in value.items()}
-        elif isinstance(value, (list, tuple)):
+        if isinstance(value, (list, tuple)):
             return type(value)(mask_value(item) for item in value)
         return value
 
@@ -90,7 +92,7 @@ def add_timestamp(
     Returns:
         EventDict with timestamp added.
     """
-    event_dict["timestamp"] = datetime.now(timezone.utc).isoformat()
+    event_dict["timestamp"] = datetime.now(UTC).isoformat()
     return event_dict
 
 

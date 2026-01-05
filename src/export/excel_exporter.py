@@ -9,7 +9,7 @@ Provides comprehensive Excel export with:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -27,7 +27,6 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from src.config import get_logger
 from src.pipeline.state import (
-    ConfidenceLevel,
     ExtractionState,
     ExtractionStatus,
 )
@@ -88,21 +87,30 @@ class ExcelExportConfig:
         data_row_height: Height of data rows.
     """
 
-    sheets: list[SheetConfig] = field(default_factory=lambda: [
-        SheetConfig(SheetType.DATA, "Extracted Data"),
-        SheetConfig(SheetType.METADATA, "Processing Metadata"),
-        SheetConfig(SheetType.VALIDATION, "Validation Results"),
-        SheetConfig(SheetType.AUDIT, "Audit Trail"),
-    ])
+    sheets: list[SheetConfig] = field(
+        default_factory=lambda: [
+            SheetConfig(SheetType.DATA, "Extracted Data"),
+            SheetConfig(SheetType.METADATA, "Processing Metadata"),
+            SheetConfig(SheetType.VALIDATION, "Validation Results"),
+            SheetConfig(SheetType.AUDIT, "Audit Trail"),
+        ]
+    )
     include_styling: bool = True
     include_confidence_colors: bool = True
     include_validation_highlighting: bool = True
     include_formulas: bool = True
     mask_phi: bool = False
-    phi_fields: set[str] = field(default_factory=lambda: {
-        "ssn", "social_security", "member_id", "subscriber_id",
-        "patient_account", "policy_number", "group_number",
-    })
+    phi_fields: set[str] = field(
+        default_factory=lambda: {
+            "ssn",
+            "social_security",
+            "member_id",
+            "subscriber_id",
+            "patient_account",
+            "policy_number",
+            "group_number",
+        }
+    )
     phi_mask_pattern: str = "***MASKED***"
     default_column_width: int = 18
     header_row_height: int = 25
@@ -310,7 +318,14 @@ class ExcelExporter:
         state: ExtractionState,
     ) -> None:
         """Build the main data extraction sheet."""
-        headers = ["Field Name", "Value", "Confidence", "Confidence Level", "Location", "Passes Agree"]
+        headers = [
+            "Field Name",
+            "Value",
+            "Confidence",
+            "Confidence Level",
+            "Location",
+            "Passes Agree",
+        ]
         self._write_header_row(worksheet, headers)
 
         # Calculate column index dynamically to avoid hardcoding
@@ -323,7 +338,9 @@ class ExcelExporter:
         row = 2
         for field_name, field_data in merged.items():
             if field_name in self.config.phi_fields and self.config.mask_phi:
-                value = self._mask_phi_value(field_data.get("value") if isinstance(field_data, dict) else field_data)
+                value = self._mask_phi_value(
+                    field_data.get("value") if isinstance(field_data, dict) else field_data
+                )
             elif isinstance(field_data, dict):
                 value = field_data.get("value", "")
             else:
@@ -331,7 +348,9 @@ class ExcelExporter:
 
             meta = field_meta.get(field_name, {})
             confidence = meta.get("confidence", 0.0) if isinstance(meta, dict) else 0.0
-            confidence_level = meta.get("confidence_level", "low") if isinstance(meta, dict) else "low"
+            confidence_level = (
+                meta.get("confidence_level", "low") if isinstance(meta, dict) else "low"
+            )
             location = field_data.get("location", "") if isinstance(field_data, dict) else ""
             passes_agree = meta.get("passes_agree", True) if isinstance(meta, dict) else True
 
@@ -348,7 +367,9 @@ class ExcelExporter:
 
             # Apply confidence coloring using dynamically calculated column index
             if self.config.include_confidence_colors:
-                self._styler.apply_confidence_color(worksheet.cell(row=row, column=confidence_column_idx), confidence)
+                self._styler.apply_confidence_color(
+                    worksheet.cell(row=row, column=confidence_column_idx), confidence
+                )
 
             row += 1
 
@@ -467,7 +488,11 @@ class ExcelExporter:
         self._write_header_row(worksheet, headers)
 
         audit_events = [
-            (state.get("start_time", ""), "Processing Started", f"PDF: {state.get('pdf_path', '')}"),
+            (
+                state.get("start_time", ""),
+                "Processing Started",
+                f"PDF: {state.get('pdf_path', '')}",
+            ),
             (state.get("start_time", ""), "Document Type Detected", state.get("document_type", "")),
             (state.get("start_time", ""), "Schema Selected", state.get("selected_schema_name", "")),
         ]
@@ -477,21 +502,25 @@ class ExcelExporter:
             if isinstance(page, dict):
                 page_num = page.get("page_number", 0)
                 extraction_time = page.get("extraction_time_ms", 0)
-                audit_events.append((
-                    "",
-                    f"Page {page_num} Extracted",
-                    f"Fields: {len(page.get('merged_fields', {}))}, Time: {extraction_time}ms",
-                ))
+                audit_events.append(
+                    (
+                        "",
+                        f"Page {page_num} Extracted",
+                        f"Fields: {len(page.get('merged_fields', {}))}, Time: {extraction_time}ms",
+                    )
+                )
 
         # Add validation event
         validation = state.get("validation", {})
         if validation:
             is_valid = validation.get("is_valid", False)
-            audit_events.append((
-                "",
-                "Validation Completed",
-                f"Result: {'Pass' if is_valid else 'Fail'}",
-            ))
+            audit_events.append(
+                (
+                    "",
+                    "Validation Completed",
+                    f"Result: {'Pass' if is_valid else 'Fail'}",
+                )
+            )
 
         # Add completion/failure event
         status = state.get("status", "")
@@ -507,11 +536,13 @@ class ExcelExporter:
             audit_events.append((end_time, "Requires Human Review", reason))
 
         # Add export timestamp
-        audit_events.append((
-            datetime.now(timezone.utc).isoformat(),
-            "Excel Export Generated",
-            f"Export timestamp",
-        ))
+        audit_events.append(
+            (
+                datetime.now(UTC).isoformat(),
+                "Excel Export Generated",
+                "Export timestamp",
+            )
+        )
 
         for row, (timestamp, event, details) in enumerate(audit_events, start=2):
             row_data = [str(timestamp), event, details]
@@ -526,8 +557,13 @@ class ExcelExporter:
     ) -> None:
         """Build the page-level details sheet."""
         headers = [
-            "Page Number", "Field Count", "Confidence", "Agreement Rate",
-            "VLM Calls", "Extraction Time (ms)", "Errors",
+            "Page Number",
+            "Field Count",
+            "Confidence",
+            "Agreement Rate",
+            "VLM Calls",
+            "Extraction Time (ms)",
+            "Errors",
         ]
         self._write_header_row(worksheet, headers)
 
@@ -550,7 +586,9 @@ class ExcelExporter:
 
                 if self.config.include_confidence_colors:
                     confidence = page.get("overall_confidence", 0.0)
-                    self._styler.apply_confidence_color(worksheet.cell(row=row, column=3), confidence)
+                    self._styler.apply_confidence_color(
+                        worksheet.cell(row=row, column=3), confidence
+                    )
 
         self._auto_size_columns(worksheet)
 
@@ -636,8 +674,7 @@ class ExcelExporter:
                     # Use 'is not None' to preserve numeric zero values (e.g., "0" for counts)
                     cell_value = str(cell.value) if cell.value is not None else ""
                     cell_length = len(cell_value)
-                    if cell_length > max_length:
-                        max_length = cell_length
+                    max_length = max(max_length, cell_length)
                 except (TypeError, AttributeError):
                     pass
 

@@ -6,12 +6,9 @@ simulating real user workflows.
 """
 
 import pytest
-import time
-from datetime import datetime, timedelta
 from fastapi import status
-from fastapi.testclient import TestClient
 
-from src.security.rbac import RBACManager, Role
+from src.security.rbac import Role
 
 
 @pytest.mark.e2e
@@ -157,11 +154,13 @@ class TestCompleteAuthenticationFlow:
             )
             assert login_response.status_code == status.HTTP_200_OK
             tokens = login_response.json()
-            user_sessions.append({
-                "username": user["username"],
-                "email": user["email"],
-                "token": tokens["access_token"],
-            })
+            user_sessions.append(
+                {
+                    "username": user["username"],
+                    "email": user["email"],
+                    "token": tokens["access_token"],
+                }
+            )
 
         # All users access their profiles
         for session in user_sessions:

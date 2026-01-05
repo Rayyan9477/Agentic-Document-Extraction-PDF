@@ -18,48 +18,50 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING
 
 # Core configuration (always available)
-from src.config import get_settings, get_logger, AuditLogger
+from src.config import AuditLogger, get_logger, get_settings
 
 # Schema components (always available - no heavy dependencies)
 from src.schemas import (
-    DocumentType,
     DocumentSchema,
-    SchemaRegistry,
+    DocumentType,
     FieldType,
-    get_schema,
+    SchemaRegistry,
     get_all_schemas,
+    get_schema,
 )
 
 # Utility components (always available)
 from src.utils import (
-    ensure_directory,
-    get_file_hash,
-    safe_filename,
-    atomic_write,
     FileLock,
-    compute_sha256,
-    generate_unique_id,
-    mask_sensitive_data,
-    parse_date,
-    format_date,
-    is_valid_date,
+    atomic_write,
     calculate_age,
-    normalize_whitespace,
-    normalize_name,
     clean_currency,
+    compute_sha256,
+    ensure_directory,
+    format_date,
     fuzzy_match,
+    generate_unique_id,
+    get_file_hash,
+    is_valid_date,
+    mask_sensitive_data,
+    normalize_name,
+    normalize_whitespace,
+    parse_date,
+    safe_filename,
 )
+
 
 # Preprocessing components (requires cv2/numpy - optional for core functionality)
 try:
     from src.preprocessing import (
-        PDFProcessor,
-        ImageEnhancer,
         BatchManager,
+        EnhancementResult,
+        ImageEnhancer,
         PageImage,
         PDFMetadata,
-        EnhancementResult,
+        PDFProcessor,
     )
+
     _PREPROCESSING_AVAILABLE = True
 except ImportError:
     PDFProcessor = None  # type: ignore[misc, assignment]
@@ -73,12 +75,13 @@ except ImportError:
 # VLM client components (requires httpx - optional for schema-only usage)
 try:
     from src.client import (
-        LMStudioClient,
         ConnectionManager,
         HealthMonitor,
+        LMStudioClient,
         VisionRequest,
         VisionResponse,
     )
+
     _CLIENT_AVAILABLE = True
 except ImportError:
     LMStudioClient = None  # type: ignore[misc, assignment]

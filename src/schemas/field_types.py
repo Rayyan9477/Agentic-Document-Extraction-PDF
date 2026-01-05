@@ -6,9 +6,10 @@ and cross-field validation rules.
 """
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 
 class FieldType(str, Enum):
@@ -243,9 +244,7 @@ class FieldDefinition:
             raise ValueError("Field name is required")
 
         if not re.match(r"^[a-z][a-z0-9_]*$", self.name):
-            raise ValueError(
-                f"Field name must be snake_case: {self.name}"
-            )
+            raise ValueError(f"Field name must be snake_case: {self.name}")
 
         if self.field_type == FieldType.LIST and not self.list_item_type:
             raise ValueError("LIST fields must specify list_item_type")
@@ -374,7 +373,7 @@ class FieldDefinition:
                 digits = re.sub(r"\D", "", value)
                 if len(digits) == 10:
                     return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
-                elif len(digits) == 11 and digits[0] == "1":
+                if len(digits) == 11 and digits[0] == "1":
                     return f"{digits[1:4]}-{digits[4:7]}-{digits[7:]}"
                 return value
 

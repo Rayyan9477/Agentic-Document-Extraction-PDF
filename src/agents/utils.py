@@ -7,14 +7,14 @@ Provides common functionality including:
 - Targeted re-extraction for low-confidence fields
 """
 
-import time
 import random
-from typing import Any, Callable, TypeVar
+import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from src.config import get_logger
-from src.schemas import DocumentType, FieldType, RuleOperator
-from src.schemas.schema_builder import SchemaBuilder, FieldBuilder, RuleBuilder
-from src.schemas import DocumentSchema
+from src.schemas import DocumentSchema, DocumentType, FieldType, RuleOperator
+from src.schemas.schema_builder import FieldBuilder, RuleBuilder, SchemaBuilder
 
 
 logger = get_logger(__name__)
@@ -171,7 +171,7 @@ class RetryConfig:
         Returns:
             Delay in milliseconds.
         """
-        delay = self.base_delay_ms * (self.exponential_base ** attempt)
+        delay = self.base_delay_ms * (self.exponential_base**attempt)
         delay = min(delay, self.max_delay_ms)
 
         if self.jitter:

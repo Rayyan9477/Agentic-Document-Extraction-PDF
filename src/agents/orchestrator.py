@@ -14,33 +14,31 @@ Checkpointing Options:
 - postgres: PostgreSQL-based checkpointing (production at scale)
 """
 
-from typing import Any, Literal, Callable
-from datetime import datetime, timezone
-from enum import Enum
-from pathlib import Path
 import hashlib
 import uuid
+from collections.abc import Callable
+from datetime import UTC, datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Literal
 
-from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, StateGraph
 
-from src.agents.base import BaseAgent, AgentError, OrchestrationError, AgentResult
+from src.agents.base import AgentError, BaseAgent, OrchestrationError
 from src.client.lm_client import LMStudioClient
-from src.config import get_logger, get_settings
+from src.config import get_logger
 from src.pipeline.state import (
+    ConfidenceLevel,
     ExtractionState,
     ExtractionStatus,
-    ConfidenceLevel,
-    create_initial_state,
-    update_state,
-    set_status,
     add_error,
     add_warning,
     complete_extraction,
     request_human_review,
     request_retry,
-    serialize_state,
-    deserialize_state,
+    set_status,
+    update_state,
 )
 
 
@@ -157,7 +155,7 @@ class OrchestratorAgent(BaseAgent):
             self._logger.info("using_memory_checkpointer")
             return MemorySaver()
 
-        elif self._checkpointer_type == CheckpointerType.SQLITE:
+        if self._checkpointer_type == CheckpointerType.SQLITE:
             try:
                 from langgraph.checkpoint.sqlite import SqliteSaver
             except ImportError as e:
@@ -183,7 +181,7 @@ class OrchestratorAgent(BaseAgent):
                 )
             return SqliteSaver.from_conn_string(str(db_path))
 
-        elif self._checkpointer_type == CheckpointerType.POSTGRES:
+        if self._checkpointer_type == CheckpointerType.POSTGRES:
             if not self._postgres_conn_string:
                 raise OrchestrationError(
                     "PostgreSQL checkpointer requires postgres_conn_string",
@@ -202,12 +200,11 @@ class OrchestratorAgent(BaseAgent):
             self._logger.info("using_postgres_checkpointer")
             return PostgresSaver.from_conn_string(self._postgres_conn_string)
 
-        else:
-            raise OrchestrationError(
-                f"Unknown checkpointer type: {self._checkpointer_type}",
-                agent_name=self.name,
-                recoverable=False,
-            )
+        raise OrchestrationError(
+            f"Unknown checkpointer type: {self._checkpointer_type}",
+            agent_name=self.name,
+            recoverable=False,
+        )
 
     def process(self, state: ExtractionState) -> ExtractionState:
         """
@@ -291,14 +288,17 @@ class OrchestratorAgent(BaseAgent):
 
         if route == ROUTE_COMPLETE:
             # Add warning for medium confidence completions at max retries
-            if confidence_level == ConfidenceLevel.MEDIUM.value and retry_count >= self._max_retries:
+            if (
+                confidence_level == ConfidenceLevel.MEDIUM.value
+                and retry_count >= self._max_retries
+            ):
                 state = add_warning(
                     state,
                     f"Medium confidence ({overall_confidence:.2f}) after {retry_count} retries",
                 )
             return complete_extraction(state)
 
-        elif route == ROUTE_RETRY:
+        if route == ROUTE_RETRY:
             reason = (
                 f"{confidence_level} confidence extraction - retrying"
                 if confidence_level != ConfidenceLevel.HIGH.value
@@ -306,11 +306,11 @@ class OrchestratorAgent(BaseAgent):
             )
             return request_retry(state, reason)
 
-        else:  # ROUTE_HUMAN_REVIEW
-            return request_human_review(
-                state,
-                f"Low confidence ({overall_confidence:.2f}) requires human review",
-            )
+        # ROUTE_HUMAN_REVIEW
+        return request_human_review(
+            state,
+            f"Low confidence ({overall_confidence:.2f}) requires human review",
+        )
 
     def _handle_failure(self, state: ExtractionState) -> ExtractionState:
         """
@@ -330,11 +330,10 @@ class OrchestratorAgent(BaseAgent):
                 state,
                 f"Extraction failed: {errors[-1] if errors else 'Unknown error'}",
             )
-        else:
-            return request_human_review(
-                state,
-                f"Extraction failed after {retry_count} retries",
-            )
+        return request_human_review(
+            state,
+            f"Extraction failed after {retry_count} retries",
+        )
 
     def build_workflow(
         self,
@@ -531,9 +530,8 @@ class OrchestratorAgent(BaseAgent):
         if updated_state:
             # Update state and continue
             return self._compiled_workflow.invoke(updated_state, config)
-        else:
-            # Resume from last checkpoint
-            return self._compiled_workflow.invoke(None, config)
+        # Resume from last checkpoint
+        return self._compiled_workflow.invoke(None, config)
 
     def get_checkpoint_state(self, thread_id: str) -> ExtractionState | None:
         """
@@ -639,8 +637,7 @@ class OrchestratorAgent(BaseAgent):
             retry_count = state.get("retry_count", 0)
             if retry_count < self._max_retries:
                 return ROUTE_RETRY
-            else:
-                return ROUTE_HUMAN_REVIEW
+            return ROUTE_HUMAN_REVIEW
 
         # Check confidence levels
         confidence_level = state.get("confidence_level", ConfidenceLevel.LOW.value)
@@ -657,17 +654,14 @@ class OrchestratorAgent(BaseAgent):
         if confidence_level == ConfidenceLevel.HIGH.value:
             return ROUTE_COMPLETE
 
-        elif confidence_level == ConfidenceLevel.MEDIUM.value:
+        if confidence_level == ConfidenceLevel.MEDIUM.value:
             if retry_count < self._max_retries:
                 return ROUTE_RETRY
-            else:
-                return ROUTE_COMPLETE
+            return ROUTE_COMPLETE
 
-        else:  # LOW confidence
-            if retry_count < 1:
-                return ROUTE_RETRY
-            else:
-                return ROUTE_HUMAN_REVIEW
+        if retry_count < 1:
+            return ROUTE_RETRY
+        return ROUTE_HUMAN_REVIEW
 
     def _retry_node(self, state: ExtractionState) -> ExtractionState:
         """
@@ -816,7 +810,7 @@ def generate_processing_id() -> str:
     Returns:
         Unique processing ID string.
     """
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     unique_id = uuid.uuid4().hex[:8]
     return f"extract_{timestamp}_{unique_id}"
 

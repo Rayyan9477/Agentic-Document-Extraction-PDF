@@ -6,7 +6,7 @@ with comprehensive error handling and status tracking.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -200,7 +200,8 @@ def _store_pipeline_result(
 
         # Store the result (excludes large binary data like page_images)
         storable_result = {
-            k: v for k, v in pipeline_result.items()
+            k: v
+            for k, v in pipeline_result.items()
             if k != "page_images"  # Exclude binary image data
         }
 
@@ -245,8 +246,8 @@ def _send_completion_webhook(
     """
     try:
         from src.queue.webhook import (
-            send_webhook_notification,
             WebhookEventType,
+            send_webhook_notification,
         )
 
         # Determine event type based on status
@@ -339,7 +340,7 @@ def process_document_task(
         ValueError: If invalid parameters.
     """
     task_id = self.request.id or "unknown"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     logger.info(
         "document_task_start",
@@ -392,7 +393,7 @@ def process_document_task(
             output_base = Path(output_dir) / result.processing_id
 
             if export_format in ("json", "both"):
-                from src.export import export_to_json, ExportFormat
+                from src.export import ExportFormat, export_to_json
 
                 json_path = output_base.with_suffix(".json")
                 export_to_json(
@@ -419,7 +420,7 @@ def process_document_task(
                     output_path = f"{json_path}; {excel_path}"
 
         # Build final result
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
         result.status = TaskStatus.COMPLETED
@@ -458,7 +459,7 @@ def process_document_task(
     except SoftTimeLimitExceeded:
         result.status = TaskStatus.FAILED
         result.errors = ["Task exceeded time limit"]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
+        result.completed_at = datetime.now(UTC).isoformat()
         logger.error("task_timeout", task_id=task_id)
 
         # Send webhook notification on timeout failure
@@ -477,7 +478,7 @@ def process_document_task(
     except MaxRetriesExceededError:
         result.status = TaskStatus.FAILED
         result.errors = ["Maximum retries exceeded"]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
+        result.completed_at = datetime.now(UTC).isoformat()
         logger.error("task_max_retries", task_id=task_id)
 
         # Send webhook notification on max retries
@@ -496,7 +497,7 @@ def process_document_task(
     except FileNotFoundError as e:
         result.status = TaskStatus.FAILED
         result.errors = [str(e)]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
+        result.completed_at = datetime.now(UTC).isoformat()
         logger.error("task_file_not_found", task_id=task_id, error=str(e))
 
         # Send webhook notification on file not found
@@ -522,11 +523,11 @@ def process_document_task(
                 error=str(e),
                 retry_count=self.request.retries,
             )
-            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
 
         result.status = TaskStatus.FAILED
         result.errors = [str(e)]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
+        result.completed_at = datetime.now(UTC).isoformat()
         logger.error("task_error", task_id=task_id, error=str(e))
 
         # Send webhook notification on general failure
@@ -586,7 +587,7 @@ def batch_process_task(
         Batch processing result with individual task results.
     """
     task_id = self.request.id or "unknown"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     logger.info(
         "batch_task_start",
@@ -630,6 +631,7 @@ def batch_process_task(
             },
         )
         import time
+
         time.sleep(1)  # Check every second
 
     # Calculate result collection timeout if not provided
@@ -638,8 +640,7 @@ def batch_process_task(
         calculated_timeout = len(pdf_paths) * DEFAULT_RESULT_TIMEOUT_PER_DOC
         # Apply min/max bounds
         result_timeout = max(
-            MIN_BATCH_RESULT_TIMEOUT,
-            min(calculated_timeout, MAX_BATCH_RESULT_TIMEOUT)
+            MIN_BATCH_RESULT_TIMEOUT, min(calculated_timeout, MAX_BATCH_RESULT_TIMEOUT)
         )
 
     logger.debug(
@@ -650,7 +651,9 @@ def batch_process_task(
     )
 
     # Collect results
-    for idx, (pdf_path, async_result) in enumerate(zip(pdf_paths, async_results.results)):
+    for idx, (pdf_path, async_result) in enumerate(
+        zip(pdf_paths, async_results.results, strict=False)
+    ):
         try:
             if async_result.successful():
                 doc_result = async_result.get(timeout=result_timeout)
@@ -662,21 +665,27 @@ def batch_process_task(
                     failed += 1
             else:
                 failed += 1
-                results.append({
-                    "pdf_path": pdf_path,
-                    "status": TaskStatus.FAILED.value,
-                    "errors": [str(async_result.result) if async_result.result else "Unknown error"],
-                })
+                results.append(
+                    {
+                        "pdf_path": pdf_path,
+                        "status": TaskStatus.FAILED.value,
+                        "errors": [
+                            str(async_result.result) if async_result.result else "Unknown error"
+                        ],
+                    }
+                )
 
         except Exception as e:
             failed += 1
-            results.append({
-                "pdf_path": pdf_path,
-                "status": TaskStatus.FAILED.value,
-                "errors": [str(e)],
-            })
+            results.append(
+                {
+                    "pdf_path": pdf_path,
+                    "status": TaskStatus.FAILED.value,
+                    "errors": [str(e)],
+                }
+            )
 
-    completed_at = datetime.now(timezone.utc)
+    completed_at = datetime.now(UTC)
     duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
     batch_result = {
@@ -737,7 +746,7 @@ def reprocess_failed_task(
         TaskResult as dictionary with reprocessing metadata.
     """
     task_id = self.request.id or "unknown"
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
 
     logger.info(
         "reprocess_task_start",
@@ -794,7 +803,7 @@ def reprocess_failed_task(
             output_base = Path(output_dir) / result.processing_id
 
             if export_format in ("json", "both"):
-                from src.export import export_to_json, ExportFormat
+                from src.export import ExportFormat, export_to_json
 
                 json_path = output_base.with_suffix(".json")
                 export_to_json(
@@ -821,7 +830,7 @@ def reprocess_failed_task(
                     output_path = f"{json_path}; {excel_path}"
 
         # Build final result
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
         result.status = TaskStatus.COMPLETED
@@ -854,7 +863,7 @@ def reprocess_failed_task(
     except SoftTimeLimitExceeded:
         result.status = TaskStatus.FAILED
         result.errors = ["Reprocess task exceeded time limit"]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
+        result.completed_at = datetime.now(UTC).isoformat()
         logger.error("reprocess_task_timeout", task_id=task_id, original_task_id=original_task_id)
         result_dict = result.to_dict()
         result_dict["original_task_id"] = original_task_id
@@ -865,8 +874,10 @@ def reprocess_failed_task(
     except MaxRetriesExceededError:
         result.status = TaskStatus.FAILED
         result.errors = ["Reprocess maximum retries exceeded"]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
-        logger.error("reprocess_task_max_retries", task_id=task_id, original_task_id=original_task_id)
+        result.completed_at = datetime.now(UTC).isoformat()
+        logger.error(
+            "reprocess_task_max_retries", task_id=task_id, original_task_id=original_task_id
+        )
         result_dict = result.to_dict()
         result_dict["original_task_id"] = original_task_id
         result_dict["reprocess_task_id"] = task_id
@@ -876,8 +887,13 @@ def reprocess_failed_task(
     except FileNotFoundError as e:
         result.status = TaskStatus.FAILED
         result.errors = [str(e)]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
-        logger.error("reprocess_task_file_not_found", task_id=task_id, original_task_id=original_task_id, error=str(e))
+        result.completed_at = datetime.now(UTC).isoformat()
+        logger.error(
+            "reprocess_task_file_not_found",
+            task_id=task_id,
+            original_task_id=original_task_id,
+            error=str(e),
+        )
         result_dict = result.to_dict()
         result_dict["original_task_id"] = original_task_id
         result_dict["reprocess_task_id"] = task_id
@@ -895,12 +911,14 @@ def reprocess_failed_task(
                 error=str(e),
                 retry_count=self.request.retries,
             )
-            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+            raise self.retry(exc=e, countdown=60 * (2**self.request.retries))
 
         result.status = TaskStatus.FAILED
         result.errors = [str(e)]
-        result.completed_at = datetime.now(timezone.utc).isoformat()
-        logger.error("reprocess_task_error", task_id=task_id, original_task_id=original_task_id, error=str(e))
+        result.completed_at = datetime.now(UTC).isoformat()
+        logger.error(
+            "reprocess_task_error", task_id=task_id, original_task_id=original_task_id, error=str(e)
+        )
         result_dict = result.to_dict()
         result_dict["original_task_id"] = original_task_id
         result_dict["reprocess_task_id"] = task_id

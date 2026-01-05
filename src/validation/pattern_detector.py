@@ -320,27 +320,31 @@ class HallucinationPatternDetector:
 
         # Check placeholder text
         if self._placeholder_regex.match(str_value):
-            matches.append(PatternMatch(
-                field_name=field_name,
-                value=value,
-                pattern=HallucinationPattern.PLACEHOLDER_TEXT,
-                severity=PatternSeverity.CRITICAL,
-                confidence=0.95,
-                description=f"Placeholder text detected: '{str_value}'",
-                suggestion="This value appears to be a placeholder, not actual data",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=field_name,
+                    value=value,
+                    pattern=HallucinationPattern.PLACEHOLDER_TEXT,
+                    severity=PatternSeverity.CRITICAL,
+                    confidence=0.95,
+                    description=f"Placeholder text detected: '{str_value}'",
+                    suggestion="This value appears to be a placeholder, not actual data",
+                )
+            )
 
         # Check test data patterns
         if self._test_data_regex.match(str_value):
-            matches.append(PatternMatch(
-                field_name=field_name,
-                value=value,
-                pattern=HallucinationPattern.TEST_DATA,
-                severity=PatternSeverity.HIGH,
-                confidence=0.90,
-                description=f"Test data pattern detected: '{str_value}'",
-                suggestion="This appears to be test/sample data, not real content",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=field_name,
+                    value=value,
+                    pattern=HallucinationPattern.TEST_DATA,
+                    severity=PatternSeverity.HIGH,
+                    confidence=0.90,
+                    description=f"Test data pattern detected: '{str_value}'",
+                    suggestion="This appears to be test/sample data, not real content",
+                )
+            )
 
         # Check for generic names
         if self._is_name_field(field_name):
@@ -397,31 +401,35 @@ class HallucinationPatternDetector:
 
         for value, fields in value_counts.items():
             if len(fields) >= 3:
-                matches.append(PatternMatch(
-                    field_name=fields[0],
-                    value=value,
-                    pattern=HallucinationPattern.REPETITIVE_VALUE,
-                    severity=PatternSeverity.HIGH,
-                    confidence=0.85,
-                    description=(
-                        f"Same value '{value[:50]}...' appears in {len(fields)} fields: "
-                        f"{', '.join(fields[:5])}"
-                    ),
-                    suggestion="Repetitive values across unrelated fields may indicate hallucination",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=fields[0],
+                        value=value,
+                        pattern=HallucinationPattern.REPETITIVE_VALUE,
+                        severity=PatternSeverity.HIGH,
+                        confidence=0.85,
+                        description=(
+                            f"Same value '{value[:50]}...' appears in {len(fields)} fields: "
+                            f"{', '.join(fields[:5])}"
+                        ),
+                        suggestion="Repetitive values across unrelated fields may indicate hallucination",
+                    )
+                )
 
         # Check for sequential patterns (e.g., 001, 002, 003)
         sequential_groups = self._find_sequential_values(str_values)
         for group_fields, pattern_desc in sequential_groups:
-            matches.append(PatternMatch(
-                field_name=group_fields[0],
-                value=pattern_desc,
-                pattern=HallucinationPattern.SEQUENTIAL_PATTERN,
-                severity=PatternSeverity.MEDIUM,
-                confidence=0.75,
-                description=f"Sequential pattern detected across fields: {', '.join(group_fields)}",
-                suggestion="Sequential values may be auto-generated rather than extracted",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=group_fields[0],
+                    value=pattern_desc,
+                    pattern=HallucinationPattern.SEQUENTIAL_PATTERN,
+                    severity=PatternSeverity.MEDIUM,
+                    confidence=0.75,
+                    description=f"Sequential pattern detected across fields: {', '.join(group_fields)}",
+                    suggestion="Sequential values may be auto-generated rather than extracted",
+                )
+            )
 
         return matches
 
@@ -435,15 +443,17 @@ class HallucinationPatternDetector:
 
         for generic_name in self.GENERIC_NAMES:
             if generic_name in lower_value or lower_value in generic_name:
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=lower_value,
-                    pattern=HallucinationPattern.GENERIC_NAME,
-                    severity=PatternSeverity.CRITICAL,
-                    confidence=0.92,
-                    description=f"Generic/placeholder name detected: '{lower_value}'",
-                    suggestion="This appears to be a common placeholder name, not a real person",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=lower_value,
+                        pattern=HallucinationPattern.GENERIC_NAME,
+                        severity=PatternSeverity.CRITICAL,
+                        confidence=0.92,
+                        description=f"Generic/placeholder name detected: '{lower_value}'",
+                        suggestion="This appears to be a common placeholder name, not a real person",
+                    )
+                )
                 break
 
         return matches
@@ -458,15 +468,17 @@ class HallucinationPatternDetector:
 
         for generic_addr in self.GENERIC_ADDRESSES:
             if generic_addr in lower_value:
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=lower_value,
-                    pattern=HallucinationPattern.GENERIC_ADDRESS,
-                    severity=PatternSeverity.HIGH,
-                    confidence=0.88,
-                    description=f"Generic address pattern detected: '{lower_value}'",
-                    suggestion="This appears to be a placeholder address",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=lower_value,
+                        pattern=HallucinationPattern.GENERIC_ADDRESS,
+                        severity=PatternSeverity.HIGH,
+                        confidence=0.88,
+                        description=f"Generic address pattern detected: '{lower_value}'",
+                        suggestion="This appears to be a placeholder address",
+                    )
+                )
                 break
 
         return matches
@@ -493,27 +505,31 @@ class HallucinationPatternDetector:
             thresholds = self.ROUND_NUMBER_THRESHOLDS.get(field_type, [])
 
             if num_value in thresholds or (num_value % 1000 == 0 and num_value >= 1000):
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=value,
-                    pattern=HallucinationPattern.ROUND_NUMBER,
-                    severity=PatternSeverity.LOW,
-                    confidence=0.50,
-                    description=f"Suspiciously round number: {num_value}",
-                    suggestion="Very round numbers may be estimates or hallucinations",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=value,
+                        pattern=HallucinationPattern.ROUND_NUMBER,
+                        severity=PatternSeverity.LOW,
+                        confidence=0.50,
+                        description=f"Suspiciously round number: {num_value}",
+                        suggestion="Very round numbers may be estimates or hallucinations",
+                    )
+                )
 
         # Check for impossible values
         if self._is_currency_field(field_name) and num_value < 0:
-            matches.append(PatternMatch(
-                field_name=field_name,
-                value=value,
-                pattern=HallucinationPattern.IMPOSSIBLE_VALUE,
-                severity=PatternSeverity.MEDIUM,
-                confidence=0.70,
-                description=f"Negative value in currency field: {num_value}",
-                suggestion="Verify if negative amount is valid for this context",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=field_name,
+                    value=value,
+                    pattern=HallucinationPattern.IMPOSSIBLE_VALUE,
+                    severity=PatternSeverity.MEDIUM,
+                    confidence=0.70,
+                    description=f"Negative value in currency field: {num_value}",
+                    suggestion="Verify if negative amount is valid for this context",
+                )
+            )
 
         return matches
 
@@ -535,40 +551,46 @@ class HallucinationPatternDetector:
 
         # Check for future dates (beyond reasonable window)
         if parsed_date > max_future:
-            matches.append(PatternMatch(
-                field_name=field_name,
-                value=str_value,
-                pattern=HallucinationPattern.IMPLAUSIBLE_DATE,
-                severity=PatternSeverity.HIGH,
-                confidence=0.85,
-                description=f"Date is too far in the future: {parsed_date.date()}",
-                suggestion="This date appears to be implausible",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=field_name,
+                    value=str_value,
+                    pattern=HallucinationPattern.IMPLAUSIBLE_DATE,
+                    severity=PatternSeverity.HIGH,
+                    confidence=0.85,
+                    description=f"Date is too far in the future: {parsed_date.date()}",
+                    suggestion="This date appears to be implausible",
+                )
+            )
 
         # Check for very old dates
         if parsed_date.year < self.MIN_PLAUSIBLE_YEAR:
-            matches.append(PatternMatch(
-                field_name=field_name,
-                value=str_value,
-                pattern=HallucinationPattern.IMPLAUSIBLE_DATE,
-                severity=PatternSeverity.HIGH,
-                confidence=0.80,
-                description=f"Date is implausibly old: {parsed_date.date()}",
-                suggestion="This date appears to be outside the expected range",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=field_name,
+                    value=str_value,
+                    pattern=HallucinationPattern.IMPLAUSIBLE_DATE,
+                    severity=PatternSeverity.HIGH,
+                    confidence=0.80,
+                    description=f"Date is implausibly old: {parsed_date.date()}",
+                    suggestion="This date appears to be outside the expected range",
+                )
+            )
 
         # Check for default/placeholder dates
         if parsed_date.month == 1 and parsed_date.day == 1:
             if parsed_date.year in [1900, 1970, 2000]:
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=str_value,
-                    pattern=HallucinationPattern.IMPLAUSIBLE_DATE,
-                    severity=PatternSeverity.MEDIUM,
-                    confidence=0.75,
-                    description=f"Default/placeholder date detected: {parsed_date.date()}",
-                    suggestion="This may be a system default date, not actual data",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=str_value,
+                        pattern=HallucinationPattern.IMPLAUSIBLE_DATE,
+                        severity=PatternSeverity.MEDIUM,
+                        confidence=0.75,
+                        description=f"Default/placeholder date detected: {parsed_date.date()}",
+                        suggestion="This may be a system default date, not actual data",
+                    )
+                )
 
         return matches
 
@@ -588,15 +610,17 @@ class HallucinationPatternDetector:
         if len(digits_only) >= 5:
             unique_digits = set(digits_only)
             if len(unique_digits) == 1:
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=str_value,
-                    pattern=HallucinationPattern.REPEATED_DIGITS,
-                    severity=PatternSeverity.HIGH,
-                    confidence=0.88,
-                    description=f"Repeated digit pattern: '{str_value}'",
-                    suggestion="Single repeated digit patterns are often synthetic",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=str_value,
+                        pattern=HallucinationPattern.REPEATED_DIGITS,
+                        severity=PatternSeverity.HIGH,
+                        confidence=0.88,
+                        description=f"Repeated digit pattern: '{str_value}'",
+                        suggestion="Single repeated digit patterns are often synthetic",
+                    )
+                )
 
         # Check for repeating patterns (e.g., 123123123)
         if len(str_value) >= 6:
@@ -604,15 +628,17 @@ class HallucinationPatternDetector:
                 pattern = str_value[:pattern_len]
                 expected = pattern * (len(str_value) // pattern_len)
                 if str_value.startswith(expected) and len(expected) >= 6:
-                    matches.append(PatternMatch(
-                        field_name=field_name,
-                        value=str_value,
-                        pattern=HallucinationPattern.SEQUENTIAL_PATTERN,
-                        severity=PatternSeverity.MEDIUM,
-                        confidence=0.75,
-                        description=f"Repeating pattern detected: '{pattern}' repeated",
-                        suggestion="Repeating patterns may indicate synthetic data",
-                    ))
+                    matches.append(
+                        PatternMatch(
+                            field_name=field_name,
+                            value=str_value,
+                            pattern=HallucinationPattern.SEQUENTIAL_PATTERN,
+                            severity=PatternSeverity.MEDIUM,
+                            confidence=0.75,
+                            description=f"Repeating pattern detected: '{pattern}' repeated",
+                            suggestion="Repeating patterns may indicate synthetic data",
+                        )
+                    )
                     break
 
         return matches
@@ -629,15 +655,17 @@ class HallucinationPatternDetector:
         truncation_indicators = ["...", "…", "---", "___"]
         for indicator in truncation_indicators:
             if str_value.endswith(indicator):
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=str_value,
-                    pattern=HallucinationPattern.TRUNCATED_VALUE,
-                    severity=PatternSeverity.MEDIUM,
-                    confidence=0.80,
-                    description=f"Value appears truncated: '{str_value[-20:]}'",
-                    suggestion="This value may be incomplete due to truncation",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=str_value,
+                        pattern=HallucinationPattern.TRUNCATED_VALUE,
+                        severity=PatternSeverity.MEDIUM,
+                        confidence=0.80,
+                        description=f"Value appears truncated: '{str_value[-20:]}'",
+                        suggestion="This value may be incomplete due to truncation",
+                    )
+                )
                 break
 
         return matches
@@ -658,15 +686,17 @@ class HallucinationPatternDetector:
         if len(alpha_only) >= 4:
             # Check for sequential alphabet
             if "abcd" in alpha_only or "efgh" in alpha_only or "lmno" in alpha_only:
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=str_value,
-                    pattern=HallucinationPattern.ALPHABETIC_SEQUENCE,
-                    severity=PatternSeverity.MEDIUM,
-                    confidence=0.70,
-                    description=f"Alphabetic sequence detected: '{str_value}'",
-                    suggestion="Sequential letters may indicate placeholder data",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=str_value,
+                        pattern=HallucinationPattern.ALPHABETIC_SEQUENCE,
+                        severity=PatternSeverity.MEDIUM,
+                        confidence=0.70,
+                        description=f"Alphabetic sequence detected: '{str_value}'",
+                        suggestion="Sequential letters may indicate placeholder data",
+                    )
+                )
 
         return matches
 
@@ -682,15 +712,17 @@ class HallucinationPatternDetector:
 
         # Check for all-zero identifiers
         if len(digits_only) >= 5 and all(d == "0" for d in digits_only):
-            matches.append(PatternMatch(
-                field_name=field_name,
-                value=str_value,
-                pattern=HallucinationPattern.SYNTHETIC_IDENTIFIER,
-                severity=PatternSeverity.CRITICAL,
-                confidence=0.95,
-                description=f"All-zero identifier: '{str_value}'",
-                suggestion="All-zero identifiers are typically invalid placeholders",
-            ))
+            matches.append(
+                PatternMatch(
+                    field_name=field_name,
+                    value=str_value,
+                    pattern=HallucinationPattern.SYNTHETIC_IDENTIFIER,
+                    severity=PatternSeverity.CRITICAL,
+                    confidence=0.95,
+                    description=f"All-zero identifier: '{str_value}'",
+                    suggestion="All-zero identifiers are typically invalid placeholders",
+                )
+            )
 
         # Check for sequential identifiers (123456789)
         if len(digits_only) >= 5:
@@ -699,15 +731,17 @@ class HallucinationPatternDetector:
                 for i in range(1, len(digits_only))
             )
             if is_sequential:
-                matches.append(PatternMatch(
-                    field_name=field_name,
-                    value=str_value,
-                    pattern=HallucinationPattern.SYNTHETIC_IDENTIFIER,
-                    severity=PatternSeverity.HIGH,
-                    confidence=0.85,
-                    description=f"Sequential identifier: '{str_value}'",
-                    suggestion="Sequential identifiers may be synthetic test data",
-                ))
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=str_value,
+                        pattern=HallucinationPattern.SYNTHETIC_IDENTIFIER,
+                        severity=PatternSeverity.HIGH,
+                        confidence=0.85,
+                        description=f"Sequential identifier: '{str_value}'",
+                        suggestion="Sequential identifiers may be synthetic test data",
+                    )
+                )
 
         return matches
 
@@ -764,11 +798,10 @@ class HallucinationPatternDetector:
         result.flagged_fields = {m.field_name for m in matches}
 
         # Calculate overall suspicion score
-        severity_scores = [
-            self.SEVERITY_WEIGHTS[m.severity] * m.confidence
-            for m in matches
-        ]
-        result.overall_suspicion_score = min(1.0, sum(severity_scores) / max(len(severity_scores), 1))
+        severity_scores = [self.SEVERITY_WEIGHTS[m.severity] * m.confidence for m in matches]
+        result.overall_suspicion_score = min(
+            1.0, sum(severity_scores) / max(len(severity_scores), 1)
+        )
 
         # Check for critical patterns
         result.critical_patterns = [

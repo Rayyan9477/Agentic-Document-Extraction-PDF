@@ -6,14 +6,11 @@ for handling various date formats in medical documents.
 """
 
 import re
-from datetime import date, datetime, timezone
-from typing import Any
+from datetime import UTC, date, datetime
 
 
 class DateParseError(Exception):
     """Exception raised when date parsing fails."""
-
-    pass
 
 
 # Common date format patterns with their strptime formats
@@ -201,7 +198,7 @@ def get_current_timestamp() -> datetime:
     Returns:
         Current datetime with UTC timezone.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def get_current_date() -> date:
@@ -211,7 +208,7 @@ def get_current_date() -> date:
     Returns:
         Current date in UTC timezone.
     """
-    return datetime.now(timezone.utc).date()
+    return datetime.now(UTC).date()
 
 
 def calculate_age(
@@ -392,8 +389,7 @@ def dates_in_order(
         if allow_equal:
             if parsed_dates[i] < parsed_dates[i - 1]:
                 return False
-        else:
-            if parsed_dates[i] <= parsed_dates[i - 1]:
-                return False
+        elif parsed_dates[i] <= parsed_dates[i - 1]:
+            return False
 
     return True

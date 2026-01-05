@@ -198,10 +198,10 @@
       "permissions": [],
       "is_active": true,
       "is_locked": false,
-      "failed_login_attempts": 0,
+      "failed_login_attempts": 1,
       "last_login": null,
       "created_at": "2025-12-30T18:27:34.757625+00:00",
-      "updated_at": "2025-12-30T18:27:34.757625+00:00",
+      "updated_at": "2026-01-05T15:42:43.485413+00:00",
       "metadata": {}
     },
     {
@@ -402,10 +402,10 @@
       "permissions": [],
       "is_active": true,
       "is_locked": false,
-      "failed_login_attempts": 0,
+      "failed_login_attempts": 1,
       "last_login": null,
       "created_at": "2025-12-30T18:27:45.777273+00:00",
-      "updated_at": "2025-12-30T18:27:45.777273+00:00",
+      "updated_at": "2026-01-05T15:42:40.724355+00:00",
       "metadata": {}
     },
     {
@@ -423,6 +423,227 @@
       "last_login": null,
       "created_at": "2025-12-30T18:27:46.558042+00:00",
       "updated_at": "2025-12-30T18:27:46.558042+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "a4LG34Xu9Yt71KKUTeEmtw",
+      "username": "flowuser",
+      "email": "flowuser@example.com",
+      "password_hash": "$2b$14$9p9Ub/kDp.wt1fTFof8hTulqrMGB1EpfIRJbPN/KUk2yzvXpYifGm",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:37:10.212813+00:00",
+      "created_at": "2026-01-05T15:37:09.549063+00:00",
+      "updated_at": "2026-01-05T15:37:10.212813+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "QbcF9gXssXHDESxiiSNRXA",
+      "username": "refreshuser",
+      "email": "refreshuser@example.com",
+      "password_hash": "$2b$14$cn3GNv/DTTZYHFHg65m3ZO79h2FxcWkEN5trJv24sBOUrSp4VtpAS",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:37.963199+00:00",
+      "created_at": "2026-01-05T15:37:10.899072+00:00",
+      "updated_at": "2026-01-05T15:42:37.963199+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "lSNMEfIDmCpdsy3svm_OsQ",
+      "username": "logoutuser",
+      "email": "logoutuser@example.com",
+      "password_hash": "$2b$14$zxu1R9OBfe3bK0yU02aox.dFlaHTTd8/5Kt602evu1VmwTX5fc9fS",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:38.690056+00:00",
+      "created_at": "2026-01-05T15:37:12.267559+00:00",
+      "updated_at": "2026-01-05T15:42:38.690056+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "JwvuiXZLNdgq2-iYO8NnIw",
+      "username": "user0",
+      "email": "user0@example.com",
+      "password_hash": "$2b$14$QL63eJVG40TkHrkMmjJAz.tKf/lbCnVM2VHv21i8czVar/w8MiX/q",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:40.018424+00:00",
+      "created_at": "2026-01-05T15:42:39.377942+00:00",
+      "updated_at": "2026-01-05T15:42:40.018424+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "Q5v6pRSMSvqMCCtK5n0_cQ",
+      "username": "alice",
+      "email": "alice@example.com",
+      "password_hash": "$2b$14$HTe2sV718QGDRodaU6C1juiSb3KquVJJe9juwWAtArdUv9mgfsqxa",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:42.652859+00:00",
+      "created_at": "2026-01-05T15:42:41.380999+00:00",
+      "updated_at": "2026-01-05T15:42:42.652859+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "eeZWWz5EblbFJDIOk4W-jg",
+      "username": "bob",
+      "email": "bob@example.com",
+      "password_hash": "$2b$14$mtjPTrj/mxdP/GD1tBxEaeNfk4rGy8sN/8eWGFYDH9/NL18Cd1Ztq",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": null,
+      "created_at": "2026-01-05T15:42:42.019311+00:00",
+      "updated_at": "2026-01-05T15:42:42.019311+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "BiPeY7SrKdJxbbDdjkHSAw",
+      "username": "difftoken",
+      "email": "difftoken@example.com",
+      "password_hash": "$2b$14$OtWxGYkFR7c.2wsZoeZfGuvcxGbt63GJG/PciGZZPWg3soWPtDHCy",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:44.847553+00:00",
+      "created_at": "2026-01-05T15:42:44.175084+00:00",
+      "updated_at": "2026-01-05T15:42:44.847553+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "iaY2NoXGnVO9H-Xd4sUJvw",
+      "username": "multirefresh",
+      "email": "multirefresh@example.com",
+      "password_hash": "$2b$14$PR7Am7AC57sXpdCi3tc.neY7HZJl9V6Ip4Ay37jg.DdUKVGVGUrH6",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:46.194909+00:00",
+      "created_at": "2026-01-05T15:42:45.528088+00:00",
+      "updated_at": "2026-01-05T15:42:46.194909+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "5vCLFNX-kHpsHliFXHN6dg",
+      "username": "recoveryuser",
+      "email": "recoveryuser@example.com",
+      "password_hash": "$2b$14$itdR73SIjTA8vPM9BmeV4.8RWQo3bRpePFuBViwuSmbTu2Ro1tfyS",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:48.897917+00:00",
+      "created_at": "2026-01-05T15:42:46.895196+00:00",
+      "updated_at": "2026-01-05T15:42:48.897917+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "yAH_0_Qe-uKJLgQL1cDYCg",
+      "username": "fixeduser",
+      "email": "fixeduser@example.com",
+      "password_hash": "$2b$14$fwDBkgbISn8rUN1ndFzCbuoRdu4cNH8pudZnojNW.A.3JcaZHI4xa",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": null,
+      "created_at": "2026-01-05T15:42:49.582290+00:00",
+      "updated_at": "2026-01-05T15:42:49.582290+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "X6_gvDraXhYHS4QLgt6Qdw",
+      "username": "persistuser",
+      "email": "persistuser@example.com",
+      "password_hash": "$2b$14$NOvCpkw8kzhZTO.cJPkNGOK5FMaDcZQY5oVj8mRy0aGwFOHp0JQ1C",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:50.929161+00:00",
+      "created_at": "2026-01-05T15:42:50.259616+00:00",
+      "updated_at": "2026-01-05T15:42:50.929161+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "XUbSA_uh7pic84wF3TaowA",
+      "username": "consistent",
+      "email": "consistent@example.com",
+      "password_hash": "$2b$14$H..DWO85ScBZWVnuZ1ap1.JT652QGZn7g8o2Atymjl5aCI9SiKx/G",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": "2026-01-05T15:42:52.296610+00:00",
+      "created_at": "2026-01-05T15:42:51.628808+00:00",
+      "updated_at": "2026-01-05T15:42:52.298113+00:00",
+      "metadata": {}
+    },
+    {
+      "user_id": "Iq-OmRkmIwotk8Sb_IVVbg",
+      "username": "secureuser",
+      "email": "secureuser@example.com",
+      "password_hash": "$2b$14$UFrh7SmaJDQyw7QrAIaJwO0IVeE4BpyJEtG535BKZ6ZbzfSEd9a4S",
+      "roles": [
+        "viewer"
+      ],
+      "permissions": [],
+      "is_active": true,
+      "is_locked": false,
+      "failed_login_attempts": 0,
+      "last_login": null,
+      "created_at": "2026-01-05T15:43:07.384336+00:00",
+      "updated_at": "2026-01-05T15:43:07.384336+00:00",
       "metadata": {}
     }
   ]

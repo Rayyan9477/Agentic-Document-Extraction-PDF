@@ -37,6 +37,7 @@ from src.monitoring.metrics import (
     track_duration,
 )
 
+
 __all__ = [
     # Metrics
     "CONFIDENCE_BUCKETS",

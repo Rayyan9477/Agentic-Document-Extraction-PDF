@@ -13,56 +13,56 @@ from src.schemas.base import (
     FieldConfidence,
     SchemaRegistry,
 )
-from src.schemas.field_types import (
-    FieldType,
-    FieldDefinition,
-    CrossFieldRule,
-    RuleOperator,
-)
-from src.schemas.validators import (
-    validate_cpt_code,
-    validate_icd10_code,
-    validate_npi,
-    validate_phone,
-    validate_ssn,
-    validate_date,
-    validate_currency,
-    validate_field,
-    MedicalCodeValidator,
-)
 
 # Import healthcare schemas to auto-register them
 from src.schemas.cms1500 import CMS1500_SCHEMA
-from src.schemas.superbill import SUPERBILL_SCHEMA
-from src.schemas.ub04 import UB04_SCHEMA
 from src.schemas.eob import EOB_SCHEMA
+from src.schemas.field_types import (
+    CrossFieldRule,
+    FieldDefinition,
+    FieldType,
+    RuleOperator,
+)
 
 # Import enhanced generic fallback for unknown documents
 from src.schemas.generic_fallback import ENHANCED_GENERIC_SCHEMA
 
 # Import nested schemas
 from src.schemas.nested_schemas import (
+    CMS1500_SERVICE_LINE_SCHEMA,
+    EOB_ADJUSTMENT_SCHEMA,
+    EOB_SERVICE_LINE_SCHEMA,
+    SUPERBILL_PROCEDURE_SCHEMA,
+    UB04_CODE_CODE_SCHEMA,
+    UB04_SERVICE_LINE_SCHEMA,
     NestedSchema,
     NestedSchemaRegistry,
-    CMS1500_SERVICE_LINE_SCHEMA,
-    SUPERBILL_PROCEDURE_SCHEMA,
-    UB04_SERVICE_LINE_SCHEMA,
-    UB04_CODE_CODE_SCHEMA,
-    EOB_SERVICE_LINE_SCHEMA,
-    EOB_ADJUSTMENT_SCHEMA,
     get_nested_schema,
 )
 
 # Import schema builders for dynamic schema creation
 from src.schemas.schema_builder import (
     FieldBuilder,
+    NestedSchemaBuilder,
     RuleBuilder,
     SchemaBuilder,
-    NestedSchemaBuilder,
+    clone_schema,
     create_field,
     create_schema,
-    clone_schema,
     generate_zero_shot_schema,
+)
+from src.schemas.superbill import SUPERBILL_SCHEMA
+from src.schemas.ub04 import UB04_SCHEMA
+from src.schemas.validators import (
+    MedicalCodeValidator,
+    validate_cpt_code,
+    validate_currency,
+    validate_date,
+    validate_field,
+    validate_icd10_code,
+    validate_npi,
+    validate_phone,
+    validate_ssn,
 )
 
 

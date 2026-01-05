@@ -7,14 +7,14 @@ context using the Mem0 memory framework with local vector storage.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any
-from pathlib import Path
-import json
 import hashlib
+import json
 import tempfile
 import threading
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 from src.config import get_logger, get_settings
 
@@ -42,8 +42,8 @@ class MemoryEntry:
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
     embedding: list[float] | None = None
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     memory_type: str = "document"
     user_id: str = "default"
 
@@ -67,8 +67,8 @@ class MemoryEntry:
             content=data["content"],
             metadata=data.get("metadata", {}),
             embedding=data.get("embedding"),
-            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
-            updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
+            created_at=data.get("created_at", datetime.now(UTC).isoformat()),
+            updated_at=data.get("updated_at", datetime.now(UTC).isoformat()),
             memory_type=data.get("memory_type", "document"),
             user_id=data.get("user_id", "default"),
         )
@@ -151,10 +151,7 @@ class Mem0Client:
                 try:
                     with self._memories_file.open("r", encoding="utf-8") as f:
                         data = json.load(f)
-                        self._memories = {
-                            k: MemoryEntry.from_dict(v)
-                            for k, v in data.items()
-                        }
+                        self._memories = {k: MemoryEntry.from_dict(v) for k, v in data.items()}
                     self._logger.debug("memories_loaded", count=len(self._memories))
                 except Exception as e:
                     self._logger.warning("memories_load_failed", error=str(e))
@@ -175,9 +172,7 @@ class Mem0Client:
                 # Atomic write: write to temp file, then rename
                 # This prevents data loss if crash occurs mid-write
                 fd, temp_path = tempfile.mkstemp(
-                    dir=self._data_dir,
-                    prefix=".memories_",
-                    suffix=".tmp"
+                    dir=self._data_dir, prefix=".memories_", suffix=".tmp"
                 )
                 try:
                     with open(fd, "w", encoding="utf-8") as f:
@@ -203,12 +198,13 @@ class Mem0Client:
         if self._embedder is None:
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._embedder = SentenceTransformer(self._embedding_model)
                 self._logger.info("embedder_loaded", model=self._embedding_model)
             except ImportError:
                 self._logger.warning(
                     "sentence_transformers_not_available",
-                    message="Install with: pip install sentence-transformers"
+                    message="Install with: pip install sentence-transformers",
                 )
                 return None
         return self._embedder
@@ -228,11 +224,13 @@ class Mem0Client:
 
             # Force garbage collection to free GPU/CPU memory
             import gc
+
             gc.collect()
 
             # If PyTorch is available, clear CUDA cache
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:
@@ -303,7 +301,7 @@ class Mem0Client:
         # Check if memory already exists
         if memory_id in self._memories:
             existing = self._memories[memory_id]
-            existing.updated_at = datetime.now(timezone.utc).isoformat()
+            existing.updated_at = datetime.now(UTC).isoformat()
             self._save_memories()
             return existing
 
@@ -373,11 +371,13 @@ class Mem0Client:
                 score = self._text_similarity(query, memory.content)
 
             if score >= threshold:
-                results.append(MemorySearchResult(
-                    entry=memory,
-                    score=score,
-                    distance=1.0 - score,
-                ))
+                results.append(
+                    MemorySearchResult(
+                        entry=memory,
+                        score=score,
+                        distance=1.0 - score,
+                    )
+                )
 
         # Sort by score and limit results
         results.sort(key=lambda x: x.score, reverse=True)
@@ -395,7 +395,7 @@ class Mem0Client:
         """Calculate cosine similarity between two vectors."""
         import math
 
-        dot_product = sum(a * b for a, b in zip(vec1, vec2))
+        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=False))
         norm1 = math.sqrt(sum(a * a for a in vec1))
         norm2 = math.sqrt(sum(b * b for b in vec2))
 
@@ -450,7 +450,7 @@ class Mem0Client:
         if metadata is not None:
             entry.metadata.update(metadata)
 
-        entry.updated_at = datetime.now(timezone.utc).isoformat()
+        entry.updated_at = datetime.now(UTC).isoformat()
         self._save_memories()
 
         self._logger.info("memory_updated", memory_id=memory_id)

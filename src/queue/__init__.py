@@ -14,26 +14,26 @@ from typing import Tuple
 from urllib.parse import urlparse
 
 from src.queue.celery_app import (
-    celery_app,
     CeleryConfig,
+    celery_app,
 )
 from src.queue.tasks import (
-    process_document_task,
-    batch_process_task,
-    reprocess_failed_task,
-    get_task_status,
-    cancel_task,
     TaskResult,
     TaskStatus,
+    batch_process_task,
+    cancel_task,
+    get_task_status,
+    process_document_task,
+    reprocess_failed_task,
 )
 from src.queue.worker import (
-    WorkerManager,
     WorkerConfig,
+    WorkerManager,
 )
 
 
 # Cache Redis availability check for 5 seconds
-_redis_check_cache: dict[str, Tuple[bool, float]] = {}
+_redis_check_cache: dict[str, tuple[bool, float]] = {}
 
 
 def is_redis_available(timeout: float = 1.0) -> bool:
@@ -96,8 +96,8 @@ def get_queue_status() -> dict:
         "async_processing_available": redis_ok,
         "recommendation": (
             "Use async_processing=true for background processing"
-            if redis_ok else
-            "Redis not available. Use async_processing=false for synchronous processing"
+            if redis_ok
+            else "Redis not available. Use async_processing=false for synchronous processing"
         ),
     }
 

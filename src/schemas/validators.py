@@ -133,18 +133,18 @@ def validate_cpt_code(code: str | int) -> ValidationInfo:
     if category:
         return ValidationInfo(
             result=ValidationResult.VALID,
-            message=f"Valid CPT code ({category})" + (f" with modifier {modifier}" if modifier else ""),
+            message=f"Valid CPT code ({category})"
+            + (f" with modifier {modifier}" if modifier else ""),
             normalized_value=normalized,
             details={"category": category, "modifier": modifier},
         )
-    else:
-        # Code doesn't fall in known ranges - might still be valid
-        return ValidationInfo(
-            result=ValidationResult.WARNING,
-            message="CPT code format is valid but not in standard ranges",
-            normalized_value=normalized,
-            details={"modifier": modifier},
-        )
+    # Code doesn't fall in known ranges - might still be valid
+    return ValidationInfo(
+        result=ValidationResult.WARNING,
+        message="CPT code format is valid but not in standard ranges",
+        normalized_value=normalized,
+        details={"modifier": modifier},
+    )
 
 
 # =============================================================================
@@ -152,10 +152,7 @@ def validate_cpt_code(code: str | int) -> ValidationInfo:
 # =============================================================================
 
 # ICD-10-CM pattern: Letter + 2 digits + optional decimal + up to 4 more characters
-ICD10_CM_PATTERN = re.compile(
-    r"^[A-TV-Z]\d{2}(?:\.?\d{0,4})?$",
-    re.IGNORECASE
-)
+ICD10_CM_PATTERN = re.compile(r"^[A-TV-Z]\d{2}(?:\.?\d{0,4})?$", re.IGNORECASE)
 
 # ICD-10-PCS pattern: 7 alphanumeric characters
 ICD10_PCS_PATTERN = re.compile(r"^[A-HJ-NP-Z0-9]{7}$", re.IGNORECASE)
@@ -229,10 +226,7 @@ def validate_icd10_code(code: str) -> ValidationInfo:
 
 # HCPCS Level I = CPT codes (handled by validate_cpt_code)
 # HCPCS Level II = Letter (A-V) + 4 digits + optional modifier
-HCPCS_LEVEL2_PATTERN = re.compile(
-    r"^[A-V]\d{4}(?:-[A-Z0-9]{2})?$",
-    re.IGNORECASE
-)
+HCPCS_LEVEL2_PATTERN = re.compile(r"^[A-V]\d{4}(?:-[A-Z0-9]{2})?$", re.IGNORECASE)
 
 
 def validate_hcpcs_code(code: str | int) -> ValidationInfo:
@@ -323,9 +317,7 @@ def validate_hcpcs_code(code: str | int) -> ValidationInfo:
 
 # NDC formats: 4-4-2, 5-3-2, 5-4-1 (labeler-product-package)
 # Also accepts with or without hyphens
-NDC_PATTERN = re.compile(
-    r"^(\d{4,5})-?(\d{3,4})-?(\d{1,2})$"
-)
+NDC_PATTERN = re.compile(r"^(\d{4,5})-?(\d{3,4})-?(\d{1,2})$")
 
 
 def validate_ndc_code(code: str | int) -> ValidationInfo:
@@ -502,6 +494,7 @@ def validate_taxonomy_code(code: str) -> ValidationInfo:
 # NPI Validation (National Provider Identifier)
 # =============================================================================
 
+
 def _luhn_checksum(number: str) -> bool:
     """
     Validate NPI using Luhn algorithm.
@@ -644,7 +637,7 @@ SSN_PATTERN = re.compile(r"^(\d{3})[-\s]?(\d{2})[-\s]?(\d{4})$")
 INVALID_SSN_PATTERNS = [
     "000",  # First three digits can't be 000
     "666",  # First three digits can't be 666
-    "9",    # First digit can't be 9 (reserved)
+    "9",  # First digit can't be 9 (reserved)
 ]
 
 
@@ -1071,7 +1064,9 @@ def validate_carc_code(code: str) -> ValidationInfo:
     if description:
         return ValidationInfo(
             result=ValidationResult.VALID,
-            message=f"Valid CARC code" + (f" ({group_code})" if group_code else "") + f": {description}",
+            message="Valid CARC code"
+            + (f" ({group_code})" if group_code else "")
+            + f": {description}",
             normalized_value=normalized,
             details={
                 "group_code": group_code,
@@ -1079,17 +1074,16 @@ def validate_carc_code(code: str) -> ValidationInfo:
                 "description": description,
             },
         )
-    else:
-        # Code format is valid but not in our known list - may still be valid
-        return ValidationInfo(
-            result=ValidationResult.WARNING,
-            message=f"CARC code format is valid but code {adjustment_code} is not in standard reference",
-            normalized_value=normalized,
-            details={
-                "group_code": group_code,
-                "adjustment_code": adjustment_code,
-            },
-        )
+    # Code format is valid but not in our known list - may still be valid
+    return ValidationInfo(
+        result=ValidationResult.WARNING,
+        message=f"CARC code format is valid but code {adjustment_code} is not in standard reference",
+        normalized_value=normalized,
+        details={
+            "group_code": group_code,
+            "adjustment_code": adjustment_code,
+        },
+    )
 
 
 # =============================================================================
@@ -1541,18 +1535,17 @@ def validate_rarc_code(code: str) -> ValidationInfo:
                 "description": description,
             },
         )
-    else:
-        # Code format is valid but not in our known list - may still be valid
-        return ValidationInfo(
-            result=ValidationResult.WARNING,
-            message=f"RARC code format is valid but code {normalized} is not in standard reference",
-            normalized_value=normalized,
-            details={
-                "prefix": prefix,
-                "number": number,
-                "category": category,
-            },
-        )
+    # Code format is valid but not in our known list - may still be valid
+    return ValidationInfo(
+        result=ValidationResult.WARNING,
+        message=f"RARC code format is valid but code {normalized} is not in standard reference",
+        normalized_value=normalized,
+        details={
+            "prefix": prefix,
+            "number": number,
+            "category": category,
+        },
+    )
 
 
 # =============================================================================
@@ -1560,14 +1553,14 @@ def validate_rarc_code(code: str) -> ValidationInfo:
 # =============================================================================
 
 DATE_FORMATS = [
-    "%Y-%m-%d",       # 2024-01-15
-    "%m/%d/%Y",       # 01/15/2024
-    "%m-%d-%Y",       # 01-15-2024
-    "%m/%d/%y",       # 01/15/24
-    "%d/%m/%Y",       # 15/01/2024 (European)
-    "%B %d, %Y",      # January 15, 2024
-    "%b %d, %Y",      # Jan 15, 2024
-    "%Y%m%d",         # 20240115
+    "%Y-%m-%d",  # 2024-01-15
+    "%m/%d/%Y",  # 01/15/2024
+    "%m-%d-%Y",  # 01-15-2024
+    "%m/%d/%y",  # 01/15/24
+    "%d/%m/%Y",  # 15/01/2024 (European)
+    "%B %d, %Y",  # January 15, 2024
+    "%b %d, %Y",  # Jan 15, 2024
+    "%Y%m%d",  # 20240115
 ]
 
 
@@ -1642,12 +1635,10 @@ def validate_date(
 # Currency Validation
 # =============================================================================
 
-CURRENCY_PATTERN = re.compile(
-    r"^\$?\s*-?\s*\$?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?\s*$"
-)
+CURRENCY_PATTERN = re.compile(r"^\$?\s*-?\s*\$?\s*(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{2}))?\s*$")
 
 
-def validate_currency(value: str | float | int) -> ValidationInfo:
+def validate_currency(value: str | float) -> ValidationInfo:
     """
     Validate and normalize currency value.
 
@@ -1703,6 +1694,7 @@ def validate_currency(value: str | float | int) -> ValidationInfo:
 # =============================================================================
 # General Field Validation
 # =============================================================================
+
 
 def validate_field(
     value: Any,
@@ -1785,12 +1777,62 @@ def validate_field(
 
     if field_type == FieldType.STATE:
         states = [
-            "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-            "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
-            "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-            "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-            "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
-            "DC", "PR", "VI", "GU", "AS", "MP",
+            "AL",
+            "AK",
+            "AZ",
+            "AR",
+            "CA",
+            "CO",
+            "CT",
+            "DE",
+            "FL",
+            "GA",
+            "HI",
+            "ID",
+            "IL",
+            "IN",
+            "IA",
+            "KS",
+            "KY",
+            "LA",
+            "ME",
+            "MD",
+            "MA",
+            "MI",
+            "MN",
+            "MS",
+            "MO",
+            "MT",
+            "NE",
+            "NV",
+            "NH",
+            "NJ",
+            "NM",
+            "NY",
+            "NC",
+            "ND",
+            "OH",
+            "OK",
+            "OR",
+            "PA",
+            "RI",
+            "SC",
+            "SD",
+            "TN",
+            "TX",
+            "UT",
+            "VT",
+            "VA",
+            "WA",
+            "WV",
+            "WI",
+            "WY",
+            "DC",
+            "PR",
+            "VI",
+            "GU",
+            "AS",
+            "MP",
         ]
         state_upper = str(value).upper().strip()
         if state_upper in states:
@@ -1816,6 +1858,7 @@ def validate_field(
 # =============================================================================
 # Medical Code Validator Class
 # =============================================================================
+
 
 class MedicalCodeValidator:
     """

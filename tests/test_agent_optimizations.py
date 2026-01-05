@@ -11,40 +11,38 @@ These tests validate the improvements made to the extraction pipeline:
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-import time
 
-from src.prompts.grounding_rules import (
-    build_grounded_system_prompt,
-    build_enhanced_system_prompt,
-    GROUNDING_RULES,
-    CHAIN_OF_THOUGHT_TEMPLATE,
-    SELF_VERIFICATION_CHECKPOINT,
-    FEW_SHOT_EXAMPLES,
-    CONSTITUTIONAL_CRITIQUE,
+from src.agents.utils import (
+    RetryConfig,
+    build_custom_schema,
+    calculate_extraction_quality_score,
+    identify_disagreement_fields,
+    identify_low_confidence_fields,
+    retry_with_backoff,
 )
 from src.prompts.classification import (
-    build_classification_prompt,
     CLASSIFICATION_EXAMPLES,
+    build_classification_prompt,
 )
 from src.prompts.extraction import (
+    EXTRACTION_ANTI_PATTERNS,
+    EXTRACTION_REASONING_TEMPLATE,
     build_extraction_prompt,
     build_verification_prompt,
-    EXTRACTION_REASONING_TEMPLATE,
-    EXTRACTION_ANTI_PATTERNS,
+)
+from src.prompts.grounding_rules import (
+    CHAIN_OF_THOUGHT_TEMPLATE,
+    CONSTITUTIONAL_CRITIQUE,
+    FEW_SHOT_EXAMPLES,
+    GROUNDING_RULES,
+    SELF_VERIFICATION_CHECKPOINT,
+    build_enhanced_system_prompt,
+    build_grounded_system_prompt,
 )
 from src.prompts.validation import (
-    build_validation_prompt,
-    CONSTITUTIONAL_VALIDATION_PRINCIPLES,
     CONFIDENCE_CALIBRATION_EXAMPLES,
-)
-from src.agents.utils import (
-    build_custom_schema,
-    retry_with_backoff,
-    RetryConfig,
-    identify_low_confidence_fields,
-    identify_disagreement_fields,
-    calculate_extraction_quality_score,
+    CONSTITUTIONAL_VALIDATION_PRINCIPLES,
+    build_validation_prompt,
 )
 
 
@@ -90,7 +88,10 @@ class TestGroundingRulesEnhancements:
         assert "visible" in CONSTITUTIONAL_CRITIQUE.lower()
         assert "overconfident" in CONSTITUTIONAL_CRITIQUE.lower()
         assert "null" in CONSTITUTIONAL_CRITIQUE.lower()
-        assert "suspicious" in CONSTITUTIONAL_CRITIQUE.lower() or "perfect" in CONSTITUTIONAL_CRITIQUE.lower()
+        assert (
+            "suspicious" in CONSTITUTIONAL_CRITIQUE.lower()
+            or "perfect" in CONSTITUTIONAL_CRITIQUE.lower()
+        )
 
     def test_build_grounded_system_prompt_options(self):
         """Test that enhanced options work correctly."""
@@ -178,9 +179,18 @@ class TestExtractionPromptEnhancements:
     def test_extraction_anti_patterns_coverage(self):
         """Verify anti-patterns cover common hallucination types."""
         assert "Calculate" in EXTRACTION_ANTI_PATTERNS or "infer" in EXTRACTION_ANTI_PATTERNS
-        assert "Fill in expected" in EXTRACTION_ANTI_PATTERNS or "expected patterns" in EXTRACTION_ANTI_PATTERNS
-        assert "partial dates" in EXTRACTION_ANTI_PATTERNS.lower() or "Complete partial" in EXTRACTION_ANTI_PATTERNS
-        assert "typical names" in EXTRACTION_ANTI_PATTERNS.lower() or "Assume typical" in EXTRACTION_ANTI_PATTERNS
+        assert (
+            "Fill in expected" in EXTRACTION_ANTI_PATTERNS
+            or "expected patterns" in EXTRACTION_ANTI_PATTERNS
+        )
+        assert (
+            "partial dates" in EXTRACTION_ANTI_PATTERNS.lower()
+            or "Complete partial" in EXTRACTION_ANTI_PATTERNS
+        )
+        assert (
+            "typical names" in EXTRACTION_ANTI_PATTERNS.lower()
+            or "Assume typical" in EXTRACTION_ANTI_PATTERNS
+        )
 
     def test_build_extraction_prompt_with_enhancements(self):
         """Test extraction prompt includes reasoning and anti-patterns."""

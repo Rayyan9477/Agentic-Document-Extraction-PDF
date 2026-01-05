@@ -46,13 +46,13 @@ from src.security.encryption import (
     KeyManager,
 )
 from src.security.rbac import (
+    ROLE_PERMISSIONS,
     AuthenticationError,
     AuthorizationError,
     PasswordManager,
     Permission,
     RBACManager,
     Role,
-    ROLE_PERMISSIONS,
     TokenError,
     TokenExpiredError,
     TokenInvalidError,
@@ -65,6 +65,7 @@ from src.security.rbac import (
     require_permissions,
     require_roles,
 )
+
 
 __all__ = [
     # Encryption

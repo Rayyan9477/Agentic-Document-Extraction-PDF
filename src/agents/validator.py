@@ -14,55 +14,43 @@ anti-hallucination detection and validation.
 
 import re
 from typing import Any
-import time
 
-from src.agents.base import BaseAgent, AgentResult, ValidationError as AgentValidationError
+from src.agents.base import AgentResult, BaseAgent
+from src.agents.base import ValidationError as AgentValidationError
+from src.agents.utils import (
+    build_custom_schema,
+)
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger
 from src.pipeline.state import (
+    ConfidenceLevel,
     ExtractionState,
     ExtractionStatus,
     ValidationResult,
-    ConfidenceLevel,
-    update_state,
-    set_status,
-    add_warning,
     complete_extraction,
     request_human_review,
     request_retry,
     serialize_validation_result,
-    deserialize_field_metadata,
+    set_status,
+    update_state,
 )
 from src.schemas import (
-    SchemaRegistry,
+    CrossFieldRule,
     DocumentSchema,
-    validate_field,
+    RuleOperator,
+    SchemaRegistry,
     validate_cpt_code,
+    validate_field,
     validate_icd10_code,
     validate_npi,
-    CrossFieldRule,
-    RuleOperator,
-)
-from src.agents.utils import (
-    build_custom_schema,
-    retry_with_backoff,
-    RetryConfig,
-    calculate_extraction_quality_score,
 )
 from src.validation import (
-    HallucinationPatternDetector,
-    detect_hallucination_patterns,
-    ConfidenceScorer,
-    AdaptiveConfidenceScorer,
     ConfidenceAction,
-    MedicalCodeValidationEngine,
-    validate_medical_codes,
-    CrossFieldValidator,
-    MedicalDocumentRules,
-    validate_cross_fields,
+    ConfidenceScorer,
+    HallucinationPatternDetector,
     HumanReviewQueue,
-    ReviewReason,
-    create_review_task,
+    MedicalCodeValidationEngine,
+    validate_cross_fields,
 )
 
 
@@ -310,25 +298,19 @@ class ValidatorAgent(BaseAgent):
                 extraction_confidences[field_name] = 0.5
 
         # Step 1: Hallucination pattern detection using validation module
-        pattern_result = self._pattern_detector.detect(
-            values, extraction_confidences
-        )
+        pattern_result = self._pattern_detector.detect(values, extraction_confidences)
 
         if pattern_result.is_likely_hallucination:
             result.hallucination_flags.extend(list(pattern_result.flagged_fields))
             for match in pattern_result.matches:
-                result.warnings.append(
-                    f"{match.field_name}: {match.description}"
-                )
+                result.warnings.append(f"{match.field_name}: {match.description}")
 
         # Step 2: Medical code validation using validation module
         code_result = self._medical_validator.validate_all(values)
 
         for code_detail in code_result.validations:
             if not code_detail.is_valid:
-                result.errors.append(
-                    f"{code_detail.code}: {code_detail.message}"
-                )
+                result.errors.append(f"{code_detail.code}: {code_detail.message}")
             result.field_validations[code_detail.code] = code_detail.is_valid
 
         # Step 3: Schema-based field validation (existing logic)
@@ -357,9 +339,7 @@ class ValidatorAgent(BaseAgent):
             result.field_validations[field_name] = len(field_errors) == 0
 
             if field_errors:
-                result.errors.extend(
-                    [f"{field_name}: {e}" for e in field_errors]
-                )
+                result.errors.extend([f"{field_name}: {e}" for e in field_errors])
 
         # Step 4: Cross-field validation using validation module
         cross_result = validate_cross_fields(values, document_type.lower())
@@ -371,9 +351,7 @@ class ValidatorAgent(BaseAgent):
 
         # Legacy cross-field validation from schema
         if schema and schema.cross_field_rules:
-            legacy_cross = self._validate_cross_field_rules(
-                extraction, schema.cross_field_rules
-            )
+            legacy_cross = self._validate_cross_field_rules(extraction, schema.cross_field_rules)
             for cf_result in legacy_cross:
                 if not cf_result.get("passed", True):
                     result.cross_field_validations.append(cf_result)
@@ -384,9 +362,7 @@ class ValidatorAgent(BaseAgent):
         result.warnings.extend(repetition_warnings)
 
         # Step 6: Calculate confidence using validation module
-        validation_results = {
-            k: v for k, v in result.field_validations.items()
-        }
+        validation_results = {k: v for k, v in result.field_validations.items()}
 
         conf_result = self._confidence_scorer.calculate(
             extraction_confidences=extraction_confidences,
@@ -406,10 +382,7 @@ class ValidatorAgent(BaseAgent):
             result.confidence_level = ConfidenceLevel.LOW
 
         # Determine validity
-        result.is_valid = (
-            len(result.errors) == 0 and
-            len(result.hallucination_flags) == 0
-        )
+        result.is_valid = len(result.errors) == 0 and len(result.hallucination_flags) == 0
 
         # Determine routing based on confidence module recommendation
         if conf_result.recommended_action == ConfidenceAction.HUMAN_REVIEW:
@@ -527,11 +500,7 @@ class ValidatorAgent(BaseAgent):
 
                 for field_name in source_fields:
                     field_data = extraction.get(field_name, {})
-                    value = (
-                        field_data.get("value")
-                        if isinstance(field_data, dict)
-                        else field_data
-                    )
+                    value = field_data.get("value") if isinstance(field_data, dict) else field_data
                     if value is None:
                         missing_fields.append(field_name)
                     else:
@@ -544,9 +513,7 @@ class ValidatorAgent(BaseAgent):
 
                 target_data = extraction.get(rule.target_field, {})
                 target_value = (
-                    target_data.get("value")
-                    if isinstance(target_data, dict)
-                    else target_data
+                    target_data.get("value") if isinstance(target_data, dict) else target_data
                 )
                 source_value = field_sum
 
@@ -563,14 +530,10 @@ class ValidatorAgent(BaseAgent):
                 target_data = extraction.get(rule.target_field, {})
 
                 source_value = (
-                    source_data.get("value")
-                    if isinstance(source_data, dict)
-                    else source_data
+                    source_data.get("value") if isinstance(source_data, dict) else source_data
                 )
                 target_value = (
-                    target_data.get("value")
-                    if isinstance(target_data, dict)
-                    else target_data
+                    target_data.get("value") if isinstance(target_data, dict) else target_data
                 )
 
                 passed, status = self._evaluate_rule(rule, source_value, target_value)
@@ -585,14 +548,16 @@ class ValidatorAgent(BaseAgent):
             else:
                 message = "OK"
 
-            results.append({
-                "rule": f"{rule.source_field} {rule.operator.value} {rule.target_field}",
-                "passed": passed,
-                "status": status,  # "passed", "failed", "skipped", "inconclusive"
-                "message": message,
-                "source_value": source_value,
-                "target_value": target_value,
-            })
+            results.append(
+                {
+                    "rule": f"{rule.source_field} {rule.operator.value} {rule.target_field}",
+                    "passed": passed,
+                    "status": status,  # "passed", "failed", "skipped", "inconclusive"
+                    "message": message,
+                    "source_value": source_value,
+                    "target_value": target_value,
+                }
+            )
 
         return results
 
@@ -650,28 +615,29 @@ class ValidatorAgent(BaseAgent):
                 result = source_value == target_value
                 return (result, "passed" if result else "failed")
 
-            elif rule.operator == RuleOperator.NOT_EQUALS:
+            if rule.operator == RuleOperator.NOT_EQUALS:
                 result = source_value != target_value
                 return (result, "passed" if result else "failed")
 
-            elif rule.operator == RuleOperator.GREATER_THAN:
+            if rule.operator == RuleOperator.GREATER_THAN:
                 result = float(source_value) > float(target_value)
                 return (result, "passed" if result else "failed")
 
-            elif rule.operator == RuleOperator.LESS_THAN:
+            if rule.operator == RuleOperator.LESS_THAN:
                 result = float(source_value) < float(target_value)
                 return (result, "passed" if result else "failed")
 
-            elif rule.operator == RuleOperator.GREATER_EQUAL:
+            if rule.operator == RuleOperator.GREATER_EQUAL:
                 result = float(source_value) >= float(target_value)
                 return (result, "passed" if result else "failed")
 
-            elif rule.operator == RuleOperator.LESS_EQUAL:
+            if rule.operator == RuleOperator.LESS_EQUAL:
                 result = float(source_value) <= float(target_value)
                 return (result, "passed" if result else "failed")
 
-            elif rule.operator == RuleOperator.DATE_BEFORE:
+            if rule.operator == RuleOperator.DATE_BEFORE:
                 from src.utils.date_utils import parse_date
+
                 source_date = parse_date(str(source_value))
                 target_date = parse_date(str(target_value))
                 if source_date and target_date:
@@ -679,8 +645,9 @@ class ValidatorAgent(BaseAgent):
                     return (result, "passed" if result else "failed")
                 return (False, "inconclusive")  # Can't validate if parsing fails
 
-            elif rule.operator == RuleOperator.DATE_AFTER:
+            if rule.operator == RuleOperator.DATE_AFTER:
                 from src.utils.date_utils import parse_date
+
                 source_date = parse_date(str(source_value))
                 target_date = parse_date(str(target_value))
                 if source_date and target_date:
@@ -688,7 +655,7 @@ class ValidatorAgent(BaseAgent):
                     return (result, "passed" if result else "failed")
                 return (False, "inconclusive")
 
-            elif rule.operator == RuleOperator.SUM_EQUALS:
+            if rule.operator == RuleOperator.SUM_EQUALS:
                 # Source value is pre-calculated sum from _validate_cross_field_rules
                 # Target value is the expected total
                 try:
@@ -732,11 +699,7 @@ class ValidatorAgent(BaseAgent):
         value_counts: dict[str, list[str]] = {}
 
         for field_name, field_data in extraction.items():
-            value = (
-                field_data.get("value")
-                if isinstance(field_data, dict)
-                else field_data
-            )
+            value = field_data.get("value") if isinstance(field_data, dict) else field_data
 
             if value is None:
                 continue
@@ -802,12 +765,11 @@ class ValidatorAgent(BaseAgent):
 
             if retry_count < max_retries:
                 return request_retry(state)
-            else:
-                return request_human_review(
-                    state,
-                    f"Maximum retries ({max_retries}) exceeded with confidence "
-                    f"{validation.overall_confidence:.2f}",
-                )
+            return request_human_review(
+                state,
+                f"Maximum retries ({max_retries}) exceeded with confidence "
+                f"{validation.overall_confidence:.2f}",
+            )
 
         # Low confidence or hallucinations: human review
         if validation.requires_human_review:
@@ -851,9 +813,7 @@ class ValidatorAgent(BaseAgent):
         warnings: list[str] = []
 
         # Check hallucination patterns
-        hallucination = self._check_hallucination_patterns(
-            field_name, value, 0.5
-        )
+        hallucination = self._check_hallucination_patterns(field_name, value, 0.5)
         if hallucination:
             warnings.append(hallucination)
 

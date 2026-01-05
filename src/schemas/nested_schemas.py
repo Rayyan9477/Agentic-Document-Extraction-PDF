@@ -610,6 +610,7 @@ EOB_ADJUSTMENT_SCHEMA = NestedSchema(
 # Nested Schema Registry
 # =============================================================================
 
+
 class NestedSchemaRegistry:
     """
     Registry for nested schemas.
@@ -698,6 +699,7 @@ register_nested_schemas()
 # =============================================================================
 # Convenience function for getting nested schemas
 # =============================================================================
+
 
 def get_nested_schema(name: str) -> NestedSchema | None:
     """

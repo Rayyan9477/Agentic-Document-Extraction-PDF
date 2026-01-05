@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 from PIL import Image
 
 from src.config import get_logger, get_settings
-from src.preprocessing.pdf_processor import PageImage, DocumentOrientation
+from src.preprocessing.pdf_processor import DocumentOrientation, PageImage
 
 
 logger = get_logger(__name__)
@@ -26,25 +26,17 @@ logger = get_logger(__name__)
 class EnhancementError(Exception):
     """Base exception for image enhancement errors."""
 
-    pass
-
 
 class DeskewError(EnhancementError):
     """Raised when deskewing fails."""
-
-    pass
 
 
 class DenoiseError(EnhancementError):
     """Raised when denoising fails."""
 
-    pass
-
 
 class ContrastError(EnhancementError):
     """Raised when contrast enhancement fails."""
-
-    pass
 
 
 class EnhancementType(str, Enum):
@@ -223,9 +215,7 @@ class ImageEnhancer:
             # Calculate original metrics
             original_variance = self._calculate_variance(img)
             original_mean, original_std = cv2.meanStdDev(
-                cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                if len(img.shape) == 3
-                else img
+                cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
             )
 
             # Track skew metrics
@@ -245,9 +235,7 @@ class ImageEnhancer:
             if self._enable_denoise:
                 img_before_denoise = img.copy()
                 img = self._denoise(img)
-                noise_reduction_ratio = self._calculate_noise_reduction(
-                    img_before_denoise, img
-                )
+                noise_reduction_ratio = self._calculate_noise_reduction(img_before_denoise, img)
                 enhancements_applied.append(EnhancementType.DENOISE)
 
             # Apply CLAHE contrast enhancement
@@ -255,9 +243,7 @@ class ImageEnhancer:
             if self._enable_contrast:
                 img_before_clahe = img.copy()
                 img = self._apply_clahe(img)
-                contrast_improvement = self._calculate_contrast_improvement(
-                    img_before_clahe, img
-                )
+                contrast_improvement = self._calculate_contrast_improvement(img_before_clahe, img)
                 enhancements_applied.append(EnhancementType.CLAHE)
 
             # Calculate enhanced metrics
@@ -577,16 +563,8 @@ class ImageEnhancer:
 
         Compares high-frequency content before and after denoising.
         """
-        gray_before = (
-            cv2.cvtColor(before, cv2.COLOR_BGR2GRAY)
-            if len(before.shape) == 3
-            else before
-        )
-        gray_after = (
-            cv2.cvtColor(after, cv2.COLOR_BGR2GRAY)
-            if len(after.shape) == 3
-            else after
-        )
+        gray_before = cv2.cvtColor(before, cv2.COLOR_BGR2GRAY) if len(before.shape) == 3 else before
+        gray_after = cv2.cvtColor(after, cv2.COLOR_BGR2GRAY) if len(after.shape) == 3 else after
 
         # Calculate noise as standard deviation of Laplacian
         noise_before = cv2.Laplacian(gray_before, cv2.CV_64F).std()
@@ -607,16 +585,8 @@ class ImageEnhancer:
 
         Compares standard deviation of pixel values before and after.
         """
-        gray_before = (
-            cv2.cvtColor(before, cv2.COLOR_BGR2GRAY)
-            if len(before.shape) == 3
-            else before
-        )
-        gray_after = (
-            cv2.cvtColor(after, cv2.COLOR_BGR2GRAY)
-            if len(after.shape) == 3
-            else after
-        )
+        gray_before = cv2.cvtColor(before, cv2.COLOR_BGR2GRAY) if len(before.shape) == 3 else before
+        gray_after = cv2.cvtColor(after, cv2.COLOR_BGR2GRAY) if len(after.shape) == 3 else after
 
         std_before = gray_before.std()
         std_after = gray_after.std()
@@ -715,9 +685,7 @@ class ImageEnhancer:
             "is_dark": is_dark,
             "is_washed_out": is_washed_out,
             "issues": issues,
-            "quality_score": self._calculate_quality_score(
-                variance, contrast, mean_brightness
-            ),
+            "quality_score": self._calculate_quality_score(variance, contrast, mean_brightness),
         }
 
     def _calculate_quality_score(
@@ -737,8 +705,6 @@ class ImageEnhancer:
         brightness_score = 100 - abs(brightness - 128) * 0.78  # Optimal around 128
 
         # Weighted average
-        quality_score = (
-            sharpness_score * 0.4 + contrast_score * 0.3 + brightness_score * 0.3
-        )
+        quality_score = sharpness_score * 0.4 + contrast_score * 0.3 + brightness_score * 0.3
 
         return max(0, min(100, quality_score))

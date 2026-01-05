@@ -4,14 +4,12 @@ Pytest Configuration and Shared Fixtures for Authentication Tests.
 Provides common fixtures and configuration for all test files.
 """
 
-import pytest
-import os
 import sys
-import tempfile
-import shutil
 from pathlib import Path
-from typing import Generator
+
+import pytest
 from fastapi.testclient import TestClient
+
 
 # Add src directory to Python path
 repo_root = Path(__file__).parent.parent
@@ -68,7 +66,8 @@ def rbac_manager(test_secret_key, test_data_dir) -> RBACManager:
 def test_app(rbac_manager):
     """Create FastAPI test application with auth routes."""
     from fastapi import FastAPI
-    from src.api.routes.auth import router, get_rbac_manager
+
+    from src.api.routes.auth import get_rbac_manager, router
 
     app = FastAPI(title="Test App")
     app.include_router(router, prefix="/api/v1")

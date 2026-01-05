@@ -5,12 +5,8 @@ Tests extraction accuracy against known ground truth data
 to measure and track extraction quality metrics.
 """
 
-import json
 from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Generator
-from unittest.mock import MagicMock, patch
+from typing import Any
 
 import pytest
 
@@ -136,9 +132,9 @@ class AccuracyCalculator:
 
         # Calculate overall score
         metrics.overall_score = (
-            self.exact_match_weight * metrics.field_accuracy +
-            self.partial_match_weight * (metrics.partial_matches / max(metrics.total_fields, 1)) +
-            self.char_accuracy_weight * metrics.character_accuracy
+            self.exact_match_weight * metrics.field_accuracy
+            + self.partial_match_weight * (metrics.partial_matches / max(metrics.total_fields, 1))
+            + self.char_accuracy_weight * metrics.character_accuracy
         )
 
         return metrics
@@ -168,7 +164,7 @@ class AccuracyCalculator:
 
         # Check Levenshtein-like similarity (simplified)
         if len(gt_str) > 0 and len(ext_str) > 0:
-            common_len = sum(1 for a, b in zip(gt_str, ext_str) if a == b)
+            common_len = sum(1 for a, b in zip(gt_str, ext_str, strict=False) if a == b)
             similarity = common_len / max(len(gt_str), len(ext_str))
             return similarity >= 0.8
 
@@ -177,7 +173,7 @@ class AccuracyCalculator:
     def _char_accuracy(self, gt_str: str, ext_str: str) -> tuple[int, int]:
         """Calculate character-level accuracy."""
         total = len(gt_str)
-        correct = sum(1 for a, b in zip(gt_str, ext_str) if a == b)
+        correct = sum(1 for a, b in zip(gt_str, ext_str, strict=False) if a == b)
         return total, correct
 
 
@@ -374,7 +370,8 @@ class TestCMS1500Accuracy:
         }
 
         ground_truth = {
-            k: v for k, v in sample["ground_truth"].items()
+            k: v
+            for k, v in sample["ground_truth"].items()
             if k in ["patient_name", "patient_dob", "patient_address"]
         }
 
@@ -396,8 +393,7 @@ class TestCMS1500Accuracy:
         }
 
         ground_truth = {
-            k: v for k, v in sample["ground_truth"].items()
-            if k.startswith("diagnosis_code")
+            k: v for k, v in sample["ground_truth"].items() if k.startswith("diagnosis_code")
         }
 
         metrics = accuracy_calculator.calculate(extracted, ground_truth)
@@ -417,8 +413,7 @@ class TestCMS1500Accuracy:
         }
 
         ground_truth = {
-            k: v for k, v in sample["ground_truth"].items()
-            if k.startswith("procedure_code")
+            k: v for k, v in sample["ground_truth"].items() if k.startswith("procedure_code")
         }
 
         metrics = accuracy_calculator.calculate(extracted, ground_truth)
@@ -437,10 +432,7 @@ class TestCMS1500Accuracy:
             "total_charges": "125.00",
         }
 
-        ground_truth = {
-            k: v for k, v in sample["ground_truth"].items()
-            if "charges" in k
-        }
+        ground_truth = {k: v for k, v in sample["ground_truth"].items() if "charges" in k}
 
         metrics = accuracy_calculator.calculate(extracted, ground_truth)
 
@@ -464,10 +456,7 @@ class TestEOBAccuracy:
             "member_id": "MEM123456",
         }
 
-        ground_truth = {
-            k: v for k, v in sample["ground_truth"].items()
-            if k.startswith("member")
-        }
+        ground_truth = {k: v for k, v in sample["ground_truth"].items() if k.startswith("member")}
 
         metrics = accuracy_calculator.calculate(extracted, ground_truth)
 
@@ -488,7 +477,8 @@ class TestEOBAccuracy:
         }
 
         ground_truth = {
-            k: v for k, v in sample["ground_truth"].items()
+            k: v
+            for k, v in sample["ground_truth"].items()
             if "amount" in k or "responsibility" in k
         }
 
@@ -568,6 +558,7 @@ class TestAccuracyReporting:
 
         # Metrics should be serializable
         import dataclasses
+
         metrics_dict = dataclasses.asdict(metrics)
 
         assert isinstance(metrics_dict, dict)

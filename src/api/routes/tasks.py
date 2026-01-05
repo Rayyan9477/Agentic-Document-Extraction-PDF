@@ -10,10 +10,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from src.api.models import (
-    TaskStatusResponse,
-    TaskCancelResponse,
-    WorkerStatusResponse,
     QueueStatsResponse,
+    TaskCancelResponse,
+    TaskStatusResponse,
+    WorkerStatusResponse,
 )
 from src.config import get_logger
 
@@ -49,6 +49,7 @@ async def list_active_tasks(
 
     # Quick Redis availability check (avoids 5+ second timeout)
     from src.queue import is_redis_available
+
     if not is_redis_available():
         logger.debug(
             "list_active_tasks_redis_unavailable",
@@ -68,29 +69,33 @@ async def list_active_tasks(
         active = inspect.active() or {}
         for worker_tasks in active.values():
             for task in worker_tasks:
-                active_tasks.append(TaskStatusResponse(
-                    task_id=task.get("id", ""),
-                    status="STARTED",
-                    ready=False,
-                    successful=None,
-                    progress=None,
-                    result=None,
-                    error=None,
-                ))
+                active_tasks.append(
+                    TaskStatusResponse(
+                        task_id=task.get("id", ""),
+                        status="STARTED",
+                        ready=False,
+                        successful=None,
+                        progress=None,
+                        result=None,
+                        error=None,
+                    )
+                )
 
         # Get reserved (pending) tasks
         reserved = inspect.reserved() or {}
         for worker_tasks in reserved.values():
             for task in worker_tasks:
-                active_tasks.append(TaskStatusResponse(
-                    task_id=task.get("id", ""),
-                    status="PENDING",
-                    ready=False,
-                    successful=None,
-                    progress=None,
-                    result=None,
-                    error=None,
-                ))
+                active_tasks.append(
+                    TaskStatusResponse(
+                        task_id=task.get("id", ""),
+                        status="PENDING",
+                        ready=False,
+                        successful=None,
+                        progress=None,
+                        result=None,
+                        error=None,
+                    )
+                )
 
         return active_tasks
 
@@ -156,7 +161,7 @@ async def get_task_status(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get task status: {str(e)}",
+            detail=f"Failed to get task status: {e!s}",
         )
 
 
@@ -211,7 +216,7 @@ async def cancel_task(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to cancel task: {str(e)}",
+            detail=f"Failed to cancel task: {e!s}",
         )
 
 
@@ -365,7 +370,7 @@ async def scale_workers(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to scale workers: {str(e)}",
+            detail=f"Failed to scale workers: {e!s}",
         )
 
 
@@ -421,5 +426,5 @@ async def purge_queue(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to purge queue: {str(e)}",
+            detail=f"Failed to purge queue: {e!s}",
         )

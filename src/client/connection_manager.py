@@ -8,12 +8,13 @@ circuit breaker pattern for resilient VLM communication.
 import asyncio
 import threading
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Awaitable, Callable, TypeVar, Union
+from typing import Any, TypeVar
 
-from src.config import get_logger, get_settings
+from src.config import get_logger
 
 
 logger = get_logger(__name__)
@@ -84,14 +85,14 @@ class ConnectionMetrics:
         self.total_requests += 1
         self.successful_requests += 1
         self.total_latency_ms += latency_ms
-        self.last_success_time = datetime.now(timezone.utc)
+        self.last_success_time = datetime.now(UTC)
         self.consecutive_failures = 0
 
     def record_failure(self) -> None:
         """Record a failed request."""
         self.total_requests += 1
         self.failed_requests += 1
-        self.last_failure_time = datetime.now(timezone.utc)
+        self.last_failure_time = datetime.now(UTC)
         self.consecutive_failures += 1
 
     def record_circuit_trip(self) -> None:
@@ -193,13 +194,13 @@ class CircuitBreaker:
 
             if self._state == CircuitState.CLOSED:
                 return True
-            elif self._state == CircuitState.HALF_OPEN:
+            if self._state == CircuitState.HALF_OPEN:
                 if self._half_open_calls < self._half_open_max_calls:
                     self._half_open_calls += 1
                     return True
                 return False
-            else:  # OPEN
-                return False
+            # OPEN
+            return False
 
     def record_success(self) -> None:
         """Record successful execution."""
@@ -268,8 +269,6 @@ class CircuitBreaker:
 
 class CircuitOpenError(Exception):
     """Raised when circuit breaker is open."""
-
-    pass
 
 
 class ConnectionManager:
@@ -369,10 +368,9 @@ class ConnectionManager:
                     self._state = ConnectionState.CONNECTED
                 logger.info("connection_established")
                 return True
-            else:
-                with self._lock:
-                    self._state = ConnectionState.FAILED
-                return False
+            with self._lock:
+                self._state = ConnectionState.FAILED
+            return False
         except Exception as e:
             with self._lock:
                 self._state = ConnectionState.FAILED
@@ -410,7 +408,7 @@ class ConnectionManager:
 
             return result
 
-        except Exception as e:
+        except Exception:
             self._circuit_breaker.record_failure()
             self._metrics.record_failure()
 
@@ -422,7 +420,7 @@ class ConnectionManager:
 
     async def execute_async(
         self,
-        func: Union[Callable[[], T], Callable[[], Awaitable[T]]],
+        func: Callable[[], T] | Callable[[], Awaitable[T]],
     ) -> T:
         """
         Execute function with circuit breaker protection (async version).
@@ -493,10 +491,9 @@ class ConnectionManager:
                             self._state = ConnectionState.CONNECTED
                             logger.info("connection_recovered")
                     return True
-                else:
-                    with self._lock:
-                        self._state = ConnectionState.FAILED
-                    return False
+                with self._lock:
+                    self._state = ConnectionState.FAILED
+                return False
             except Exception as e:
                 with self._lock:
                     self._state = ConnectionState.FAILED

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -77,7 +77,7 @@ class ResultStore:
         result_with_meta = {
             **result,
             "_storage_metadata": {
-                "stored_at": datetime.now(timezone.utc).isoformat(),
+                "stored_at": datetime.now(UTC).isoformat(),
                 "processing_id": processing_id,
             },
         }
@@ -114,7 +114,7 @@ class ResultStore:
             return None
 
         try:
-            with open(result_path, "r", encoding="utf-8") as f:
+            with open(result_path, encoding="utf-8") as f:
                 result = json.load(f)
 
             self._logger.debug(
@@ -203,18 +203,20 @@ class ResultStore:
             all_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
             # Apply pagination
-            for file_path in all_files[offset:offset + limit]:
+            for file_path in all_files[offset : offset + limit]:
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(file_path, encoding="utf-8") as f:
                         data = json.load(f)
 
-                    results.append({
-                        "processing_id": data.get("processing_id", file_path.stem),
-                        "document_type": data.get("document_type", "unknown"),
-                        "status": data.get("status", "unknown"),
-                        "stored_at": data.get("_storage_metadata", {}).get("stored_at"),
-                        "overall_confidence": data.get("overall_confidence", 0.0),
-                    })
+                    results.append(
+                        {
+                            "processing_id": data.get("processing_id", file_path.stem),
+                            "document_type": data.get("document_type", "unknown"),
+                            "status": data.get("status", "unknown"),
+                            "stored_at": data.get("_storage_metadata", {}).get("stored_at"),
+                            "overall_confidence": data.get("overall_confidence", 0.0),
+                        }
+                    )
 
                 except Exception:
                     # Skip invalid files
@@ -239,7 +241,7 @@ class ResultStore:
         from datetime import timedelta
 
         deleted_count = 0
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=self._max_age_hours)
+        cutoff = datetime.now(UTC) - timedelta(hours=self._max_age_hours)
 
         try:
             for file_path in self._storage_dir.glob("**/*.json"):
@@ -247,7 +249,7 @@ class ResultStore:
                     # Check file modification time
                     mtime = datetime.fromtimestamp(
                         file_path.stat().st_mtime,
-                        tz=timezone.utc,
+                        tz=UTC,
                     )
 
                     if mtime < cutoff:

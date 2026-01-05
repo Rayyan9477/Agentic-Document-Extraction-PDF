@@ -10,16 +10,15 @@ Provides comprehensive Markdown export with:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from src.config import get_logger
 from src.pipeline.state import (
-    ExtractionState,
-    ExtractionStatus,
     ConfidenceLevel,
+    ExtractionState,
 )
 
 
@@ -60,11 +59,20 @@ class MarkdownExportConfig:
     include_audit_trail: bool = True
     include_raw_values: bool = False
     mask_phi: bool = False
-    phi_fields: set[str] = field(default_factory=lambda: {
-        "ssn", "social_security", "member_id", "subscriber_id",
-        "patient_account", "policy_number", "group_number",
-        "patient_name", "patient_dob", "patient_address",
-    })
+    phi_fields: set[str] = field(
+        default_factory=lambda: {
+            "ssn",
+            "social_security",
+            "member_id",
+            "subscriber_id",
+            "patient_account",
+            "policy_number",
+            "group_number",
+            "patient_name",
+            "patient_dob",
+            "patient_address",
+        }
+    )
     phi_mask_pattern: str = "[REDACTED]"
     header_level: int = 1
 
@@ -373,7 +381,9 @@ class MarkdownExporter:
         metadata = {
             "Processing ID": f"`{state.get('processing_id', 'N/A')}`",
             "PDF Path": f"`{state.get('pdf_path', 'N/A')}`",
-            "PDF Hash": f"`{state.get('pdf_hash', 'N/A')[:16]}...`" if state.get("pdf_hash") else "N/A",
+            "PDF Hash": (
+                f"`{state.get('pdf_hash', 'N/A')[:16]}...`" if state.get("pdf_hash") else "N/A"
+            ),
             "Document Type": state.get("document_type", "Unknown"),
             "Schema": state.get("selected_schema_name", "Auto-detected"),
             "Status": state.get("status", "unknown").replace("_", " ").title(),
@@ -456,7 +466,7 @@ class MarkdownExporter:
 
         # Export timestamp
         lines.append("")
-        lines.append(f"*Report generated: {datetime.now(timezone.utc).isoformat()}*")
+        lines.append(f"*Report generated: {datetime.now(UTC).isoformat()}*")
 
         return "\n".join(lines)
 
@@ -528,6 +538,7 @@ class MarkdownExporter:
     def _format_json_block(self, data: dict[str, Any]) -> str:
         """Format data as JSON for code block."""
         import json
+
         return json.dumps(data, indent=2, default=str)
 
     def _format_field_name(self, field_name: str) -> str:
@@ -557,7 +568,7 @@ class MarkdownExporter:
         """Get confidence level from score."""
         if confidence >= 0.85:
             return ConfidenceLevel.HIGH
-        elif confidence >= 0.50:
+        if confidence >= 0.50:
             return ConfidenceLevel.MEDIUM
         return ConfidenceLevel.LOW
 

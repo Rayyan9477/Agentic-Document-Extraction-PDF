@@ -8,10 +8,11 @@ and alerting capabilities for the VLM backend.
 import asyncio
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 
@@ -58,7 +59,7 @@ class ServerHealth:
     available_models: list[str] = field(default_factory=list)
     gpu_memory_used_mb: float | None = None
     gpu_memory_total_mb: float | None = None
-    last_check_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_check_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     consecutive_failures: int = 0
     uptime_seconds: float | None = None
     error_message: str | None = None
@@ -180,7 +181,7 @@ class HealthMonitor:
             ServerHealth with current status information.
         """
         start_time = time.perf_counter()
-        health = ServerHealth(last_check_time=datetime.now(timezone.utc))
+        health = ServerHealth(last_check_time=datetime.now(UTC))
 
         try:
             # Check models endpoint
@@ -371,7 +372,7 @@ class HealthMonitor:
             ServerHealth with current status.
         """
         start_time = time.perf_counter()
-        health = ServerHealth(last_check_time=datetime.now(timezone.utc))
+        health = ServerHealth(last_check_time=datetime.now(UTC))
 
         try:
             client = await self._get_async_client()
@@ -492,7 +493,7 @@ class HealthMonitor:
                         # If we get here, stop_event was set
                         logger.info("monitor_continuous_stopped", reason="stop_event")
                         break
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         # Normal timeout, continue monitoring
                         pass
                 else:

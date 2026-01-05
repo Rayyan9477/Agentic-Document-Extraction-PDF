@@ -6,13 +6,12 @@ tracking all extraction data, validation results, and control flow.
 """
 
 import copy
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, TypedDict, Annotated
-from pathlib import Path
 import secrets
-import operator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, TypedDict
 
 
 class ExtractionStatus(str, Enum):
@@ -75,7 +74,7 @@ class FieldMetadata:
         """Get confidence level classification."""
         if self.confidence >= 0.85:
             return ConfidenceLevel.HIGH
-        elif self.confidence >= 0.50:
+        if self.confidence >= 0.50:
             return ConfidenceLevel.MEDIUM
         return ConfidenceLevel.LOW
 
@@ -142,9 +141,7 @@ class PageExtraction:
             "page_number": self.page_number,
             "pass1_raw": self.pass1_raw,
             "pass2_raw": self.pass2_raw,
-            "merged_fields": {
-                k: v.to_dict() for k, v in self.merged_fields.items()
-            },
+            "merged_fields": {k: v.to_dict() for k, v in self.merged_fields.items()},
             "extraction_time_ms": self.extraction_time_ms,
             "vlm_calls": self.vlm_calls,
             "errors": self.errors,
@@ -267,7 +264,9 @@ class ExtractionState(TypedDict, total=False):
 
     # === Memory Fields (Mem0 Integration) ===
     session_id: str | None  # Session identifier for memory grouping
-    recovery_checkpoint: str | None  # Checkpoint identifier for recovery (renamed to avoid LangGraph reserved name)
+    recovery_checkpoint: (
+        str | None
+    )  # Checkpoint identifier for recovery (renamed to avoid LangGraph reserved name)
     memory_context: dict[str, Any] | None  # Retrieved context from memory
     similar_docs: list[str]  # IDs of similar previously processed documents
     provider_patterns: dict[str, Any] | None  # Provider-specific extraction patterns
@@ -326,7 +325,7 @@ def create_initial_state(
         errors=[],
         warnings=[],
         # Timing
-        start_time=datetime.now(timezone.utc).isoformat(),
+        start_time=datetime.now(UTC).isoformat(),
         end_time=None,
         total_vlm_calls=0,
         total_processing_time_ms=0,
@@ -461,7 +460,7 @@ def complete_extraction(
             "final_output": final_output,
             "overall_confidence": overall_confidence,
             "confidence_level": confidence_level.value,
-            "end_time": datetime.now(timezone.utc).isoformat(),
+            "end_time": datetime.now(UTC).isoformat(),
         },
     )
 
@@ -478,7 +477,7 @@ def request_human_review(
             "current_step": "human_review",
             "requires_human_review": True,
             "human_review_reason": reason,
-            "end_time": datetime.now(timezone.utc).isoformat(),
+            "end_time": datetime.now(UTC).isoformat(),
         },
     )
 
@@ -529,7 +528,7 @@ def fail_extraction(state: ExtractionState, error: str) -> ExtractionState:
         {
             "status": ExtractionStatus.FAILED.value,
             "current_step": "failed",
-            "end_time": datetime.now(timezone.utc).isoformat(),
+            "end_time": datetime.now(UTC).isoformat(),
         },
     )
 
@@ -617,7 +616,7 @@ def serialize_state(state: ExtractionState) -> dict[str, Any]:
     serialized: dict[str, Any] = dict(state)
 
     # Ensure page_images are serializable (remove any non-serializable data)
-    if "page_images" in serialized and serialized["page_images"]:
+    if serialized.get("page_images"):
         serialized["page_images"] = [
             {k: v for k, v in img.items() if k != "image_bytes"}
             for img in serialized["page_images"]

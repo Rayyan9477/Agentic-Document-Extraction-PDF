@@ -7,31 +7,28 @@ to validated, exported output.
 
 import json
 import tempfile
-from datetime import datetime
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
-from unittest.mock import MagicMock, patch
+from typing import Any
 
 import pytest
 
+from src.export import (
+    ExportFormat,
+    JSONExporter,
+    export_to_excel,
+    export_to_json,
+)
 from src.pipeline.state import (
-    ExtractionState,
-    ExtractionStatus,
     ConfidenceLevel,
+    ExtractionStatus,
     create_initial_state,
 )
-from src.export import (
-    JSONExporter,
-    ExcelExporter,
-    ExportFormat,
-    export_to_json,
-    export_to_excel,
-)
 from src.validation import (
-    DualPassComparator,
-    HallucinationPatternDetector,
     ConfidenceScorer,
     CrossFieldValidator,
+    DualPassComparator,
+    HallucinationPatternDetector,
 )
 
 
@@ -328,16 +325,13 @@ class TestValidationIntegration:
         pass2_confidence = {"patient_name": 0.94, "date_of_service": 0.90}
 
         comparator = DualPassComparator()
-        result = comparator.compare(
-            pass1_data, pass2_data, pass1_confidence, pass2_confidence
-        )
+        result = comparator.compare(pass1_data, pass2_data, pass1_confidence, pass2_confidence)
 
         assert result.overall_agreement_rate >= 0.9
         assert len(result.field_comparisons) == 2
         # Check all comparisons are matches (not MISMATCH)
         assert all(
-            fc.result != ComparisonResult.MISMATCH
-            for fc in result.field_comparisons.values()
+            fc.result != ComparisonResult.MISMATCH for fc in result.field_comparisons.values()
         )
 
     def test_dual_pass_with_disagreement(self) -> None:
@@ -356,9 +350,7 @@ class TestValidationIntegration:
         pass2_confidence = {"patient_name": 0.94, "diagnosis_code": 0.72}
 
         comparator = DualPassComparator()
-        result = comparator.compare(
-            pass1_data, pass2_data, pass1_confidence, pass2_confidence
-        )
+        result = comparator.compare(pass1_data, pass2_data, pass1_confidence, pass2_confidence)
 
         # Should detect the disagreement - completely different values
         patient_comparison = result.field_comparisons.get("patient_name")
@@ -514,10 +506,13 @@ class TestPipelineStateTransitions:
         from src.pipeline.state import update_state
 
         state = create_initial_state(str(sample_pdf_path))
-        state = update_state(state, {
-            "status": ExtractionStatus.FAILED.value,
-            "errors": ["Processing error occurred"],
-        })
+        state = update_state(
+            state,
+            {
+                "status": ExtractionStatus.FAILED.value,
+                "errors": ["Processing error occurred"],
+            },
+        )
 
         assert state["status"] == ExtractionStatus.FAILED.value
         assert len(state["errors"]) == 1
@@ -527,11 +522,14 @@ class TestPipelineStateTransitions:
         from src.pipeline.state import update_state
 
         state = create_initial_state(str(sample_pdf_path))
-        state = update_state(state, {
-            "status": ExtractionStatus.HUMAN_REVIEW.value,
-            "requires_human_review": True,
-            "human_review_reason": "Low confidence on critical fields",
-        })
+        state = update_state(
+            state,
+            {
+                "status": ExtractionStatus.HUMAN_REVIEW.value,
+                "requires_human_review": True,
+                "human_review_reason": "Low confidence on critical fields",
+            },
+        )
 
         assert state["status"] == ExtractionStatus.HUMAN_REVIEW.value
         assert state["requires_human_review"] is True

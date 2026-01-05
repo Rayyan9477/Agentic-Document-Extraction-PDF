@@ -8,19 +8,20 @@ Provides Mem0-based persistent memory for:
 - Self-improving extraction
 """
 
-from src.memory.mem0_client import Mem0Client, MemoryEntry, MemorySearchResult
 from src.memory.context_manager import ContextManager, ExtractionContext
-from src.memory.correction_tracker import CorrectionTracker, Correction
-from src.memory.vector_store import VectorStoreManager, VectorStoreConfig
+from src.memory.correction_tracker import Correction, CorrectionTracker
+from src.memory.mem0_client import Mem0Client, MemoryEntry, MemorySearchResult
+from src.memory.vector_store import VectorStoreConfig, VectorStoreManager
+
 
 __all__ = [
+    "ContextManager",
+    "Correction",
+    "CorrectionTracker",
+    "ExtractionContext",
     "Mem0Client",
     "MemoryEntry",
     "MemorySearchResult",
-    "ContextManager",
-    "ExtractionContext",
-    "CorrectionTracker",
-    "Correction",
-    "VectorStoreManager",
     "VectorStoreConfig",
+    "VectorStoreManager",
 ]

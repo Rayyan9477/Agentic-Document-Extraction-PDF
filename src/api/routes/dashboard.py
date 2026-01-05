@@ -7,7 +7,7 @@ and system overview data.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -112,7 +112,7 @@ async def get_dashboard_metrics(
         request_id=request_id,
     )
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     return {
         "system": _get_system_metrics(),
@@ -178,7 +178,7 @@ async def get_dashboard_summary(
         request_id=request_id,
     )
 
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     # Check service health
     services = {
@@ -191,8 +191,9 @@ async def get_dashboard_summary(
     # Check LM Studio connectivity
     try:
         import urllib.request
-        import json
+
         from src.config import get_settings
+
         settings = get_settings()
         lm_studio_url = str(settings.lm_studio.base_url)
         models_url = f"{lm_studio_url}/models"

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from src.pipeline.runner import PipelineRunner, extract_document, get_extraction_result
-from src.pipeline.state import ExtractionState
 
 
 def run_extraction_pipeline(
@@ -49,8 +48,8 @@ def run_extraction_pipeline(
 
 
 __all__ = [
-    "run_extraction_pipeline",
     "PipelineRunner",
     "extract_document",
     "get_extraction_result",
+    "run_extraction_pipeline",
 ]

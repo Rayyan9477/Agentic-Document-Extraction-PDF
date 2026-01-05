@@ -11,10 +11,11 @@ Implements validation logic that checks relationships between multiple fields:
 These rules catch logical inconsistencies that single-field validation cannot detect.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 from src.config import get_logger
 
@@ -183,7 +184,9 @@ class CrossFieldValidator:
             rules: Initial list of validation rules.
         """
         self.rules: list[CrossFieldRule] = rules or []
-        self._custom_validators: dict[str, Callable[[dict[str, Any], CrossFieldRule], RuleViolation | None]] = {}
+        self._custom_validators: dict[
+            str, Callable[[dict[str, Any], CrossFieldRule], RuleViolation | None]
+        ] = {}
 
     def add_rule(self, rule: CrossFieldRule) -> None:
         """Add a validation rule."""
@@ -207,14 +210,16 @@ class CrossFieldValidator:
             allow_equal: Whether dates can be equal.
             severity: Severity of violation.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.DATE_ORDER,
-            fields=[earlier_field, later_field],
-            severity=severity,
-            params={"allow_equal": allow_equal},
-            message_template=f"{{earlier_field}} must be before {{later_field}}",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.DATE_ORDER,
+                fields=[earlier_field, later_field],
+                severity=severity,
+                params={"allow_equal": allow_equal},
+                message_template="{earlier_field} must be before {later_field}",
+            )
+        )
 
     def add_sum_rule(
         self,
@@ -234,18 +239,20 @@ class CrossFieldValidator:
             tolerance: Allowed difference for floating point.
             severity: Severity of violation.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.SUM_VALIDATION,
-            fields=component_fields + [total_field],
-            severity=severity,
-            params={
-                "component_fields": component_fields,
-                "total_field": total_field,
-                "tolerance": tolerance,
-            },
-            message_template=f"Sum of components must equal {{total_field}}",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.SUM_VALIDATION,
+                fields=component_fields + [total_field],
+                severity=severity,
+                params={
+                    "component_fields": component_fields,
+                    "total_field": total_field,
+                    "tolerance": tolerance,
+                },
+                message_template="Sum of components must equal {total_field}",
+            )
+        )
 
     def add_nested_sum_rule(
         self,
@@ -270,19 +277,21 @@ class CrossFieldValidator:
             tolerance: Allowed difference for floating point.
             severity: Severity of violation.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.NESTED_SUM_VALIDATION,
-            fields=[array_field, total_field],
-            severity=severity,
-            params={
-                "array_field": array_field,
-                "item_field": item_field,
-                "total_field": total_field,
-                "tolerance": tolerance,
-            },
-            message_template=f"Sum of {array_field}[].{item_field} must equal {{total_field}}",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.NESTED_SUM_VALIDATION,
+                fields=[array_field, total_field],
+                severity=severity,
+                params={
+                    "array_field": array_field,
+                    "item_field": item_field,
+                    "total_field": total_field,
+                    "tolerance": tolerance,
+                },
+                message_template=f"Sum of {array_field}[].{item_field} must equal {{total_field}}",
+            )
+        )
 
     def add_required_if_rule(
         self,
@@ -302,18 +311,20 @@ class CrossFieldValidator:
             trigger_values: Values that trigger requirement (any non-empty if None).
             severity: Severity of violation.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.REQUIRED_IF,
-            fields=[trigger_field, required_field],
-            severity=severity,
-            params={
-                "trigger_field": trigger_field,
-                "required_field": required_field,
-                "trigger_values": trigger_values,
-            },
-            message_template=f"{{required_field}} is required when {{trigger_field}} is present",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.REQUIRED_IF,
+                fields=[trigger_field, required_field],
+                severity=severity,
+                params={
+                    "trigger_field": trigger_field,
+                    "required_field": required_field,
+                    "trigger_values": trigger_values,
+                },
+                message_template="{required_field} is required when {trigger_field} is present",
+            )
+        )
 
     def add_mutual_exclusive_rule(
         self,
@@ -331,13 +342,15 @@ class CrossFieldValidator:
             field_b: Second mutually exclusive field.
             severity: Severity of violation.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.MUTUAL_EXCLUSIVE,
-            fields=[field_a, field_b],
-            severity=severity,
-            message_template=f"Only one of {{field_a}} or {{field_b}} can have a value",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.MUTUAL_EXCLUSIVE,
+                fields=[field_a, field_b],
+                severity=severity,
+                message_template="Only one of {field_a} or {field_b} can have a value",
+            )
+        )
 
     def add_mutual_required_rule(
         self,
@@ -353,13 +366,15 @@ class CrossFieldValidator:
             fields: Fields that must all be present or all absent.
             severity: Severity of violation.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.MUTUAL_REQUIRED,
-            fields=fields,
-            severity=severity,
-            message_template="All or none of these fields must be present: {fields}",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.MUTUAL_REQUIRED,
+                fields=fields,
+                severity=severity,
+                message_template="All or none of these fields must be present: {fields}",
+            )
+        )
 
     def add_value_range_rule(
         self,
@@ -389,20 +404,22 @@ class CrossFieldValidator:
         if max_field:
             fields.append(max_field)
 
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.VALUE_RANGE,
-            fields=fields,
-            severity=severity,
-            params={
-                "value_field": value_field,
-                "min_field": min_field,
-                "max_field": max_field,
-                "min_value": min_value,
-                "max_value": max_value,
-            },
-            message_template=f"{{value_field}} must be within allowed range",
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.VALUE_RANGE,
+                fields=fields,
+                severity=severity,
+                params={
+                    "value_field": value_field,
+                    "min_field": min_field,
+                    "max_field": max_field,
+                    "min_value": min_value,
+                    "max_value": max_value,
+                },
+                message_template="{value_field} must be within allowed range",
+            )
+        )
 
     def add_custom_rule(
         self,
@@ -422,13 +439,15 @@ class CrossFieldValidator:
             severity: Severity of violation.
             message_template: Template for violation message.
         """
-        self.rules.append(CrossFieldRule(
-            name=name,
-            rule_type=RuleType.CUSTOM,
-            fields=fields,
-            severity=severity,
-            message_template=message_template,
-        ))
+        self.rules.append(
+            CrossFieldRule(
+                name=name,
+                rule_type=RuleType.CUSTOM,
+                fields=fields,
+                severity=severity,
+                message_template=message_template,
+            )
+        )
         self._custom_validators[name] = validator
 
     def validate(self, data: dict[str, Any]) -> CrossFieldResult:
@@ -537,7 +556,11 @@ class CrossFieldValidator:
                 severity=rule.severity,
                 fields=(earlier_field, later_field),
                 message=f"{earlier_field} ({earlier_date.date()}) must be before {later_field} ({later_date.date()})",
-                expected=f"{earlier_field} <= {later_field}" if allow_equal else f"{earlier_field} < {later_field}",
+                expected=(
+                    f"{earlier_field} <= {later_field}"
+                    if allow_equal
+                    else f"{earlier_field} < {later_field}"
+                ),
                 actual=f"{earlier_date.date()} vs {later_date.date()}",
             )
 
@@ -713,7 +736,7 @@ class CrossFieldValidator:
                 fields=(trigger_field, required_field),
                 message=f"{required_field} is required when {trigger_field} is empty",
                 expected=f"{required_field} should have a value",
-                actual=f"Both fields are empty",
+                actual="Both fields are empty",
             )
 
         return None
@@ -760,8 +783,8 @@ class CrossFieldValidator:
 
         # All or none
         if any(has_values) and not all(has_values):
-            present = [f for f, v in zip(rule.fields, has_values) if v]
-            missing = [f for f, v in zip(rule.fields, has_values) if not v]
+            present = [f for f, v in zip(rule.fields, has_values, strict=False) if v]
+            missing = [f for f, v in zip(rule.fields, has_values, strict=False) if not v]
 
             return RuleViolation(
                 rule_name=rule.name,
@@ -870,6 +893,7 @@ class CrossFieldValidator:
 
         try:
             import re
+
             # Remove currency symbols and formatting
             cleaned = re.sub(r"[$,\s]", "", str(value))
             return float(cleaned)
@@ -934,7 +958,14 @@ class MedicalDocumentRules:
         # Sum validation for service lines
         validator.add_sum_rule(
             "line_charges_total",
-            ["line_1_charges", "line_2_charges", "line_3_charges", "line_4_charges", "line_5_charges", "line_6_charges"],
+            [
+                "line_1_charges",
+                "line_2_charges",
+                "line_3_charges",
+                "line_4_charges",
+                "line_5_charges",
+                "line_6_charges",
+            ],
             "total_charges",
             tolerance=0.01,
         )

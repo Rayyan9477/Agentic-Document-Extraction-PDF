@@ -12,10 +12,8 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from datetime import datetime, timedelta, timezone
-from typing import Any, Generator
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -683,21 +681,25 @@ class TestAlertStore:
         store = AlertStore()
 
         # Add alerts with different severities
-        store.add(Alert(
-            id="warn-001",
-            rule_name="rule1",
-            severity=AlertSeverity.WARNING,
-            status=AlertStatus.FIRING,
-            message="Warning",
-        ))
+        store.add(
+            Alert(
+                id="warn-001",
+                rule_name="rule1",
+                severity=AlertSeverity.WARNING,
+                status=AlertStatus.FIRING,
+                message="Warning",
+            )
+        )
 
-        store.add(Alert(
-            id="crit-001",
-            rule_name="rule2",
-            severity=AlertSeverity.CRITICAL,
-            status=AlertStatus.FIRING,
-            message="Critical",
-        ))
+        store.add(
+            Alert(
+                id="crit-001",
+                rule_name="rule2",
+                severity=AlertSeverity.CRITICAL,
+                status=AlertStatus.FIRING,
+                message="Critical",
+            )
+        )
 
         critical_alerts = store.get_by_severity(AlertSeverity.CRITICAL)
         assert len(critical_alerts) == 1
@@ -716,7 +718,7 @@ class TestAlertStore:
             status=AlertStatus.RESOLVED,
             message="Old resolved alert",
         )
-        alert.resolved_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        alert.resolved_at = datetime.now(UTC) - timedelta(hours=1)
         store.add(alert)
 
         store.prune()
@@ -864,7 +866,7 @@ class TestAlertManager:
 
     def test_check_with_notification(self) -> None:
         """Test that alerts trigger notifications."""
-        from src.monitoring.alerts import AlertManager, AlertRule, AlertSeverity, LogHandler
+        from src.monitoring.alerts import AlertManager, AlertRule, AlertSeverity
 
         manager = AlertManager()
 
@@ -971,12 +973,9 @@ class TestMonitoringIntegration:
     def test_multiple_handlers_receive_alert(self) -> None:
         """Test that multiple handlers receive the same alert."""
         from src.monitoring.alerts import (
-            Alert,
             AlertManager,
             AlertRule,
             AlertSeverity,
-            AlertStatus,
-            LogHandler,
         )
 
         manager = AlertManager()

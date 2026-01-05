@@ -9,12 +9,11 @@ future reference.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
-import json
 
 from src.config import get_logger, get_settings
-from src.memory.mem0_client import Mem0Client, MemorySearchResult
+from src.memory.mem0_client import Mem0Client
 
 
 logger = get_logger(__name__)
@@ -55,11 +54,7 @@ class ExtractionContext:
     @property
     def has_context(self) -> bool:
         """Check if any context was retrieved."""
-        return bool(
-            self.similar_extractions
-            or self.provider_patterns
-            or self.correction_hints
-        )
+        return bool(self.similar_extractions or self.provider_patterns or self.correction_hints)
 
 
 class ContextManager:
@@ -113,7 +108,7 @@ class ContextManager:
         Returns:
             ExtractionContext with relevant memories.
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         context = ExtractionContext()
 
         try:
@@ -130,9 +125,7 @@ class ContextManager:
                         "duplicate_document_found",
                         pdf_hash=pdf_hash,
                     )
-                    context.similar_extractions = [
-                        r.entry.metadata for r in duplicate_results
-                    ]
+                    context.similar_extractions = [r.entry.metadata for r in duplicate_results]
 
             # Search for similar document extractions
             query = f"document_type:{document_type}"
@@ -147,16 +140,18 @@ class ContextManager:
             )
 
             if similar_results:
-                context.similar_extractions.extend([
-                    {
-                        "id": r.entry.id,
-                        "score": r.score,
-                        "document_type": r.entry.metadata.get("document_type"),
-                        "fields": r.entry.metadata.get("fields", {}),
-                        "confidence": r.entry.metadata.get("confidence", 0.0),
-                    }
-                    for r in similar_results
-                ])
+                context.similar_extractions.extend(
+                    [
+                        {
+                            "id": r.entry.id,
+                            "score": r.score,
+                            "document_type": r.entry.metadata.get("document_type"),
+                            "fields": r.entry.metadata.get("fields", {}),
+                            "confidence": r.entry.metadata.get("confidence", 0.0),
+                        }
+                        for r in similar_results
+                    ]
+                )
 
             # Search for provider-specific patterns
             if provider_name:
@@ -169,9 +164,7 @@ class ContextManager:
 
                 if provider_results:
                     best_match = provider_results[0]
-                    context.provider_patterns = best_match.entry.metadata.get(
-                        "patterns", {}
-                    )
+                    context.provider_patterns = best_match.entry.metadata.get("patterns", {})
 
             # Get correction hints for fields
             if field_names:
@@ -188,15 +181,11 @@ class ContextManager:
                         context.correction_hints[field_name] = {
                             "common_errors": correction.metadata.get("common_errors", []),
                             "suggested_format": correction.metadata.get("format"),
-                            "confidence_boost": correction.metadata.get(
-                                "confidence_boost", 0.0
-                            ),
+                            "confidence_boost": correction.metadata.get("confidence_boost", 0.0),
                         }
 
             # Calculate confidence adjustments
-            context.confidence_adjustments = self._calculate_confidence_adjustments(
-                context
-            )
+            context.confidence_adjustments = self._calculate_confidence_adjustments(context)
 
         except Exception as e:
             self._logger.warning(
@@ -205,7 +194,7 @@ class ContextManager:
             )
 
         # Calculate retrieval time
-        elapsed = datetime.now(timezone.utc) - start_time
+        elapsed = datetime.now(UTC) - start_time
         context.retrieval_time_ms = int(elapsed.total_seconds() * 1000)
 
         self._logger.info(
@@ -239,10 +228,10 @@ class ContextManager:
             Memory ID of stored extraction.
         """
         # Build content for semantic search
-        fields_summary = ", ".join(
-            f"{k}:{v}" for k, v in list(extraction_result.items())[:10]
+        fields_summary = ", ".join(f"{k}:{v}" for k, v in list(extraction_result.items())[:10])
+        content = (
+            f"document_type:{document_type} confidence:{confidence:.2f} fields:{fields_summary}"
         )
-        content = f"document_type:{document_type} confidence:{confidence:.2f} fields:{fields_summary}"
 
         # Build metadata
         metadata = {
@@ -251,7 +240,7 @@ class ContextManager:
             "confidence": confidence,
             "pdf_hash": pdf_hash,
             "provider_name": provider_name,
-            "extracted_at": datetime.now(timezone.utc).isoformat(),
+            "extracted_at": datetime.now(UTC).isoformat(),
         }
 
         entry = self._client.add(
@@ -290,7 +279,7 @@ class ContextManager:
         metadata = {
             "provider_name": provider_name,
             "patterns": patterns,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         entry = self._client.add(
@@ -323,8 +312,7 @@ class ContextManager:
         # Boost from similar successful extractions
         if context.similar_extractions:
             high_conf_extractions = [
-                e for e in context.similar_extractions
-                if e.get("confidence", 0) >= 0.85
+                e for e in context.similar_extractions if e.get("confidence", 0) >= 0.85
             ]
             if len(high_conf_extractions) >= 2:
                 # Extract common fields with high confidence

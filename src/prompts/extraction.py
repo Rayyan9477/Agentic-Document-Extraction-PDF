@@ -14,8 +14,6 @@ Enhanced with:
 from typing import Any
 
 from src.prompts.grounding_rules import (
-    build_grounded_system_prompt,
-    build_hallucination_warning,
     build_null_handling_instruction,
 )
 
@@ -319,8 +317,7 @@ Approach:
 - Check header, body, and footer sections
 - Note any fields that may be on other pages
 """
-    else:
-        return """
+    return """
 ### SECOND PASS EXTRACTION (VERIFICATION)
 
 Your goal is ACCURACY. Carefully verify each extraction with heightened scrutiny.

@@ -9,12 +9,13 @@ import gc
 import os
 import sys
 import threading
+from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Generator, Iterator, TypeVar
+from typing import Any, TypeVar
 
 from src.config import get_logger, get_settings
 from src.preprocessing.image_enhancer import EnhancementResult, ImageEnhancer
@@ -22,7 +23,6 @@ from src.preprocessing.pdf_processor import (
     PageImage,
     PDFMetadata,
     PDFProcessor,
-    ProcessingResult,
 )
 
 
@@ -61,7 +61,7 @@ class BatchProgress:
     processed_pages: int = 0
     current_batch: int = 0
     total_batches: int = 0
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
     estimated_completion: datetime | None = None
     memory_usage_mb: float = 0.0
     errors: list[str] = field(default_factory=list)
@@ -76,7 +76,7 @@ class BatchProgress:
     @property
     def elapsed_seconds(self) -> float:
         """Get elapsed time in seconds."""
-        return (datetime.now(timezone.utc) - self.start_time).total_seconds()
+        return (datetime.now(UTC) - self.start_time).total_seconds()
 
     @property
     def pages_per_second(self) -> float:
@@ -189,8 +189,7 @@ class MemoryMonitor:
         """Update and return peak memory usage."""
         current = self.get_current_memory_mb()
         with self._lock:
-            if current > self._peak_memory:
-                self._peak_memory = current
+            self._peak_memory = max(self._peak_memory, current)
         return self._peak_memory
 
     @property
@@ -365,9 +364,7 @@ class BatchManager:
 
                 # Apply enhancements if enabled
                 if self._enable_enhancement and self._image_enhancer:
-                    enhanced_results = self._image_enhancer.enhance_batch(
-                        batch_result.pages
-                    )
+                    enhanced_results = self._image_enhancer.enhance_batch(batch_result.pages)
                     all_enhancements.extend(enhanced_results)
                     all_pages.extend([r.page_image for r in enhanced_results])
                 else:
@@ -543,8 +540,7 @@ class BatchManager:
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             # Submit all documents
             future_to_path = {
-                executor.submit(self._process_single, path): path
-                for path in file_paths
+                executor.submit(self._process_single, path): path for path in file_paths
             }
 
             # Collect results
@@ -614,7 +610,8 @@ class BatchManager:
 
         # Batch size affects peak memory
         peak_estimate = (
-            estimated_per_page_mb * min(self._batch_size, metadata.page_count)
+            estimated_per_page_mb
+            * min(self._batch_size, metadata.page_count)
             * enhancement_overhead
         )
 

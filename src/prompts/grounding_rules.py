@@ -12,9 +12,6 @@ Enhanced with:
 - Constitutional AI-style critique prompts
 """
 
-from typing import Any
-
-
 GROUNDING_RULES = """
 ## CRITICAL GROUNDING RULES - YOU MUST FOLLOW THESE EXACTLY
 
@@ -538,5 +535,5 @@ Common hallucination patterns to avoid:
 - Verify every extracted value against what is actually visible
 - Do not use any prior knowledge about typical document values
 - Extract only what you can clearly see in this specific image
-"""
+""",
     )

@@ -4,42 +4,38 @@
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.validation import (
-    # Dual-pass
-    DualPassComparator,
-    ComparisonResult,
-    MergeStrategy,
-    compare_extractions,
-    # Pattern detection
-    HallucinationPatternDetector,
-    HallucinationPattern,
-    PatternSeverity,
-    detect_hallucination_patterns,
-    # Confidence
-    ConfidenceScorer,
     AdaptiveConfidenceScorer,
-    ConfidenceLevel,
-    ConfidenceAction,
-    calculate_confidence,
-    get_confidence_level,
-    # Cross-field
-    CrossFieldValidator,
-    MedicalDocumentRules,
-    RuleType,
-    validate_cross_fields,
-    # Medical codes
-    MedicalCodeValidationEngine,
     CodeType,
     CodeValidationStatus,
-    validate_medical_codes,
+    ComparisonResult,
+    ConfidenceAction,
+    ConfidenceLevel,
+    # Confidence
+    ConfidenceScorer,
+    CrossFieldValidator,
+    # Dual-pass
+    DualPassComparator,
+    HallucinationPattern,
+    # Pattern detection
+    HallucinationPatternDetector,
     # Human review
     HumanReviewQueue,
+    # Medical codes
+    MedicalCodeValidationEngine,
+    MedicalDocumentRules,
     ReviewPriority,
-    ReviewStatus,
     ReviewReason,
+    ReviewStatus,
+    calculate_confidence,
+    compare_extractions,
     create_review_task,
+    detect_hallucination_patterns,
+    validate_cross_fields,
+    validate_medical_codes,
 )
 
 
@@ -99,8 +95,7 @@ def test_dual_pass_mismatch():
     assert len(result.field_comparisons) == 2
     # Check that fields requiring review exist (partial match or mismatch)
     fields_requiring_review = [
-        name for name, comp in result.field_comparisons.items()
-        if comp.requires_review
+        name for name, comp in result.field_comparisons.items() if comp.requires_review
     ]
     assert len(fields_requiring_review) >= 1
     print("    PASSED: Mismatch detection and flagging")
@@ -110,9 +105,7 @@ def test_dual_pass_required_fields():
     """Test dual-pass with required fields."""
     print("\n[4] Testing dual-pass required fields...")
 
-    comparator = DualPassComparator(
-        required_fields=["patient_name", "billing_npi"]
-    )
+    comparator = DualPassComparator(required_fields=["patient_name", "billing_npi"])
 
     result = comparator.compare(
         pass1_data={"patient_name": "John", "amount": "100"},
@@ -120,8 +113,9 @@ def test_dual_pass_required_fields():
     )
 
     # billing_npi is missing - should flag for review
-    assert result.field_comparisons.get("billing_npi") is None or \
-           result.field_comparisons.get("billing_npi", {})
+    assert result.field_comparisons.get("billing_npi") is None or result.field_comparisons.get(
+        "billing_npi", {}
+    )
     print("    PASSED: Required field tracking")
 
 
@@ -130,11 +124,13 @@ def test_pattern_detector_placeholder():
     print("\n[5] Testing placeholder pattern detection...")
 
     detector = HallucinationPatternDetector()
-    result = detector.detect({
-        "patient_name": "N/A",
-        "claim_id": "TBD",
-        "amount": "XXX",
-    })
+    result = detector.detect(
+        {
+            "patient_name": "N/A",
+            "claim_id": "TBD",
+            "amount": "XXX",
+        }
+    )
 
     assert result.is_likely_hallucination
     assert len(result.matches) >= 3
@@ -150,15 +146,14 @@ def test_pattern_detector_generic_names():
     """Test detection of generic/test names."""
     print("\n[6] Testing generic name detection...")
 
-    result = detect_hallucination_patterns({
-        "patient_name": "John Doe",
-        "provider_name": "Test Patient",
-    })
+    result = detect_hallucination_patterns(
+        {
+            "patient_name": "John Doe",
+            "provider_name": "Test Patient",
+        }
+    )
 
-    name_matches = [
-        m for m in result.matches
-        if m.pattern == HallucinationPattern.GENERIC_NAME
-    ]
+    name_matches = [m for m in result.matches if m.pattern == HallucinationPattern.GENERIC_NAME]
     assert len(name_matches) >= 1
     assert result.is_likely_hallucination
     print("    PASSED: Generic name detection")
@@ -168,14 +163,18 @@ def test_pattern_detector_repeated_digits():
     """Test detection of repeated digit patterns."""
     print("\n[7] Testing repeated digit detection...")
 
-    result = detect_hallucination_patterns({
-        "claim_id": "000000000",
-        "npi": "1111111111",
-    })
+    result = detect_hallucination_patterns(
+        {
+            "claim_id": "000000000",
+            "npi": "1111111111",
+        }
+    )
 
     repeated_matches = [
-        m for m in result.matches
-        if m.pattern in (
+        m
+        for m in result.matches
+        if m.pattern
+        in (
             HallucinationPattern.REPEATED_DIGITS,
             HallucinationPattern.SYNTHETIC_IDENTIFIER,
         )
@@ -188,15 +187,14 @@ def test_pattern_detector_round_numbers():
     """Test detection of suspiciously round numbers."""
     print("\n[8] Testing round number detection...")
 
-    result = detect_hallucination_patterns({
-        "total_charges": 1000.00,
-        "payment_amount": 500.00,
-    })
+    result = detect_hallucination_patterns(
+        {
+            "total_charges": 1000.00,
+            "payment_amount": 500.00,
+        }
+    )
 
-    round_matches = [
-        m for m in result.matches
-        if m.pattern == HallucinationPattern.ROUND_NUMBER
-    ]
+    round_matches = [m for m in result.matches if m.pattern == HallucinationPattern.ROUND_NUMBER]
     assert len(round_matches) >= 1
     print("    PASSED: Round number detection")
 
@@ -259,9 +257,7 @@ def test_confidence_scorer_critical_fields():
     """Test confidence with critical fields."""
     print("\n[12] Testing critical field handling...")
 
-    scorer = ConfidenceScorer(
-        critical_fields=["patient_name", "billing_npi"]
-    )
+    scorer = ConfidenceScorer(critical_fields=["patient_name", "billing_npi"])
     # Use very low values for billing_npi to ensure it ends up as LOW confidence
     result = scorer.calculate(
         extraction_confidences={"patient_name": 0.95, "billing_npi": 0.10, "amount": 0.90},
@@ -303,18 +299,22 @@ def test_cross_field_date_order():
     )
 
     # Valid order
-    result = validator.validate({
-        "admission_date": "2024-01-15",
-        "discharge_date": "2024-01-20",
-    })
+    result = validator.validate(
+        {
+            "admission_date": "2024-01-15",
+            "discharge_date": "2024-01-20",
+        }
+    )
     assert result.passed
     assert len(result.errors) == 0
 
     # Invalid order
-    result = validator.validate({
-        "admission_date": "2024-01-20",
-        "discharge_date": "2024-01-15",
-    })
+    result = validator.validate(
+        {
+            "admission_date": "2024-01-20",
+            "discharge_date": "2024-01-15",
+        }
+    )
     assert not result.passed
     assert len(result.errors) >= 1
     print("    PASSED: Date ordering validation")
@@ -333,21 +333,25 @@ def test_cross_field_sum_validation():
     )
 
     # Valid sum
-    result = validator.validate({
-        "line1": 100.00,
-        "line2": 200.00,
-        "line3": 300.00,
-        "total": 600.00,
-    })
+    result = validator.validate(
+        {
+            "line1": 100.00,
+            "line2": 200.00,
+            "line3": 300.00,
+            "total": 600.00,
+        }
+    )
     assert result.passed
 
     # Invalid sum
-    result = validator.validate({
-        "line1": 100.00,
-        "line2": 200.00,
-        "line3": 300.00,
-        "total": 500.00,
-    })
+    result = validator.validate(
+        {
+            "line1": 100.00,
+            "line2": 200.00,
+            "line3": 300.00,
+            "total": 500.00,
+        }
+    )
     assert not result.passed
     print("    PASSED: Sum validation")
 
@@ -364,16 +368,20 @@ def test_cross_field_required_if():
     )
 
     # Valid: modifier present, cpt present
-    result = validator.validate({
-        "modifier": "25",
-        "cpt_code": "99213",
-    })
+    result = validator.validate(
+        {
+            "modifier": "25",
+            "cpt_code": "99213",
+        }
+    )
     assert result.passed
 
     # Invalid: modifier present, cpt missing
-    result = validator.validate({
-        "modifier": "25",
-    })
+    result = validator.validate(
+        {
+            "modifier": "25",
+        }
+    )
     assert not result.passed
     print("    PASSED: Required-if validation")
 
@@ -453,12 +461,14 @@ def test_medical_code_batch():
     """Test batch medical code validation."""
     print("\n[21] Testing batch medical code validation...")
 
-    result = validate_medical_codes({
-        "cpt_code": "99213",
-        "diagnosis_code": "E11.9",
-        "billing_npi": "1234567893",
-        "invalid_code": "XXXXX",
-    })
+    result = validate_medical_codes(
+        {
+            "cpt_code": "99213",
+            "diagnosis_code": "E11.9",
+            "billing_npi": "1234567893",
+            "invalid_code": "XXXXX",
+        }
+    )
 
     assert len(result.valid_codes) >= 3
     assert result.validation_rate > 0.5
@@ -550,7 +560,14 @@ def test_human_review_queue_workflow():
         document_path="/workflow.pdf",
         document_type="cms1500",
         extracted_data={"patient_name": "Wrong Name"},
-        fields_to_review=[{"field_name": "patient_name", "extracted_value": "Wrong Name", "confidence": 0.3, "reason": "low confidence"}],
+        fields_to_review=[
+            {
+                "field_name": "patient_name",
+                "extracted_value": "Wrong Name",
+                "confidence": 0.3,
+                "reason": "low confidence",
+            }
+        ],
         reasons=[ReviewReason.LOW_CONFIDENCE],
         overall_confidence=0.3,
     )
@@ -642,12 +659,9 @@ def test_integration_full_validation():
 
     # Step 5: Confidence scoring
     conf_result = calculate_confidence(
-        extraction_confidences={k: 0.9 for k in dual_result.merged_output},
-        agreement_scores={
-            k: v.similarity_score
-            for k, v in dual_result.field_comparisons.items()
-        },
-        validation_results={k: True for k in code_result.valid_codes},
+        extraction_confidences=dict.fromkeys(dual_result.merged_output, 0.9),
+        agreement_scores={k: v.similarity_score for k, v in dual_result.field_comparisons.items()},
+        validation_results=dict.fromkeys(code_result.valid_codes, True),
         pattern_flags=pattern_result.flagged_fields,
     )
 

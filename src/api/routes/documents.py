@@ -5,39 +5,38 @@ Provides endpoints for sync and async document processing,
 batch processing, and result retrieval.
 """
 
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-import tempfile
-import shutil
-
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks, UploadFile, File, Form, Path as FastAPIPath
-from typing import Annotated
 import re
+import shutil
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Annotated, Any
+
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import Path as FastAPIPath
 
 from src.api.models import (
-    ProcessRequest,
-    ProcessResponse,
     AsyncProcessResponse,
+    BatchItemResult,
     BatchProcessRequest,
     BatchProcessResponse,
-    BatchItemResult,
-    FieldResult,
-    ValidationResult,
-    ProcessingMetadata,
-    TaskStatusEnum,
     ConfidenceLevelEnum,
     ExportFormatEnum,
+    FieldResult,
     PreviewRequest,
     PreviewResponse,
     PreviewStyleEnum,
+    ProcessingMetadata,
+    ProcessRequest,
+    ProcessResponse,
+    TaskStatusEnum,
+    ValidationResult,
 )
 from src.config import get_logger
 from src.security.path_validator import (
-    SecurePathValidator,
     PathTraversalError,
     PathValidationError,
-    validate_pdf_path,
+    SecurePathValidator,
 )
 
 
@@ -79,7 +78,7 @@ def _map_confidence_level(confidence: float) -> ConfidenceLevelEnum:
     """Map confidence score to level."""
     if confidence >= 0.85:
         return ConfidenceLevelEnum.HIGH
-    elif confidence >= 0.50:
+    if confidence >= 0.50:
         return ConfidenceLevelEnum.MEDIUM
     return ConfidenceLevelEnum.LOW
 
@@ -287,7 +286,7 @@ async def process_document(
                 ExportFormatEnum.BOTH,
                 ExportFormatEnum.ALL,
             ):
-                from src.export import export_to_json, ExportFormat
+                from src.export import ExportFormat, export_to_json
 
                 json_path = output_base.with_suffix(".json")
                 export_to_json(
@@ -313,7 +312,7 @@ async def process_document(
                 output_paths.append(str(excel_path))
 
             if request.export_format in (ExportFormatEnum.MARKDOWN, ExportFormatEnum.ALL):
-                from src.export import export_to_markdown, MarkdownStyle
+                from src.export import MarkdownStyle, export_to_markdown
 
                 md_path = output_base.with_suffix(".md")
                 export_to_markdown(
@@ -336,7 +335,7 @@ async def process_document(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Processing failed: {str(e)}",
+            detail=f"Processing failed: {e!s}",
         )
 
 
@@ -380,7 +379,7 @@ async def upload_document(
     )
 
     # Validate file type
-    if not file.filename or not file.filename.lower().endswith('.pdf'):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
             detail="Only PDF files are supported",
@@ -401,16 +400,17 @@ async def upload_document(
     def secure_filename(filename: str) -> str:
         """Sanitize filename to prevent path traversal and other attacks."""
         import os
+
         # Get only the basename (removes any path components)
         filename = os.path.basename(filename)
         # Remove null bytes
-        filename = filename.replace('\x00', '')
+        filename = filename.replace("\x00", "")
         # Allow only safe characters: alphanumeric, dash, underscore, dot
-        safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.')
-        filename = ''.join(c if c in safe_chars else '_' for c in filename)
+        safe_chars = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.")
+        filename = "".join(c if c in safe_chars else "_" for c in filename)
         # Prevent empty or dangerous filenames
-        if not filename or filename.startswith('.'):
-            filename = 'upload.pdf'
+        if not filename or filename.startswith("."):
+            filename = "upload.pdf"
         return filename
 
     safe_name = secure_filename(file.filename or "upload.pdf")
@@ -426,7 +426,7 @@ async def upload_document(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to save uploaded file: {str(e)}",
+            detail=f"Failed to save uploaded file: {e!s}",
         )
 
     # Queue for async processing
@@ -470,7 +470,7 @@ async def upload_document(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to queue document for processing: {str(e)}",
+            detail=f"Failed to queue document for processing: {e!s}",
         )
 
 
@@ -579,10 +579,10 @@ async def batch_process_documents(
 
     # Sync processing
     try:
+        from src.export import ExportFormat, export_to_excel, export_to_json
         from src.pipeline.graph import run_extraction_pipeline
-        from src.export import export_to_json, export_to_excel, ExportFormat
 
-        started_at = datetime.now(timezone.utc)
+        started_at = datetime.now(UTC)
         results: list[BatchItemResult] = []
         successful = 0
         failed = 0
@@ -609,33 +609,37 @@ async def batch_process_documents(
                         if request.export_format == ExportFormatEnum.EXCEL:
                             output_path = str(excel_path)
 
-                results.append(BatchItemResult(
-                    pdf_path=pdf_path,
-                    processing_id=result.get("processing_id", ""),
-                    status=TaskStatusEnum.COMPLETED,
-                    field_count=len(result.get("merged_extraction", {})),
-                    overall_confidence=result.get("overall_confidence", 0.0),
-                    output_path=output_path,
-                    errors=[],
-                ))
+                results.append(
+                    BatchItemResult(
+                        pdf_path=pdf_path,
+                        processing_id=result.get("processing_id", ""),
+                        status=TaskStatusEnum.COMPLETED,
+                        field_count=len(result.get("merged_extraction", {})),
+                        overall_confidence=result.get("overall_confidence", 0.0),
+                        output_path=output_path,
+                        errors=[],
+                    )
+                )
                 successful += 1
 
             except Exception as e:
-                results.append(BatchItemResult(
-                    pdf_path=pdf_path,
-                    processing_id="",
-                    status=TaskStatusEnum.FAILED,
-                    field_count=0,
-                    overall_confidence=0.0,
-                    output_path="",
-                    errors=[str(e)],
-                ))
+                results.append(
+                    BatchItemResult(
+                        pdf_path=pdf_path,
+                        processing_id="",
+                        status=TaskStatusEnum.FAILED,
+                        field_count=0,
+                        overall_confidence=0.0,
+                        output_path="",
+                        errors=[str(e)],
+                    )
+                )
                 failed += 1
 
                 if request.stop_on_error:
                     break
 
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
         return BatchProcessResponse(
@@ -658,7 +662,7 @@ async def batch_process_documents(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Batch processing failed: {str(e)}",
+            detail=f"Batch processing failed: {e!s}",
         )
 
 
@@ -676,7 +680,7 @@ async def get_processing_result(
             max_length=64,
             pattern=r"^[a-zA-Z0-9\-_]+$",
             description="Unique processing ID (alphanumeric, dashes, underscores only)",
-        )
+        ),
     ],
     http_request: Request,
 ) -> ProcessResponse:
@@ -783,7 +787,7 @@ async def generate_preview(
     Raises:
         HTTPException: If processing ID not found.
     """
-    from src.export import export_to_markdown, MarkdownStyle
+    from src.export import MarkdownStyle, export_to_markdown
 
     request_id = getattr(http_request.state, "request_id", "")
 
@@ -835,7 +839,7 @@ async def generate_preview(
         processing_id=request.processing_id,
         format="markdown",
         content=content,
-        generated_at=datetime.now(timezone.utc).isoformat(),
+        generated_at=datetime.now(UTC).isoformat(),
     )
 
 

@@ -6,21 +6,20 @@ with the existing agent architecture. Enables seamless performance
 profiling, caching, and cost optimization.
 """
 
+from collections.abc import Generator
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from typing import Any, Callable, Generator
+from typing import Any
 
-from src.agents.base import BaseAgent, AgentError
+from src.agents.base import AgentError, BaseAgent
 from src.agents.optimization import (
-    get_profiler,
-    PerformanceProfiler,
     AgentMetrics,
-    PipelineMetrics,
     CostOptimizer,
     IntelligentCache,
+    OptimizedOrchestrator,
     ParallelExecutor,
     PerformanceMonitor,
-    OptimizedOrchestrator,
+    PerformanceProfiler,
+    get_profiler,
 )
 from src.config import get_logger, get_settings
 from src.pipeline.state import ExtractionState
@@ -324,11 +323,13 @@ def extract_pages_parallel(
     for i, result in enumerate(results):
         if isinstance(result, Exception):
             logger.warning(f"page_{i}_extraction_failed", error=str(result))
-            processed_results.append({
-                "error": str(result),
-                "page_number": i,
-                "success": False,
-            })
+            processed_results.append(
+                {
+                    "error": str(result),
+                    "page_number": i,
+                    "success": False,
+                }
+            )
         else:
             processed_results.append(result)
 
@@ -553,7 +554,7 @@ class OptimizedPipeline:
 
             return state
 
-        except Exception as e:
+        except Exception:
             # End profiling even on error
             self.orchestrator.profiler.end_pipeline()
             raise

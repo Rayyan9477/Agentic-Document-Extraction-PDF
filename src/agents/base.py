@@ -7,17 +7,16 @@ that all extraction agents share.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
 from typing import Any, Generic, TypeVar
 
-from src.config import get_logger, get_settings
 from src.client.lm_client import (
+    LMClientError,
     LMStudioClient,
     VisionRequest,
     VisionResponse,
-    LMClientError,
 )
+from src.config import get_logger, get_settings
 from src.pipeline.state import ExtractionState
 
 
@@ -54,25 +53,17 @@ class AgentError(Exception):
 class AnalysisError(AgentError):
     """Error during document analysis."""
 
-    pass
-
 
 class ExtractionError(AgentError):
     """Error during data extraction."""
-
-    pass
 
 
 class ValidationError(AgentError):
     """Error during validation."""
 
-    pass
-
 
 class OrchestrationError(AgentError):
     """Error during workflow orchestration."""
-
-    pass
 
 
 @dataclass(slots=True)
@@ -348,7 +339,7 @@ class BaseAgent(ABC):
             agent=self._name,
             **context,
         )
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
     def log_operation_complete(
         self,
@@ -369,7 +360,7 @@ class BaseAgent(ABC):
         Returns:
             Duration in milliseconds.
         """
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
         log_method = self._logger.info if success else self._logger.error
@@ -507,7 +498,7 @@ class BaseAgent(ABC):
         if isinstance(v1, list) and isinstance(v2, list):
             if len(v1) != len(v2):
                 return False
-            return all(self._values_match(a, b) for a, b in zip(v1, v2))
+            return all(self._values_match(a, b) for a, b in zip(v1, v2, strict=False))
 
         # Direct equality for other types
         return v1 == v2

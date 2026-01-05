@@ -10,13 +10,13 @@ import hashlib
 import io
 import secrets
 import shutil
-import tempfile
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Generator, Iterator
+from typing import Any
 
 import fitz  # PyMuPDF
 from PIL import Image
@@ -30,37 +30,25 @@ logger = get_logger(__name__)
 class PDFProcessingError(Exception):
     """Base exception for PDF processing errors."""
 
-    pass
-
 
 class PDFValidationError(PDFProcessingError):
     """Raised when PDF validation fails."""
-
-    pass
 
 
 class PDFEncryptionError(PDFProcessingError):
     """Raised when PDF is encrypted and cannot be processed."""
 
-    pass
-
 
 class PDFCorruptionError(PDFProcessingError):
     """Raised when PDF file is corrupted."""
-
-    pass
 
 
 class PDFSizeError(PDFProcessingError):
     """Raised when PDF exceeds size limits."""
 
-    pass
-
 
 class PDFPageLimitError(PDFProcessingError):
     """Raised when PDF exceeds page limits."""
-
-    pass
 
 
 class DocumentOrientation(str, Enum):
@@ -303,9 +291,7 @@ class PDFProcessor:
         self._dpi = dpi or settings.pdf.dpi
         self._max_pages = max_pages or settings.pdf.max_pages
         self._max_file_size_bytes = (
-            max_file_size_mb * 1024 * 1024
-            if max_file_size_mb
-            else settings.pdf.max_file_size_bytes
+            max_file_size_mb * 1024 * 1024 if max_file_size_mb else settings.pdf.max_file_size_bytes
         )
         self._output_format = output_format or settings.pdf.output_format.value
         self._temp_dir = temp_dir or settings.pdf.temp_dir
@@ -342,9 +328,7 @@ class PDFProcessor:
 
         # Check file extension
         if file_path.suffix.lower() != ".pdf":
-            raise PDFValidationError(
-                f"Invalid file extension: {file_path.suffix}. Expected .pdf"
-            )
+            raise PDFValidationError(f"Invalid file extension: {file_path.suffix}. Expected .pdf")
 
         # Check file size
         file_size = file_path.stat().st_size
@@ -358,9 +342,7 @@ class PDFProcessor:
         with open(file_path, "rb") as f:
             header = f.read(8)
             if not header.startswith(b"%PDF-"):
-                raise PDFCorruptionError(
-                    f"Invalid PDF header. File may be corrupted or not a PDF."
-                )
+                raise PDFCorruptionError("Invalid PDF header. File may be corrupted or not a PDF.")
 
         # Try to open and validate with PyMuPDF
         try:
@@ -424,9 +406,7 @@ class PDFProcessor:
 
                 # Check for forms and annotations
                 has_forms = any(page.widgets() for page in doc)
-                has_annotations = any(
-                    len(list(page.annots() or [])) > 0 for page in doc
-                )
+                has_annotations = any(len(list(page.annots() or [])) > 0 for page in doc)
 
                 # Generate processing ID
                 processing_id = secrets.token_hex(16)
@@ -551,9 +531,7 @@ class PDFProcessor:
             return page_image
 
         except Exception as e:
-            raise PDFProcessingError(
-                f"Failed to render page {page_number + 1}: {e}"
-            ) from e
+            raise PDFProcessingError(f"Failed to render page {page_number + 1}: {e}") from e
 
     def process(
         self,
@@ -574,7 +552,7 @@ class PDFProcessor:
         Raises:
             PDFProcessingError: If processing fails.
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         warnings: list[str] = []
 
         # Validate PDF
@@ -619,10 +597,8 @@ class PDFProcessor:
                         )
 
                 # Calculate processing time
-                end_time = datetime.now(timezone.utc)
-                processing_time_ms = int(
-                    (end_time - start_time).total_seconds() * 1000
-                )
+                end_time = datetime.now(UTC)
+                processing_time_ms = int((end_time - start_time).total_seconds() * 1000)
 
                 result = ProcessingResult(
                     metadata=metadata,
@@ -761,7 +737,7 @@ class PDFProcessor:
             minute = int(date_str[10:12]) if len(date_str) >= 12 else 0
             second = int(date_str[12:14]) if len(date_str) >= 14 else 0
 
-            return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+            return datetime(year, month, day, hour, minute, second, tzinfo=UTC)
         except (ValueError, IndexError):
             logger.debug("failed_to_parse_pdf_date", date_str=date_str)
             return None

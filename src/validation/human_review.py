@@ -15,13 +15,13 @@ Provides:
 """
 
 import json
+import secrets
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
-import secrets
 
 from src.config import get_logger
 
@@ -137,7 +137,7 @@ class ReviewTask:
     fields_to_review: list[ReviewField]
     extracted_data: dict[str, Any]
     overall_confidence: float
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     assigned_to: str | None = None
     completed_at: datetime | None = None
     corrections: dict[str, Any] = field(default_factory=dict)
@@ -293,8 +293,7 @@ class HumanReviewQueue:
                 self._save_queue()
 
         logger.info(
-            f"Created review task {task_id} for {document_path} "
-            f"with priority {priority.value}"
+            f"Created review task {task_id} for {document_path} " f"with priority {priority.value}"
         )
 
         return task
@@ -322,10 +321,7 @@ class HumanReviewQueue:
         with self._lock:
             for priority in self._priority_order:
                 for task in self._tasks.values():
-                    if (
-                        task.status == ReviewStatus.PENDING
-                        and task.priority == priority
-                    ):
+                    if task.status == ReviewStatus.PENDING and task.priority == priority:
                         if assignee:
                             task.status = ReviewStatus.IN_PROGRESS
                         task.assigned_to = assignee
@@ -397,7 +393,7 @@ class HumanReviewQueue:
                 return False
 
             task.status = ReviewStatus.COMPLETED
-            task.completed_at = datetime.now(timezone.utc)
+            task.completed_at = datetime.now(UTC)
             task.corrections = corrections or {}
             task.reviewer_decision = decision
 
@@ -434,7 +430,7 @@ class HumanReviewQueue:
                 return False
 
             task.status = ReviewStatus.REJECTED
-            task.completed_at = datetime.now(timezone.utc)
+            task.completed_at = datetime.now(UTC)
             task.reviewer_decision = f"rejected: {reason}"
 
             if self.auto_persist:
@@ -476,10 +472,7 @@ class HumanReviewQueue:
     def get_pending_count(self) -> int:
         """Get count of pending tasks."""
         with self._lock:
-            return sum(
-                1 for t in self._tasks.values()
-                if t.status == ReviewStatus.PENDING
-            )
+            return sum(1 for t in self._tasks.values() if t.status == ReviewStatus.PENDING)
 
     def get_pending_by_priority(self) -> dict[str, int]:
         """Get pending task counts by priority."""
@@ -496,10 +489,7 @@ class HumanReviewQueue:
     ) -> list[ReviewTask]:
         """Get all tasks with a specific status."""
         with self._lock:
-            return [
-                t for t in self._tasks.values()
-            if t.status == status
-        ]
+            return [t for t in self._tasks.values() if t.status == status]
 
     def get_corrected_extraction(
         self,
@@ -596,10 +586,7 @@ class HumanReviewQueue:
 
         self.queue_path.parent.mkdir(parents=True, exist_ok=True)
 
-        data = {
-            task_id: task.to_dict()
-            for task_id, task in self._tasks.items()
-        }
+        data = {task_id: task.to_dict() for task_id, task in self._tasks.items()}
 
         with open(self.queue_path, "w") as f:
             json.dump(data, f, indent=2, default=str)
@@ -650,7 +637,8 @@ class HumanReviewQueue:
                 assigned_to=data.get("assigned_to"),
                 completed_at=(
                     datetime.fromisoformat(data["completed_at"])
-                    if data.get("completed_at") else None
+                    if data.get("completed_at")
+                    else None
                 ),
                 corrections=data.get("corrections", {}),
                 reviewer_decision=data.get("reviewer_decision", ""),
@@ -747,15 +735,17 @@ def create_review_task(
         if field_name in dual_pass_mismatches:
             p1_val, p2_val = dual_pass_mismatches[field_name]
 
-        review_fields.append({
-            "field_name": field_name,
-            "extracted_value": extracted_data.get(field_name),
-            "confidence": field_confidences.get(field_name, 0.0),
-            "reason": ", ".join(reason_parts),
-            "pass1_value": p1_val,
-            "pass2_value": p2_val,
-            "validation_errors": validation_errors.get(field_name, []),
-        })
+        review_fields.append(
+            {
+                "field_name": field_name,
+                "extracted_value": extracted_data.get(field_name),
+                "confidence": field_confidences.get(field_name, 0.0),
+                "reason": ", ".join(reason_parts),
+                "pass1_value": p1_val,
+                "pass2_value": p2_val,
+                "validation_errors": validation_errors.get(field_name, []),
+            }
+        )
 
     # Create queue and task
     queue = HumanReviewQueue(auto_persist=False)

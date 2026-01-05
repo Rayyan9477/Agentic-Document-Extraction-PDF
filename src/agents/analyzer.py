@@ -10,30 +10,28 @@ Responsible for:
 
 from typing import Any
 
-from src.agents.base import BaseAgent, AgentResult, AnalysisError
+from src.agents.base import AgentResult, AnalysisError, BaseAgent
+from src.agents.utils import RetryConfig, retry_with_backoff
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger, get_settings
 from src.pipeline.state import (
+    DocumentAnalysis,
     ExtractionState,
     ExtractionStatus,
-    DocumentAnalysis,
-    update_state,
-    set_status,
     add_warning,
+    set_status,
+    update_state,
+)
+from src.prompts.classification import (
+    DOCUMENT_TYPE_DESCRIPTIONS,
+    build_classification_prompt,
+    build_page_relationship_prompt,
+    build_structure_analysis_prompt,
 )
 from src.prompts.grounding_rules import (
     build_grounded_system_prompt,
-    build_enhanced_system_prompt,
 )
-from src.prompts.classification import (
-    build_classification_prompt,
-    build_structure_analysis_prompt,
-    build_page_relationship_prompt,
-    build_schema_selection_prompt,
-    DOCUMENT_TYPE_DESCRIPTIONS,
-)
-from src.agents.utils import retry_with_backoff, RetryConfig
-from src.schemas import SchemaRegistry, DocumentType
+from src.schemas import DocumentType, SchemaRegistry
 
 
 logger = get_logger(__name__)
@@ -455,10 +453,7 @@ class AnalyzerAgent(BaseAgent):
                 self._vlm_calls += 1
 
                 # Add page context to prompt
-                page_prompt = (
-                    f"This is page {i} of {total_pages}.\n\n"
-                    f"{relationship_prompt}"
-                )
+                page_prompt = f"This is page {i} of {total_pages}.\n\n" f"{relationship_prompt}"
 
                 # Call VLM to analyze page relationship
                 result = self.send_vision_request_with_json(

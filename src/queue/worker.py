@@ -8,9 +8,8 @@ including configuration, health checks, and scaling.
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from src.config import get_logger
@@ -50,11 +49,13 @@ class WorkerConfig:
     """
 
     concurrency: int = 4
-    queues: list[str] = field(default_factory=lambda: [
-        "document_processing",
-        "batch_processing",
-        "reprocessing",
-    ])
+    queues: list[str] = field(
+        default_factory=lambda: [
+            "document_processing",
+            "batch_processing",
+            "reprocessing",
+        ]
+    )
     loglevel: str = "INFO"
     hostname: str = "worker@%h"
     pool: str = "prefork"
@@ -167,14 +168,13 @@ class WorkerManager:
                     "status": "started",
                     "pid": self._worker_process.pid,
                     "command": " ".join(cmd),
-                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "started_at": datetime.now(UTC).isoformat(),
                 }
-            else:
-                # Run in foreground (blocking)
-                subprocess.run(cmd, check=True)
-                return {
-                    "status": "completed",
-                }
+            # Run in foreground (blocking)
+            subprocess.run(cmd, check=True)
+            return {
+                "status": "completed",
+            }
 
         except Exception as e:
             self._logger.error("worker_start_failed", error=str(e))
@@ -259,21 +259,25 @@ class WorkerManager:
                 worker_active = active.get(worker_name, [])
                 worker_reserved = reserved.get(worker_name, [])
 
-                workers.append({
-                    "name": worker_name,
-                    "state": WorkerState.RUNNING.value,
-                    "active_tasks": len(worker_active),
-                    "reserved_tasks": len(worker_reserved),
-                    "total": worker_stats.get("total", {}),
-                    "pool": worker_stats.get("pool", {}),
-                    "broker": worker_stats.get("broker", {}),
-                })
+                workers.append(
+                    {
+                        "name": worker_name,
+                        "state": WorkerState.RUNNING.value,
+                        "active_tasks": len(worker_active),
+                        "reserved_tasks": len(worker_reserved),
+                        "total": worker_stats.get("total", {}),
+                        "pool": worker_stats.get("pool", {}),
+                        "broker": worker_stats.get("broker", {}),
+                    }
+                )
 
             return {
                 "status": "ok" if workers else "no_workers",
                 "worker_count": len(workers),
                 "workers": workers,
-                "registered_tasks": list(registered.get(list(registered.keys())[0], [])) if registered else [],
+                "registered_tasks": (
+                    list(registered.get(list(registered.keys())[0], [])) if registered else []
+                ),
             }
 
         except Exception as e:

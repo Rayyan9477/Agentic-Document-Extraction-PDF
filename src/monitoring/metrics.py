@@ -12,11 +12,11 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, TypeVar
 
+import structlog
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
     Counter,
@@ -27,7 +27,6 @@ from prometheus_client import (
     generate_latest,
 )
 
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -45,7 +44,22 @@ class MetricNamespace(str, Enum):
 
 
 # Default histogram buckets for different metric types
-DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0)
+DURATION_BUCKETS = (
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+    30.0,
+    60.0,
+    120.0,
+)
 SIZE_BUCKETS = (1024, 10240, 102400, 1048576, 10485760, 104857600)  # 1KB to 100MB
 CONFIDENCE_BUCKETS = (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0)
 PAGE_BUCKETS = (1, 2, 5, 10, 20, 50, 100, 200)
@@ -117,11 +131,13 @@ class MetricsRegistry:
             "extraction_system",
             "Document extraction system information",
         )
-        self.system_info.info({
-            "version": self._labels.version,
-            "service": self._labels.service,
-            "environment": self._labels.environment,
-        })
+        self.system_info.info(
+            {
+                "version": self._labels.version,
+                "service": self._labels.service,
+                "environment": self._labels.environment,
+            }
+        )
 
         # System uptime
         self.system_uptime = Gauge(
@@ -600,7 +616,11 @@ class MetricsCollector:
         ).inc(page_count)
 
         # Bucket page count
-        page_bucket = "1" if page_count == 1 else "2-5" if page_count <= 5 else "6-10" if page_count <= 10 else "10+"
+        page_bucket = (
+            "1"
+            if page_count == 1
+            else "2-5" if page_count <= 5 else "6-10" if page_count <= 10 else "10+"
+        )
 
         self._registry.extraction_duration_seconds.labels(
             doc_type=doc_type,
@@ -947,6 +967,7 @@ def track_duration(
         def validate_document(doc_id: str) -> bool:
             ...
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -1022,6 +1043,7 @@ def count_calls(
         def upload_document(file: UploadFile) -> str:
             ...
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -1075,6 +1097,7 @@ def track_duration_and_count(
     Returns:
         Decorated function.
     """
+
     def decorator(func: F) -> F:
         # Apply both decorators
         decorated = track_duration(metric_name, labels)(func)

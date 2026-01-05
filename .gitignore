@@ -60,6 +60,9 @@ temp_images/
 *.xlsx
 *.xls
 
+# SEC-MED-004: User data with password hashes should not be in repository
+data/users.json
+
 # OS
 .DS_Store
 Thumbs.db

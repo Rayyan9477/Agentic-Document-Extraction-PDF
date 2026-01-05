@@ -22,7 +22,15 @@ INSURANCE_FIELDS = [
         field_type=FieldType.STRING,
         description="Type of insurance program (Medicare, Medicaid, TRICARE, CHAMPVA, Group Health, FECA, Other)",
         required=True,
-        allowed_values=["Medicare", "Medicaid", "TRICARE", "CHAMPVA", "Group Health Plan", "FECA BLK LUNG", "Other"],
+        allowed_values=[
+            "Medicare",
+            "Medicaid",
+            "TRICARE",
+            "CHAMPVA",
+            "Group Health Plan",
+            "FECA BLK LUNG",
+            "Other",
+        ],
         location_hint="Box 1 - top left checkboxes",
     ),
     FieldDefinition(

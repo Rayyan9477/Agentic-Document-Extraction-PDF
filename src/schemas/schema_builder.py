@@ -5,7 +5,8 @@ Provides a fluent API for building custom schemas at runtime,
 enabling zero-shot learning and easy extension for new document types.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from src.schemas.base import DocumentSchema, DocumentType, SchemaRegistry
 from src.schemas.field_types import CrossFieldRule, FieldDefinition, FieldType, RuleOperator
@@ -497,6 +498,7 @@ class NestedSchemaBuilder:
 # Convenience Functions for Quick Schema Creation
 # =============================================================================
 
+
 def create_field(
     name: str,
     field_type: FieldType,
@@ -660,7 +662,12 @@ def generate_zero_shot_schema(
 
             if "date" in lower_name or "dob" in lower_name:
                 field_type = FieldType.DATE
-            elif "amount" in lower_name or "total" in lower_name or "fee" in lower_name or "charge" in lower_name:
+            elif (
+                "amount" in lower_name
+                or "total" in lower_name
+                or "fee" in lower_name
+                or "charge" in lower_name
+            ):
                 field_type = FieldType.CURRENCY
             elif "phone" in lower_name or "fax" in lower_name:
                 field_type = FieldType.PHONE

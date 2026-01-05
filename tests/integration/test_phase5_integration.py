@@ -12,15 +12,10 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -144,9 +139,7 @@ class TestHealthEndpoints:
 class TestMetricsEndpoint:
     """Tests for Prometheus metrics endpoint."""
 
-    def test_metrics_endpoint_returns_prometheus_format(
-        self, test_client: TestClient
-    ) -> None:
+    def test_metrics_endpoint_returns_prometheus_format(self, test_client: TestClient) -> None:
         """Test that metrics endpoint returns Prometheus format."""
         response = test_client.get("/api/v1/metrics")
 
@@ -235,18 +228,14 @@ class TestRequestTracking:
 class TestRateLimiting:
     """Tests for rate limiting middleware."""
 
-    def test_rate_limit_headers(
-        self, test_client_with_rate_limiting: TestClient
-    ) -> None:
+    def test_rate_limit_headers(self, test_client_with_rate_limiting: TestClient) -> None:
         """Test that rate limit headers are present."""
         response = test_client_with_rate_limiting.get("/api/v1/health")
 
         assert "X-RateLimit-Limit" in response.headers
         assert "X-RateLimit-Remaining" in response.headers
 
-    def test_rate_limit_decreases(
-        self, test_client_with_rate_limiting: TestClient
-    ) -> None:
+    def test_rate_limit_decreases(self, test_client_with_rate_limiting: TestClient) -> None:
         """Test that rate limit remaining decreases."""
         response1 = test_client_with_rate_limiting.get("/api/v1/health")
         remaining1 = int(response1.headers.get("X-RateLimit-Remaining", 0))
@@ -269,17 +258,14 @@ class TestEncryptionIntegration:
     @pytest.mark.skip(reason="Requires master key configuration")
     def test_encrypt_decrypt_cycle(self, temp_dir: Path) -> None:
         """Test complete encryption/decryption cycle."""
-        pass
 
     @pytest.mark.skip(reason="Requires master key configuration")
     def test_password_based_encryption(self) -> None:
         """Test password-based encryption."""
-        pass
 
     @pytest.mark.skip(reason="Requires master key configuration")
     def test_file_encryption(self, temp_dir: Path) -> None:
         """Test file encryption/decryption."""
-        pass
 
 
 class TestAuditLoggingIntegration:
@@ -288,7 +274,6 @@ class TestAuditLoggingIntegration:
     @pytest.mark.skip(reason="Test uses log_event but implementation has log method")
     def test_audit_logger_creates_logs(self, temp_dir: Path) -> None:
         """Test that audit logger creates log files."""
-        pass
 
     def test_phi_masking(self, temp_dir: Path) -> None:
         """Test PHI masking in audit logs."""
@@ -384,12 +369,10 @@ class TestSecureDataCleanupIntegration:
     @pytest.mark.skip(reason="Test uses different API than implementation")
     def test_secure_file_deletion(self, temp_dir: Path) -> None:
         """Test secure file deletion."""
-        pass
 
     @pytest.mark.skip(reason="Test uses different API than implementation")
     def test_temp_file_manager(self, temp_dir: Path) -> None:
         """Test temporary file manager."""
-        pass
 
 
 # =============================================================================
@@ -413,9 +396,7 @@ class TestMetricsIntegration:
         # Metrics should be recorded
         # (Verification depends on metrics registry state)
 
-    def test_metrics_with_different_endpoints(
-        self, test_client: TestClient
-    ) -> None:
+    def test_metrics_with_different_endpoints(self, test_client: TestClient) -> None:
         """Test metrics for different endpoints."""
         endpoints = [
             "/api/v1/health",
@@ -440,12 +421,10 @@ class TestAlertingIntegration:
     @pytest.mark.skip(reason="Test uses different API than implementation")
     def test_alert_rule_evaluation(self) -> None:
         """Test alert rule evaluation."""
-        pass
 
     @pytest.mark.skip(reason="Test uses different API than implementation")
     def test_alert_notification_handlers(self) -> None:
         """Test alert notification through handlers."""
-        pass
 
     def test_default_alert_rules(self) -> None:
         """Test loading default alert rules."""
@@ -471,7 +450,6 @@ class TestEndToEndSecurityFlow:
     @pytest.mark.skip(reason="Requires master key configuration and uses different cleanup API")
     def test_complete_document_security_flow(self, temp_dir: Path) -> None:
         """Test complete document security workflow."""
-        pass
 
     def test_hipaa_compliance_verification(self, test_client: TestClient) -> None:
         """Test HIPAA compliance verification through API."""
@@ -491,7 +469,6 @@ class TestEndToEndSecurityFlow:
     @pytest.mark.skip(reason="Test uses different API than implementation")
     def test_security_event_monitoring(self) -> None:
         """Test security event monitoring integration."""
-        pass
 
 
 # =============================================================================
@@ -505,11 +482,8 @@ class TestAPIErrorHandling:
     def test_validation_error_response(self, test_client: TestClient) -> None:
         """Test validation error response format."""
         # This will depend on your actual API endpoints
-        pass
 
-    def test_error_responses_have_request_id(
-        self, test_client: TestClient
-    ) -> None:
+    def test_error_responses_have_request_id(self, test_client: TestClient) -> None:
         """Test that error responses include request ID."""
         response = test_client.get("/api/v1/nonexistent")
 
@@ -529,7 +503,6 @@ class TestSecurityPerformance:
     @pytest.mark.skip(reason="Requires master key configuration")
     def test_encryption_performance(self) -> None:
         """Test encryption performance for various data sizes."""
-        pass
 
     def test_api_response_time(self, test_client: TestClient) -> None:
         """Test API response time with security middleware."""

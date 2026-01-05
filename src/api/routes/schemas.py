@@ -12,9 +12,9 @@ from fastapi import APIRouter, HTTPException, Request
 from src.api.models import SchemaInfo, SchemaListResponse
 from src.config import get_logger
 from src.security.path_validator import (
-    SecurePathValidator,
     PathTraversalError,
     PathValidationError,
+    SecurePathValidator,
 )
 
 
@@ -32,9 +32,7 @@ _pdf_validator = SecurePathValidator(
 def _get_schema_info(schema_name: str, schema_def: dict[str, Any]) -> SchemaInfo:
     """Build SchemaInfo from schema definition."""
     fields = schema_def.get("fields", {})
-    if isinstance(fields, dict):
-        field_count = len(fields)
-    elif isinstance(fields, list):
+    if isinstance(fields, dict) or isinstance(fields, list):
         field_count = len(fields)
     else:
         field_count = 0
@@ -81,18 +79,17 @@ async def list_schemas(
         for schema in all_schemas:
             # Handle both DocumentSchema objects and dict schemas
             if hasattr(schema, "name"):
-                schemas.append(SchemaInfo(
-                    name=schema.name,
-                    description=getattr(schema, "description", ""),
-                    document_type=getattr(schema, "document_type", schema.name),
-                    field_count=len(getattr(schema, "fields", [])),
-                    version=getattr(schema, "version", "1.0.0"),
-                ))
+                schemas.append(
+                    SchemaInfo(
+                        name=schema.name,
+                        description=getattr(schema, "description", ""),
+                        document_type=getattr(schema, "document_type", schema.name),
+                        field_count=len(getattr(schema, "fields", [])),
+                        version=getattr(schema, "version", "1.0.0"),
+                    )
+                )
             elif isinstance(schema, dict):
-                schemas.append(_get_schema_info(
-                    schema.get("name", "unknown"),
-                    schema
-                ))
+                schemas.append(_get_schema_info(schema.get("name", "unknown"), schema))
 
         return SchemaListResponse(
             schemas=schemas,
@@ -107,7 +104,7 @@ async def list_schemas(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list schemas: {str(e)}",
+            detail=f"Failed to list schemas: {e!s}",
         )
 
 
@@ -165,7 +162,7 @@ async def get_schema(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get schema: {str(e)}",
+            detail=f"Failed to get schema: {e!s}",
         )
 
 
@@ -213,14 +210,10 @@ async def get_schema_fields(
         fields = schema.get("fields", {})
 
         if isinstance(fields, dict):
-            return [
-                {"name": name, **field_def}
-                for name, field_def in fields.items()
-            ]
-        elif isinstance(fields, list):
+            return [{"name": name, **field_def} for name, field_def in fields.items()]
+        if isinstance(fields, list):
             return fields
-        else:
-            return []
+        return []
 
     except HTTPException:
         raise
@@ -233,7 +226,7 @@ async def get_schema_fields(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get schema fields: {str(e)}",
+            detail=f"Failed to get schema fields: {e!s}",
         )
 
 
@@ -267,8 +260,6 @@ async def detect_schema(
         request_id=request_id,
         pdf_path=pdf_path,
     )
-
-    from pathlib import Path
 
     # SECURITY: Validate path for traversal attacks before any file operations
     try:
@@ -319,5 +310,5 @@ async def detect_schema(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Detection failed: {str(e)}",
+            detail=f"Detection failed: {e!s}",
         )

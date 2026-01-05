@@ -14,23 +14,20 @@ from __future__ import annotations
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+import structlog
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
-import structlog
-
 from src.monitoring.metrics import MetricsCollector
 from src.security.audit import (
-    AuditContext,
-    AuditEventType,
     AuditLogger,
     AuditOutcome,
-    AuditSeverity,
 )
 from src.security.rbac import (
     Permission,
@@ -39,6 +36,7 @@ from src.security.rbac import (
     TokenExpiredError,
     TokenPayload,
 )
+
 
 logger = structlog.get_logger(__name__)
 
@@ -50,10 +48,10 @@ logger = structlog.get_logger(__name__)
 # Trusted proxy IP ranges - only trust X-Forwarded-For from these IPs
 # Configure based on your infrastructure (load balancers, reverse proxies)
 TRUSTED_PROXY_RANGES = {
-    "127.0.0.1",      # localhost
-    "10.0.0.0/8",     # Private network
+    "127.0.0.1",  # localhost
+    "10.0.0.0/8",  # Private network
     "172.16.0.0/12",  # Private network
-    "192.168.0.0/16", # Private network
+    "192.168.0.0/16",  # Private network
 }
 
 
@@ -80,10 +78,9 @@ def _is_trusted_proxy(client_ip: str) -> bool:
                 # Network range
                 if ip in ipaddress.ip_network(trusted, strict=False):
                     return True
-            else:
-                # Single IP
-                if ip == ipaddress.ip_address(trusted):
-                    return True
+            # Single IP
+            elif ip == ipaddress.ip_address(trusted):
+                return True
 
         return False
     except ValueError:
@@ -349,7 +346,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             status_code = response.status_code
-        except Exception as e:
+        except Exception:
             status_code = 500
             raise
         finally:
@@ -376,6 +373,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
         """Normalize path by replacing dynamic segments."""
         # Replace UUIDs
         import re
+
         path = re.sub(
             r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
             "{id}",
@@ -434,7 +432,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             outcome = AuditOutcome.SUCCESS if response.status_code < 400 else AuditOutcome.FAILURE
-        except Exception as e:
+        except Exception:
             outcome = AuditOutcome.FAILURE
             raise
         finally:
@@ -536,7 +534,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 content={
                     "error": "token_expired",
                     "message": "Authentication token has expired",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
         except TokenError as e:
@@ -545,7 +543,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 content={
                     "error": "authentication_failed",
                     "message": str(e),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -576,7 +574,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
             # DEV MODE: Accept dev token for development (skip JWT validation)
             if token == "dev-token-rayyan":
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 return TokenPayload(
                     sub="dev-user-rayyan",
                     username="rayyan",
@@ -623,8 +621,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._limiter = RateLimiter(default_rpm, burst_size)
 
         # Rate limits for authentication endpoints (SECURITY: strict limits to prevent brute force)
-        self._limiter.set_endpoint_limit("/api/v1/auth/login", 5, 2)  # 5 attempts/min (strict for auth)
-        self._limiter.set_endpoint_limit("/api/v1/auth/signup", 3, 1)  # 3 attempts/min (prevent enumeration)
+        self._limiter.set_endpoint_limit(
+            "/api/v1/auth/login", 5, 2
+        )  # 5 attempts/min (strict for auth)
+        self._limiter.set_endpoint_limit(
+            "/api/v1/auth/signup", 3, 1
+        )  # 3 attempts/min (prevent enumeration)
         self._limiter.set_endpoint_limit("/api/v1/auth/refresh", 30, 5)  # 30/min
         self._limiter.set_endpoint_limit("/api/v1/auth/me", 60, 10)  # 60/min
 
@@ -655,7 +657,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "error": "rate_limit_exceeded",
                     "message": "Too many requests",
                     "retry_after": headers.get("X-RateLimit-Reset", 60),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
                 headers={k: str(v) for k, v in headers.items()},
             )
@@ -717,6 +719,7 @@ def require_permission(permission: Permission) -> Callable:
     Returns:
         FastAPI dependency.
     """
+
     async def dependency(request: Request) -> None:
         permissions = getattr(request.state, "permissions", [])
         if permission.value not in permissions:

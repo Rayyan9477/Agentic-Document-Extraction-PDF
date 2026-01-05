@@ -10,13 +10,10 @@ Tests complete authentication flows:
 """
 
 import pytest
-import time
-from datetime import datetime, timedelta, timezone
 from fastapi import status
 from fastapi.testclient import TestClient
-from typing import Dict, Any
 
-from src.security.rbac import RBACManager, Role, Permission
+from src.security.rbac import RBACManager, Role
 
 
 @pytest.fixture(autouse=True)
@@ -36,9 +33,10 @@ def rbac_manager():
 @pytest.fixture
 def app(rbac_manager):
     """Create complete FastAPI application for integration testing."""
-    from fastapi import FastAPI, Depends, HTTPException
+    from fastapi import Depends, FastAPI
     from fastapi.middleware.cors import CORSMiddleware
-    from src.api.routes.auth import router, get_rbac_manager
+
+    from src.api.routes.auth import get_rbac_manager, router
 
     app = FastAPI(title="Auth Integration Test App")
 
@@ -59,9 +57,7 @@ def app(rbac_manager):
 
     # Add a protected endpoint for testing
     @app.get("/api/v1/protected/resource")
-    async def protected_resource(
-        authorization: str = Depends(lambda: None)
-    ):
+    async def protected_resource(authorization: str = Depends(lambda: None)):
         """Protected endpoint requiring authentication."""
         # This would normally use a dependency for auth
         return {"message": "Protected resource accessed"}

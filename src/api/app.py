@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -89,6 +90,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize monitoring
     try:
         from src.monitoring.metrics import MetricsCollector
+
         collector = MetricsCollector()
         app.state.metrics_collector = collector
         logger.info("metrics_initialized")
@@ -98,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize alert manager
     try:
         from src.monitoring.alerts import AlertManager, get_default_alert_rules
+
         alert_manager = AlertManager()
         for rule in get_default_alert_rules():
             alert_manager.add_rule(rule)
@@ -114,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Cleanup temporary files if needed
     try:
         from src.security.data_cleanup import TempFileManager
+
         temp_manager = TempFileManager()
         temp_manager.cleanup_all()  # Use sync method (cleanup_async doesn't exist)
         logger.info("temp_files_cleaned")
@@ -161,8 +165,10 @@ def create_app(
     # Production validation: NEVER allow wildcards with credentials
     # Check if running in production (env variable or settings)
     import os
-    is_production = os.getenv("APP_ENV", "").lower() == "production" or \
-                    (hasattr(settings, "app_env") and str(settings.app_env).lower() == "production")
+
+    is_production = os.getenv("APP_ENV", "").lower() == "production" or (
+        hasattr(settings, "app_env") and str(settings.app_env).lower() == "production"
+    )
 
     if is_production:
         for origin in cors_origins:
@@ -177,7 +183,13 @@ def create_app(
         allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE"],  # Removed OPTIONS (handled automatically)
-        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID", "X-CSRF-Token"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-API-Key",
+            "X-Request-ID",
+            "X-CSRF-Token",
+        ],
         max_age=3600,  # Cache preflight for 1 hour
     )
 
@@ -185,6 +197,7 @@ def create_app(
     if enable_security:
         try:
             from src.api.middleware import SecurityHeadersMiddleware
+
             app.add_middleware(SecurityHeadersMiddleware)
             logger.info("security_headers_middleware_enabled")
         except ImportError as e:
@@ -194,6 +207,7 @@ def create_app(
     if enable_metrics:
         try:
             from src.api.middleware import MetricsMiddleware
+
             app.add_middleware(MetricsMiddleware)
             logger.info("metrics_middleware_enabled")
         except ImportError as e:
@@ -203,6 +217,7 @@ def create_app(
     if enable_audit:
         try:
             from src.api.middleware import AuditMiddleware
+
             app.add_middleware(
                 AuditMiddleware,
                 log_dir="./logs/audit",
@@ -216,6 +231,7 @@ def create_app(
     if enable_rate_limiting:
         try:
             from src.api.middleware import RateLimitMiddleware
+
             app.add_middleware(
                 RateLimitMiddleware,
                 default_rpm=60,
@@ -269,7 +285,7 @@ def create_app(
                     "error": "internal_error",
                     "message": "An unexpected error occurred",
                     "request_id": request_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             )
 
@@ -300,7 +316,7 @@ def create_app(
                 "error": "validation_error",
                 "message": str(exc),
                 "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -317,7 +333,7 @@ def create_app(
                 "error": "file_not_found",
                 "message": str(exc),
                 "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
@@ -334,18 +350,18 @@ def create_app(
                 "error": "permission_denied",
                 "message": str(exc),
                 "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         )
 
     # Register routes
     from src.api.routes.auth import router as auth_router
-    from src.api.routes.documents import router as documents_router
-    from src.api.routes.tasks import router as tasks_router
-    from src.api.routes.health import router as health_router
-    from src.api.routes.schemas import router as schemas_router
     from src.api.routes.dashboard import router as dashboard_router
+    from src.api.routes.documents import router as documents_router
+    from src.api.routes.health import router as health_router
     from src.api.routes.queue import router as queue_router
+    from src.api.routes.schemas import router as schemas_router
+    from src.api.routes.tasks import router as tasks_router
 
     app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])
     app.include_router(documents_router, prefix="/api/v1", tags=["Documents"])
@@ -371,6 +387,7 @@ def create_app(
         """Return empty favicon to prevent 404 errors."""
         # Return a minimal 1x1 transparent PNG
         import base64
+
         png_data = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         )

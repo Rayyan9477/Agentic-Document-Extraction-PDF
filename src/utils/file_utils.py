@@ -10,9 +10,9 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Iterator
 
 from src.config import get_logger
 
@@ -23,13 +23,9 @@ logger = get_logger(__name__)
 class FileOperationError(Exception):
     """Exception raised for file operation errors."""
 
-    pass
-
 
 class FileLockError(Exception):
     """Exception raised when file lock cannot be acquired."""
-
-    pass
 
 
 def ensure_directory(path: Path | str) -> Path:

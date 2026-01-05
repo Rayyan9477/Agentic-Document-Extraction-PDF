@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import os
 import re
-from pathlib import Path, PurePath, PureWindowsPath, PurePosixPath
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path
 
 import structlog
+
 
 logger = structlog.get_logger(__name__)
 
@@ -48,39 +49,39 @@ class SecurePathValidator:
 
     # Dangerous patterns that indicate traversal attempts
     TRAVERSAL_PATTERNS = [
-        r"\.\.",           # Direct ..
-        r"\.\\/",          # .\ on Windows
-        r"%2e%2e",         # URL-encoded ..
-        r"%252e%252e",     # Double URL-encoded ..
-        r"\.%2e",          # Mixed encoding
-        r"%2e\.",          # Mixed encoding
-        r"%c0%ae",         # UTF-8 overlong encoding of .
-        r"%c1%9c",         # UTF-8 overlong encoding of /
-        r"\.\.%00",        # Null byte after ..
-        r"\.\.%5c",        # URL-encoded backslash
-        r"\.\.%2f",        # URL-encoded forward slash
+        r"\.\.",  # Direct ..
+        r"\.\\/",  # .\ on Windows
+        r"%2e%2e",  # URL-encoded ..
+        r"%252e%252e",  # Double URL-encoded ..
+        r"\.%2e",  # Mixed encoding
+        r"%2e\.",  # Mixed encoding
+        r"%c0%ae",  # UTF-8 overlong encoding of .
+        r"%c1%9c",  # UTF-8 overlong encoding of /
+        r"\.\.%00",  # Null byte after ..
+        r"\.\.%5c",  # URL-encoded backslash
+        r"\.\.%2f",  # URL-encoded forward slash
     ]
 
     # Characters that should never appear in sanitized paths
     DANGEROUS_CHARS = {
-        '\x00',  # Null byte
-        '\n',    # Newline
-        '\r',    # Carriage return
-        '\t',    # Tab
-        '|',     # Pipe (command injection)
-        ';',     # Command separator
-        '&',     # Command chaining
-        '$',     # Variable expansion
-        '`',     # Command substitution
-        '!',     # History expansion
-        '*',     # Glob wildcard
-        '?',     # Glob wildcard
-        '[',     # Glob pattern
-        ']',     # Glob pattern
-        '{',     # Brace expansion
-        '}',     # Brace expansion
-        '<',     # Redirection
-        '>',     # Redirection
+        "\x00",  # Null byte
+        "\n",  # Newline
+        "\r",  # Carriage return
+        "\t",  # Tab
+        "|",  # Pipe (command injection)
+        ";",  # Command separator
+        "&",  # Command chaining
+        "$",  # Variable expansion
+        "`",  # Command substitution
+        "!",  # History expansion
+        "*",  # Glob wildcard
+        "?",  # Glob wildcard
+        "[",  # Glob pattern
+        "]",  # Glob pattern
+        "{",  # Brace expansion
+        "}",  # Brace expansion
+        "<",  # Redirection
+        ">",  # Redirection
     }
 
     def __init__(
@@ -117,7 +118,7 @@ class SecurePathValidator:
         if allowed_extensions:
             # Normalize extensions to lowercase with dot prefix
             self._allowed_extensions = {
-                ext.lower() if ext.startswith('.') else f'.{ext.lower()}'
+                ext.lower() if ext.startswith(".") else f".{ext.lower()}"
                 for ext in allowed_extensions
             }
 
@@ -128,10 +129,7 @@ class SecurePathValidator:
         self._base_dir = Path(base_directory).resolve() if base_directory else Path.cwd()
 
         # Compile traversal patterns for efficiency
-        self._traversal_regex = re.compile(
-            '|'.join(self.TRAVERSAL_PATTERNS),
-            re.IGNORECASE
-        )
+        self._traversal_regex = re.compile("|".join(self.TRAVERSAL_PATTERNS), re.IGNORECASE)
 
     def validate(self, path: str | Path, must_exist: bool = False) -> Path:
         """
@@ -152,7 +150,7 @@ class SecurePathValidator:
         path_str = str(path)
 
         # Check for null bytes first
-        if '\x00' in path_str:
+        if "\x00" in path_str:
             logger.warning(
                 "path_traversal_null_byte",
                 path=path_str[:100],
@@ -161,9 +159,7 @@ class SecurePathValidator:
 
         # Check length limits
         if len(path_str) > self._max_path_length:
-            raise PathValidationError(
-                f"Path exceeds maximum length of {self._max_path_length}"
-            )
+            raise PathValidationError(f"Path exceeds maximum length of {self._max_path_length}")
 
         # Check for URL-encoded and other traversal patterns
         if self._traversal_regex.search(path_str):
@@ -181,9 +177,7 @@ class SecurePathValidator:
                 path=path_str[:100],
                 chars=list(dangerous_found),
             )
-            raise PathTraversalError(
-                f"Dangerous characters in path: {dangerous_found}"
-            )
+            raise PathTraversalError(f"Dangerous characters in path: {dangerous_found}")
 
         # Parse path
         try:
@@ -193,20 +187,18 @@ class SecurePathValidator:
 
         # Check absolute path policy
         if parsed.is_absolute() and not self._allow_absolute:
-            raise PathValidationError(
-                "Absolute paths are not allowed"
-            )
+            raise PathValidationError("Absolute paths are not allowed")
 
         # Check for .. components in the parsed path
         # This catches cases the regex might miss after normalization
         for part in parsed.parts:
-            if part == '..':
+            if part == "..":
                 logger.warning(
                     "path_traversal_dotdot",
                     path=path_str[:100],
                 )
                 raise PathTraversalError("Parent directory reference (..) not allowed")
-            if part.startswith('.') and part not in ('.', '..'):
+            if part.startswith(".") and part not in (".", ".."):
                 # Hidden files - may be allowed but log it
                 logger.debug(
                     "path_hidden_file",
@@ -217,7 +209,7 @@ class SecurePathValidator:
         if parsed.is_absolute():
             resolved = parsed.resolve() if self._resolve_symlinks else parsed
         else:
-            resolved = (self._base_dir / parsed)
+            resolved = self._base_dir / parsed
             if self._resolve_symlinks:
                 resolved = resolved.resolve()
 
@@ -253,9 +245,7 @@ class SecurePathValidator:
                     path=str(resolved)[:100],
                     allowed=str(self._allowed_dirs),
                 )
-                raise PathTraversalError(
-                    "Path is outside allowed directories"
-                )
+                raise PathTraversalError("Path is outside allowed directories")
 
         # Verify existence if required
         if must_exist and not resolved.exists():
@@ -272,9 +262,7 @@ class SecurePathValidator:
                     path=str(resolved)[:100],
                     base=str(self._base_dir),
                 )
-                raise PathTraversalError(
-                    "Resolved path escapes base directory"
-                )
+                raise PathTraversalError("Resolved path escapes base directory")
 
         return resolved
 
@@ -293,7 +281,7 @@ class SecurePathValidator:
             PathValidationError: If filename fails validation.
         """
         # Check for null bytes
-        if '\x00' in filename:
+        if "\x00" in filename:
             raise PathTraversalError("Null byte in filename")
 
         # Get basename only (strips any path components)
@@ -306,16 +294,12 @@ class SecurePathValidator:
                 original=filename[:100],
                 basename=basename,
             )
-            raise PathTraversalError(
-                "Filename contained directory separators"
-            )
+            raise PathTraversalError("Filename contained directory separators")
 
         # Check for dangerous characters
         dangerous_found = set(basename) & self.DANGEROUS_CHARS
         if dangerous_found:
-            raise PathTraversalError(
-                f"Dangerous characters in filename: {dangerous_found}"
-            )
+            raise PathTraversalError(f"Dangerous characters in filename: {dangerous_found}")
 
         # Check length
         if len(basename) > self._max_filename_length:
@@ -324,20 +308,18 @@ class SecurePathValidator:
             )
 
         # Check for empty or dotfile-only names
-        if not basename or basename == '.' or basename == '..':
+        if not basename or basename == "." or basename == "..":
             raise PathValidationError("Invalid filename")
 
         # Check extension if restrictions apply
         if self._allowed_extensions:
             suffix = Path(basename).suffix.lower()
             if suffix not in self._allowed_extensions:
-                raise PathValidationError(
-                    f"File extension '{suffix}' not allowed"
-                )
+                raise PathValidationError(f"File extension '{suffix}' not allowed")
 
         return basename
 
-    def sanitize_filename(self, filename: str, replacement: str = '_') -> str:
+    def sanitize_filename(self, filename: str, replacement: str = "_") -> str:
         """
         Sanitize a filename by replacing dangerous characters.
 
@@ -349,7 +331,7 @@ class SecurePathValidator:
             Sanitized filename safe for filesystem use.
         """
         # Get basename only
-        basename = os.path.basename(filename.replace('\x00', ''))
+        basename = os.path.basename(filename.replace("\x00", ""))
 
         # Replace dangerous characters
         result = []
@@ -359,20 +341,20 @@ class SecurePathValidator:
             else:
                 result.append(char)
 
-        sanitized = ''.join(result)
+        sanitized = "".join(result)
 
         # Remove leading dots (hidden files)
-        sanitized = sanitized.lstrip('.')
+        sanitized = sanitized.lstrip(".")
 
         # Handle empty result
         if not sanitized:
-            sanitized = 'unnamed'
+            sanitized = "unnamed"
 
         # Truncate to max length
         if len(sanitized) > self._max_filename_length:
             # Preserve extension
             path = Path(sanitized)
-            stem = path.stem[:self._max_filename_length - len(path.suffix) - 1]
+            stem = path.stem[: self._max_filename_length - len(path.suffix) - 1]
             sanitized = stem + path.suffix
 
         return sanitized
@@ -385,7 +367,7 @@ def get_pdf_validator(
     """Get a validator configured for PDF file paths."""
     return SecurePathValidator(
         allowed_directories=allowed_directories,
-        allowed_extensions=['.pdf'],
+        allowed_extensions=[".pdf"],
         allow_absolute_paths=True,  # Allow absolute paths but validate traversal
         resolve_symlinks=True,
     )
@@ -397,7 +379,7 @@ def get_output_validator(
     """Get a validator configured for output paths."""
     return SecurePathValidator(
         allowed_directories=allowed_directories,
-        allowed_extensions=['.json', '.xlsx', '.xls', '.md', '.csv'],
+        allowed_extensions=[".json", ".xlsx", ".xls", ".md", ".csv"],
         allow_absolute_paths=True,
         resolve_symlinks=True,
     )
@@ -458,19 +440,19 @@ def is_safe_path(path: str) -> bool:
         True if path appears safe, False otherwise.
     """
     # Quick null byte check
-    if '\x00' in path:
+    if "\x00" in path:
         return False
 
     # Check for .. anywhere
-    if '..' in path:
+    if ".." in path:
         return False
 
     # Check for URL-encoded sequences
-    if '%' in path.lower():
+    if "%" in path.lower():
         return False
 
     # Check for dangerous shell characters
-    dangerous = {'|', ';', '&', '$', '`', '<', '>', '*', '?'}
+    dangerous = {"|", ";", "&", "$", "`", "<", ">", "*", "?"}
     if any(c in path for c in dangerous):
         return False
 

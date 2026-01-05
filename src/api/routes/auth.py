@@ -5,20 +5,22 @@ Provides endpoints for user authentication, registration, and token management.
 """
 
 import re
+import secrets as stdlib_secrets
 import unicodedata
-from typing import Any, Optional
+from datetime import UTC
+from typing import ClassVar
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from src.config import get_logger
 from src.security.rbac import (
     RBACManager,
     Role,
-    TokenInvalidError,
     TokenExpiredError,
-    AuthorizationError,
+    TokenInvalidError,
 )
+
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -33,8 +35,8 @@ class PasswordValidator:
     Validates password strength according to OWASP and HIPAA requirements.
     """
 
-    MIN_LENGTH = 8  # Unit tests expect 8-char minimum
-    COMMON_PASSWORDS = {
+    MIN_LENGTH: ClassVar[int] = 8  # Unit tests expect 8-char minimum
+    COMMON_PASSWORDS: ClassVar[set[str]] = {
         "password",
         "12345678",
         "123456789",
@@ -55,7 +57,7 @@ class PasswordValidator:
     }
 
     @staticmethod
-    def validate_password(password: str) -> tuple[bool, Optional[str]]:
+    def validate_password(password: str) -> tuple[bool, str | None]:
         """
         Validate password strength with Unicode normalization.
 
@@ -67,33 +69,21 @@ class PasswordValidator:
         """
         # SECURITY: Normalize Unicode to prevent lookalike character bypass attacks
         # NFKC normalization converts visually similar characters to their canonical form
-        password = unicodedata.normalize('NFKC', password)
+        password = unicodedata.normalize("NFKC", password)
 
         # SECURITY: Only allow ASCII printable characters to prevent Unicode bypass
         # This prevents attacks using Cyrillic or other lookalike characters
         if not all(32 <= ord(c) <= 126 for c in password):
-            return False, "Password must contain only ASCII printable characters (letters, numbers, and standard symbols)"
+            return (
+                False,
+                "Password must contain only ASCII printable characters (letters, numbers, and standard symbols)",
+            )
 
         if len(password) < PasswordValidator.MIN_LENGTH:
             return False, f"Password must be at least {PasswordValidator.MIN_LENGTH} characters"
 
         if password.lower() in PasswordValidator.COMMON_PASSWORDS:
             return False, "Password is too common. Please choose a stronger password"
-
-        # Complexity requirements disabled for simplified login
-        # Uncomment for production/HIPAA compliance:
-        # checks = {
-        #     r"[A-Z]": "at least one uppercase letter",
-        #     r"[a-z]": "at least one lowercase letter",
-        #     r"[0-9]": "at least one number",
-        #     r'[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/`~]': "at least one special character",
-        # }
-        # missing_requirements = []
-        # for pattern, requirement in checks.items():
-        #     if not re.search(pattern, password):
-        #         missing_requirements.append(requirement)
-        # if missing_requirements:
-        #     return False, f"Password must contain {', '.join(missing_requirements)}"
 
         return True, None
 
@@ -132,7 +122,7 @@ def _validate_jwt_secret_entropy(secret_key: str) -> None:
         )
 
     # Check for common weak patterns (removed 'secret' for dev environments)
-    weak_patterns = ['password', '123456', 'abcdef', 'qwerty']
+    weak_patterns = ["password", "123456", "abcdef", "qwerty"]
     lower_key = secret_key.lower()
     for pattern in weak_patterns:
         if pattern in lower_key:
@@ -140,6 +130,66 @@ def _validate_jwt_secret_entropy(secret_key: str) -> None:
                 f"JWT_SECRET_KEY contains weak pattern '{pattern}'. "
                 "Generate a proper random key with: python -c 'import secrets; print(secrets.token_urlsafe(64))'"
             )
+
+
+def _set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+    csrf_token: str | None = None,
+) -> None:
+    """
+    Set secure HttpOnly cookies for authentication tokens.
+
+    SECURITY: Uses HttpOnly cookies to prevent XSS attacks from stealing tokens.
+    - access_token: HttpOnly, Secure, SameSite=Lax (30 min)
+    - refresh_token: HttpOnly, Secure, SameSite=Strict (7 days)
+    - csrf_token: NOT HttpOnly (readable by JS for CSRF protection)
+    """
+    import os
+
+    is_production = os.getenv("ENVIRONMENT", "development") == "production"
+
+    # Access token cookie (30 minutes)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        max_age=1800,  # 30 minutes
+        httponly=True,  # SECURITY: Not accessible via JavaScript
+        secure=is_production,  # HTTPS only in production
+        samesite="lax",  # Allow normal navigation
+        path="/",
+    )
+
+    # Refresh token cookie (7 days)
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh_token,
+        max_age=604800,  # 7 days
+        httponly=True,  # SECURITY: Not accessible via JavaScript
+        secure=is_production,  # HTTPS only in production
+        samesite="strict",  # Strict for refresh token
+        path="/api/v1/auth/refresh",  # Only sent to refresh endpoint
+    )
+
+    # CSRF token (readable by frontend to include in headers)
+    if csrf_token:
+        response.set_cookie(
+            key="csrf_token",
+            value=csrf_token,
+            max_age=1800,  # Same as access token
+            httponly=False,  # Must be readable by JavaScript
+            secure=is_production,
+            samesite="strict",
+            path="/",
+        )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    """Clear all authentication cookies on logout."""
+    response.delete_cookie(key="access_token", path="/")
+    response.delete_cookie(key="refresh_token", path="/api/v1/auth/refresh")
+    response.delete_cookie(key="csrf_token", path="/")
 
 
 def get_rbac_manager() -> RBACManager:
@@ -234,20 +284,29 @@ class MessageResponse(BaseModel):
     "/auth/login",
     response_model=TokenResponse,
     summary="User login",
-    description="Authenticate user and return access tokens.",
+    description="Authenticate user and return access tokens. Also sets HttpOnly cookies for enhanced security.",
     status_code=status.HTTP_200_OK,
 )
 async def login(
     request: LoginRequest,
     http_request: Request,
+    response: Response,
     rbac: RBACManager = Depends(get_rbac_manager),
 ) -> TokenResponse:
     """
     Authenticate user with username and password.
 
+    SECURITY: Sets HttpOnly cookies for tokens to prevent XSS attacks.
+    - access_token: HttpOnly cookie (not accessible via JavaScript)
+    - refresh_token: HttpOnly cookie with strict path
+    - csrf_token: Regular cookie (readable by JS for CSRF protection)
+
+    Also returns tokens in response body for backward compatibility.
+
     Args:
         request: Login credentials.
         http_request: HTTP request object.
+        response: HTTP response for setting cookies.
 
     Returns:
         Access and refresh tokens.
@@ -288,12 +347,25 @@ async def login(
                 detail="Invalid username or password",
             )
 
+        # SECURITY: Generate CSRF token for frontend to use
+        csrf_token = stdlib_secrets.token_urlsafe(32)
+
+        # SECURITY: Set HttpOnly cookies to prevent XSS token theft
+        _set_auth_cookies(
+            response=response,
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            csrf_token=csrf_token,
+        )
+
         logger.info(
             "login_success",
             username=request.username,
             request_id=request_id,
         )
 
+        # Return tokens in body for backward compatibility
+        # Frontend can transition to cookie-based auth gradually
         return TokenResponse(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
@@ -428,28 +500,38 @@ async def signup(
     "/auth/logout",
     response_model=MessageResponse,
     summary="User logout",
-    description="Logout user and revoke access token.",
+    description="Logout user, revoke access token, and clear HttpOnly cookies.",
     status_code=status.HTTP_200_OK,
 )
 async def logout(
     http_request: Request,
+    response: Response,
     rbac: RBACManager = Depends(get_rbac_manager),
 ) -> MessageResponse:
     """
     Logout user and revoke their access token.
 
+    SECURITY: Clears HttpOnly cookies to prevent token reuse.
+    Supports both header-based and cookie-based authentication.
+
     Args:
         http_request: HTTP request object.
+        response: HTTP response for clearing cookies.
 
     Returns:
         Success message.
     """
     request_id = getattr(http_request.state, "request_id", "")
 
-    # Extract and revoke the access token
+    # Try to get token from header first, then from cookie
+    token = None
     auth_header = http_request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]
+    elif http_request.cookies.get("access_token"):
+        token = http_request.cookies.get("access_token")
+
+    if token:
         try:
             # Revoke the token on the server side
             rbac.tokens.revoke_token(token)
@@ -470,6 +552,9 @@ async def logout(
             request_id=request_id,
         )
 
+    # SECURITY: Clear all auth cookies
+    _clear_auth_cookies(response)
+
     return MessageResponse(
         message="Logged out successfully",
         success=True,
@@ -486,12 +571,13 @@ class RefreshTokenRequest(BaseModel):
     "/auth/refresh",
     response_model=TokenResponse,
     summary="Refresh token",
-    description="Refresh access token using refresh token with secure rotation.",
+    description="Refresh access token using refresh token with secure rotation. Supports both query param and HttpOnly cookie.",
     status_code=status.HTTP_200_OK,
 )
 async def refresh_token(
     http_request: Request,
-    refresh_token: str = Query(..., min_length=1),
+    response: Response,
+    refresh_token: str | None = Query(None, min_length=1),
     rbac: RBACManager = Depends(get_rbac_manager),
 ) -> TokenResponse:
     """
@@ -502,10 +588,12 @@ async def refresh_token(
     - New token pair is issued
     - Prevents refresh token replay attacks
     - Detects token theft (reused revoked token = breach indicator)
+    - Supports both query param and HttpOnly cookie for backward compatibility
 
     Args:
-        request: Refresh token request body.
         http_request: HTTP request object.
+        response: HTTP response for setting new cookies.
+        refresh_token: Optional refresh token from query param.
 
     Returns:
         New access and refresh tokens.
@@ -521,7 +609,16 @@ async def refresh_token(
     )
 
     try:
+        # Try query param first, then fall back to cookie
         incoming_refresh_token = refresh_token
+        if not incoming_refresh_token:
+            incoming_refresh_token = http_request.cookies.get("refresh_token")
+
+        if not incoming_refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token required",
+            )
 
         # Validate refresh token
         payload = rbac.tokens.validate_token(incoming_refresh_token)
@@ -587,6 +684,15 @@ async def refresh_token(
         # Create new token pair with fresh tokens
         tokens = rbac.tokens.create_token_pair(user)
 
+        # SECURITY: Generate new CSRF token and set HttpOnly cookies
+        csrf_token = stdlib_secrets.token_urlsafe(32)
+        _set_auth_cookies(
+            response=response,
+            access_token=tokens.access_token,
+            refresh_token=tokens.refresh_token,
+            csrf_token=csrf_token,
+        )
+
         logger.info(
             "token_refresh_success",
             user_id=user.user_id,
@@ -643,7 +749,7 @@ async def refresh_token(
     "/auth/me",
     response_model=UserResponse,
     summary="Get current user",
-    description="Get current authenticated user information.",
+    description="Get current authenticated user information. Supports both header and cookie authentication.",
     status_code=status.HTTP_200_OK,
 )
 async def get_current_user(
@@ -652,6 +758,9 @@ async def get_current_user(
 ) -> UserResponse:
     """
     Get current authenticated user.
+
+    SECURITY: Supports both Bearer token header and HttpOnly cookie authentication.
+    Header takes precedence for backward compatibility.
 
     Args:
         http_request: HTTP request object.
@@ -664,15 +773,19 @@ async def get_current_user(
     """
     request_id = getattr(http_request.state, "request_id", "")
 
-    # Get authorization header
+    # Try to get token from header first, then from cookie
+    token = None
     auth_header = http_request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+    elif http_request.cookies.get("access_token"):
+        token = http_request.cookies.get("access_token")
+
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
-
-    token = auth_header.split(" ")[1]
 
     # DEV MODE: Accept dev token for development (skip JWT validation)
     if token == "dev-token-rayyan":
@@ -759,7 +872,9 @@ class CreateAPIKeyRequest(BaseModel):
         """Validate API key name."""
         # Only allow alphanumeric, spaces, hyphens, and underscores
         if not re.match(r"^[\w\s\-]+$", v):
-            raise ValueError("Name can only contain letters, numbers, spaces, hyphens, and underscores")
+            raise ValueError(
+                "Name can only contain letters, numbers, spaces, hyphens, and underscores"
+            )
         return v.strip()
 
 
@@ -853,8 +968,8 @@ async def create_api_key(
     Returns:
         Created API key details including the key itself.
     """
-    from datetime import datetime, timezone, timedelta
     import secrets
+    from datetime import datetime, timedelta
 
     request_id = getattr(request.state, "request_id", "unknown")
     user_id = getattr(request.state, "user_id", None)
@@ -884,7 +999,7 @@ async def create_api_key(
             expires_days=body.expires_days,
         )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + timedelta(days=body.expires_days)
 
         logger.info(

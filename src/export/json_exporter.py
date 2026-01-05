@@ -10,16 +10,16 @@ Provides comprehensive JSON export with:
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from src.config import get_logger
 from src.pipeline.state import (
+    ConfidenceLevel,
     ExtractionState,
     ExtractionStatus,
-    ConfidenceLevel,
 )
 
 
@@ -64,10 +64,17 @@ class JSONExportConfig:
     indent_size: int = 2
     exclude_fields: set[str] = field(default_factory=set)
     mask_phi: bool = False
-    phi_fields: set[str] = field(default_factory=lambda: {
-        "ssn", "social_security", "member_id", "subscriber_id",
-        "patient_account", "policy_number", "group_number",
-    })
+    phi_fields: set[str] = field(
+        default_factory=lambda: {
+            "ssn",
+            "social_security",
+            "member_id",
+            "subscriber_id",
+            "patient_account",
+            "policy_number",
+            "group_number",
+        }
+    )
     phi_mask_pattern: str = "***MASKED***"
 
 
@@ -201,33 +208,43 @@ class JSONExporter:
             "resourceType": "DocumentReference",
             "id": state.get("processing_id", ""),
             "status": self._map_status_to_fhir(state.get("status", "")),
-            "docStatus": "final" if state.get("status") == ExtractionStatus.COMPLETED.value else "preliminary",
+            "docStatus": (
+                "final"
+                if state.get("status") == ExtractionStatus.COMPLETED.value
+                else "preliminary"
+            ),
             "type": {
-                "coding": [{
-                    "system": "http://loinc.org",
-                    "code": self._get_loinc_code(state.get("document_type", "")),
-                    "display": state.get("document_type", "Unknown"),
-                }]
+                "coding": [
+                    {
+                        "system": "http://loinc.org",
+                        "code": self._get_loinc_code(state.get("document_type", "")),
+                        "display": state.get("document_type", "Unknown"),
+                    }
+                ]
             },
             "date": state.get("end_time") or state.get("start_time", ""),
-            "content": [{
-                "attachment": {
-                    "contentType": "application/pdf",
-                    "url": state.get("pdf_path", ""),
-                },
-                "format": {
-                    "system": "urn:oid:1.3.6.1.4.1.19376.1.2.3",
-                    "code": "urn:ihe:pcc:xds-ms:2007",
-                    "display": "Medical Summary",
+            "content": [
+                {
+                    "attachment": {
+                        "contentType": "application/pdf",
+                        "url": state.get("pdf_path", ""),
+                    },
+                    "format": {
+                        "system": "urn:oid:1.3.6.1.4.1.19376.1.2.3",
+                        "code": "urn:ihe:pcc:xds-ms:2007",
+                        "display": "Medical Summary",
+                    },
                 }
-            }],
+            ],
             "context": {
-                "related": [{
-                    "identifier": {
-                        "system": "urn:oid:2.16.840.1.113883.3.88.11.83.8",
-                        "value": state.get("processing_id", ""),
+                "related": [
+                    {
+                        "identifier": {
+                            "system": "urn:oid:2.16.840.1.113883.3.88.11.83.8",
+                            "value": state.get("processing_id", ""),
+                        }
                     }
-                }]
+                ]
             },
             "extension": [
                 {
@@ -241,8 +258,8 @@ class JSONExporter:
                 {
                     "url": "http://example.org/fhir/StructureDefinition/extraction-status",
                     "valueCode": state.get("status", "unknown"),
-                }
-            ]
+                },
+            ],
         }
 
     def _extract_values(self, state: ExtractionState) -> dict[str, Any]:
@@ -333,7 +350,7 @@ class JSONExporter:
             "human_review_reason": state.get("human_review_reason"),
             "errors": state.get("errors", []),
             "warnings": state.get("warnings", []),
-            "export_timestamp": datetime.now(timezone.utc).isoformat(),
+            "export_timestamp": datetime.now(UTC).isoformat(),
         }
 
     def _build_raw_passes(self, state: ExtractionState) -> list[dict[str, Any]]:
@@ -356,11 +373,14 @@ class JSONExporter:
         """Recursively mask PHI fields in a dictionary."""
         if isinstance(obj, dict):
             return {
-                k: self._mask_value(k, v) if k.lower() in self.config.phi_fields
-                else self._mask_dict(v)
+                k: (
+                    self._mask_value(k, v)
+                    if k.lower() in self.config.phi_fields
+                    else self._mask_dict(v)
+                )
                 for k, v in obj.items()
             }
-        elif isinstance(obj, list):
+        if isinstance(obj, list):
             return [self._mask_dict(item) for item in obj]
         return obj
 

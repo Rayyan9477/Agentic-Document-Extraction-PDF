@@ -7,7 +7,6 @@ worker status, and queue management.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -45,6 +44,7 @@ async def get_queue_stats(
 
     # Quick Redis availability check (avoids 5+ second timeout)
     from src.queue import is_redis_available
+
     if not is_redis_available():
         logger.debug(
             "queue_stats_redis_unavailable",
@@ -67,13 +67,15 @@ async def get_queue_stats(
         # Convert to list format expected by frontend
         result = []
         for name, data in queues.items():
-            result.append({
-                "name": name,
-                "pending": data.get("pending", 0),
-                "active": data.get("active", 0),
-                "completed": data.get("completed", 0),
-                "failed": data.get("failed", 0),
-            })
+            result.append(
+                {
+                    "name": name,
+                    "pending": data.get("pending", 0),
+                    "active": data.get("active", 0),
+                    "completed": data.get("completed", 0),
+                    "failed": data.get("failed", 0),
+                }
+            )
 
         # Add default queues if empty
         if not result:
@@ -123,6 +125,7 @@ async def get_workers(
 
     # Quick Redis availability check (avoids 5+ second timeout)
     from src.queue import is_redis_available
+
     if not is_redis_available():
         logger.debug(
             "queue_workers_redis_unavailable",
@@ -141,14 +144,16 @@ async def get_workers(
         # Format workers for frontend
         result = []
         for worker in workers:
-            result.append({
-                "id": worker.get("id", "unknown"),
-                "name": worker.get("name", "unknown"),
-                "status": worker.get("status", "unknown"),
-                "active_tasks": worker.get("active_tasks", 0),
-                "processed": worker.get("processed", 0),
-                "last_heartbeat": worker.get("last_heartbeat"),
-            })
+            result.append(
+                {
+                    "id": worker.get("id", "unknown"),
+                    "name": worker.get("name", "unknown"),
+                    "status": worker.get("status", "unknown"),
+                    "active_tasks": worker.get("active_tasks", 0),
+                    "processed": worker.get("processed", 0),
+                    "last_heartbeat": worker.get("last_heartbeat"),
+                }
+            )
 
         return result
 
@@ -190,6 +195,7 @@ async def purge_queue(
 
     # Quick Redis availability check (avoids 5+ second timeout)
     from src.queue import is_redis_available
+
     if not is_redis_available():
         raise HTTPException(
             status_code=503,
@@ -220,5 +226,5 @@ async def purge_queue(
         )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to purge queue: {str(e)}",
+            detail=f"Failed to purge queue: {e!s}",
         )

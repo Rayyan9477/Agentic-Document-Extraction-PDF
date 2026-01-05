@@ -13,15 +13,10 @@ Tests cover:
 
 from __future__ import annotations
 
-import asyncio
-import hashlib
 import os
 import tempfile
-import time
-from datetime import datetime, timedelta, timezone
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -43,6 +38,7 @@ def test_data_dir(tmp_path) -> Path:
 def isolated_user_store(test_data_dir):
     """Create UserStore with isolated storage."""
     from src.security.rbac import UserStore
+
     return UserStore(storage_path=str(test_data_dir / "users.json"))
 
 
@@ -50,6 +46,7 @@ def isolated_user_store(test_data_dir):
 def isolated_rbac_manager(test_data_dir):
     """Create RBACManager with isolated storage."""
     from src.security.rbac import RBACManager
+
     RBACManager.reset_instance()
     manager = RBACManager(
         secret_key="test-secret-key-for-isolated-tests-12345",
@@ -70,7 +67,7 @@ class TestEncryptionConfig:
 
     def test_default_config(self) -> None:
         """Test default encryption configuration."""
-        from src.security.encryption import EncryptionConfig, EncryptionAlgorithm
+        from src.security.encryption import EncryptionAlgorithm, EncryptionConfig
 
         config = EncryptionConfig()
         assert config.algorithm == EncryptionAlgorithm.AES_256_GCM
@@ -79,8 +76,8 @@ class TestEncryptionConfig:
     def test_custom_config(self) -> None:
         """Test custom encryption configuration."""
         from src.security.encryption import (
-            EncryptionConfig,
             EncryptionAlgorithm,
+            EncryptionConfig,
             KeyDerivationFunction,
         )
 
@@ -722,7 +719,7 @@ class TestPermissionAndRole:
 
     def test_role_permissions_mapping(self) -> None:
         """Test role to permissions mapping."""
-        from src.security.rbac import Permission, Role, ROLE_PERMISSIONS
+        from src.security.rbac import ROLE_PERMISSIONS, Permission, Role
 
         # Viewer should have read access
         assert Permission.DOCUMENTS_READ in ROLE_PERMISSIONS[Role.VIEWER]
@@ -985,17 +982,16 @@ class TestRBACManager:
 
         # Validate access with document read permission (should pass)
         payload = isolated_rbac_manager.validate_access(
-            tokens.access_token,
-            required_permissions={Permission.DOCUMENT_READ}
+            tokens.access_token, required_permissions={Permission.DOCUMENT_READ}
         )
         assert payload is not None
 
         # Validate access with user create permission (should fail)
         from src.security.rbac import AuthorizationError
+
         with pytest.raises(AuthorizationError):
             isolated_rbac_manager.validate_access(
-                tokens.access_token,
-                required_permissions={Permission.USER_CREATE}
+                tokens.access_token, required_permissions={Permission.USER_CREATE}
             )
 
 
@@ -1004,7 +1000,7 @@ class TestRequirePermissionsDecorator:
 
     def test_require_permissions(self, isolated_rbac_manager) -> None:
         """Test permission validation via validate_access."""
-        from src.security.rbac import Permission, Role, AuthorizationError
+        from src.security.rbac import AuthorizationError, Permission, Role
 
         # Create user with viewer role (has DOCUMENT_READ permission)
         isolated_rbac_manager.users.create_user(
@@ -1019,21 +1015,19 @@ class TestRequirePermissionsDecorator:
 
         # Should have document read permission
         payload = isolated_rbac_manager.validate_access(
-            tokens.access_token,
-            required_permissions={Permission.DOCUMENT_READ}
+            tokens.access_token, required_permissions={Permission.DOCUMENT_READ}
         )
         assert payload is not None
 
         # Should NOT have document delete permission
         with pytest.raises(AuthorizationError):
             isolated_rbac_manager.validate_access(
-                tokens.access_token,
-                required_permissions={Permission.DOCUMENT_DELETE}
+                tokens.access_token, required_permissions={Permission.DOCUMENT_DELETE}
             )
 
     def test_require_admin(self, isolated_rbac_manager) -> None:
         """Test admin role permission checking via validate_access."""
-        from src.security.rbac import Permission, Role, AuthorizationError
+        from src.security.rbac import AuthorizationError, Permission, Role
 
         # Non-admin user
         isolated_rbac_manager.users.create_user(
@@ -1049,8 +1043,7 @@ class TestRequirePermissionsDecorator:
         # Viewer should not have user management permissions
         with pytest.raises(AuthorizationError):
             isolated_rbac_manager.validate_access(
-                viewer_tokens.access_token,
-                required_permissions={Permission.USER_CREATE}
+                viewer_tokens.access_token, required_permissions={Permission.USER_CREATE}
             )
 
         # Admin user
@@ -1066,14 +1059,12 @@ class TestRequirePermissionsDecorator:
 
         # Admin should have all permissions including user management
         payload = isolated_rbac_manager.validate_access(
-            admin_tokens.access_token,
-            required_permissions={Permission.USER_CREATE}
+            admin_tokens.access_token, required_permissions={Permission.USER_CREATE}
         )
         assert payload is not None
 
         payload = isolated_rbac_manager.validate_access(
-            admin_tokens.access_token,
-            required_permissions={Permission.DOCUMENT_DELETE}
+            admin_tokens.access_token, required_permissions={Permission.DOCUMENT_DELETE}
         )
         assert payload is not None
 
@@ -1094,9 +1085,9 @@ class TestSecurityIntegration:
 
     def test_encrypt_audit_cleanup_flow(self, temp_dir: Path) -> None:
         """Test complete security flow: encrypt, audit, cleanup."""
-        from src.security.audit import AuditEventType, AuditLogger
+        from src.security.audit import AuditLogger
         from src.security.data_cleanup import SecureDataCleanup
-        from src.security.encryption import EncryptionService, FileEncryptor, KeyManager
+        from src.security.encryption import FileEncryptor, KeyManager
 
         # 1. Create and encrypt sensitive file
         key_manager = KeyManager()

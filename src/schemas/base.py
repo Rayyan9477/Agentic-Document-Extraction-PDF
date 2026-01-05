@@ -6,7 +6,7 @@ extraction results, confidence tracking, and schema registry.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, ClassVar
 
@@ -53,12 +53,11 @@ class ConfidenceLevel(str, Enum):
         """Get confidence level from numeric score."""
         if score >= 0.85:
             return cls.HIGH
-        elif score >= 0.70:
+        if score >= 0.70:
             return cls.MEDIUM
-        elif score >= 0.50:
+        if score >= 0.50:
             return cls.LOW
-        else:
-            return cls.VERY_LOW
+        return cls.VERY_LOW
 
 
 @dataclass(slots=True)
@@ -98,11 +97,7 @@ class FieldConfidence:
     @property
     def needs_review(self) -> bool:
         """Check if field needs human review."""
-        return (
-            not self.passes_match
-            or self.confidence_score < 0.50
-            or not self.validation_passed
-        )
+        return not self.passes_match or self.confidence_score < 0.50 or not self.validation_passed
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
@@ -188,7 +183,7 @@ class ExtractionResult:
     vlm_calls: int = 0
     pass1_raw: dict[str, Any] | None = None
     pass2_raw: dict[str, Any] | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -218,10 +213,7 @@ class ExtractionResult:
     @property
     def valid_field_count(self) -> int:
         """Get number of fields that passed validation."""
-        return sum(
-            1 for conf in self.confidence_scores.values()
-            if conf.validation_passed
-        )
+        return sum(1 for conf in self.confidence_scores.values() if conf.validation_passed)
 
     def get_field(self, name: str) -> Any:
         """Get field value by name."""
@@ -246,9 +238,7 @@ class ExtractionResult:
             "document_type": self.document_type.value,
             "schema_name": self.schema_name,
             "fields": self.fields,
-            "confidence_scores": {
-                k: v.to_dict() for k, v in self.confidence_scores.items()
-            },
+            "confidence_scores": {k: v.to_dict() for k, v in self.confidence_scores.items()},
             "overall_confidence": self.overall_confidence,
             "confidence_level": self.confidence_level.value,
             "is_valid": self.is_valid,
@@ -416,19 +406,23 @@ class DocumentSchema:
         if rule.operator == RuleOperator.NOT_EQUALS:
             return source_value != target_value
 
-        if rule.operator in (RuleOperator.GREATER_THAN, RuleOperator.LESS_THAN,
-                            RuleOperator.GREATER_EQUAL, RuleOperator.LESS_EQUAL):
+        if rule.operator in (
+            RuleOperator.GREATER_THAN,
+            RuleOperator.LESS_THAN,
+            RuleOperator.GREATER_EQUAL,
+            RuleOperator.LESS_EQUAL,
+        ):
             try:
                 s = float(source_value) if source_value else 0
                 t = float(target_value) if target_value else 0
 
                 if rule.operator == RuleOperator.GREATER_THAN:
                     return s > t
-                elif rule.operator == RuleOperator.LESS_THAN:
+                if rule.operator == RuleOperator.LESS_THAN:
                     return s < t
-                elif rule.operator == RuleOperator.GREATER_EQUAL:
+                if rule.operator == RuleOperator.GREATER_EQUAL:
                     return s >= t
-                elif rule.operator == RuleOperator.LESS_EQUAL:
+                if rule.operator == RuleOperator.LESS_EQUAL:
                     return s <= t
             except (ValueError, TypeError):
                 return False
@@ -455,8 +449,7 @@ class DocumentSchema:
                 if s_date and t_date:
                     if rule.operator == RuleOperator.DATE_BEFORE:
                         return s_date < t_date
-                    else:
-                        return s_date > t_date
+                    return s_date > t_date
             except Exception:
                 return False
 

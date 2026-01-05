@@ -12,20 +12,15 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timedelta, timezone
 from fastapi import status
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
-from typing import Generator
 
-from src.api.routes.auth import router, get_rbac_manager
+from src.api.routes.auth import get_rbac_manager, router
 from src.security.rbac import (
     RBACManager,
     Role,
-    User,
     TokenPair,
-    TokenExpiredError,
-    TokenInvalidError,
+    User,
 )
 
 
@@ -469,9 +464,7 @@ class TestLoginEndpoint:
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-    def test_login_account_lockout_after_failed_attempts(
-        self, client, test_user, rbac_manager
-    ):
+    def test_login_account_lockout_after_failed_attempts(self, client, test_user, rbac_manager):
         """Test account lockout after multiple failed login attempts."""
         # Attempt login with wrong password 5 times
         for i in range(5):
@@ -643,9 +636,7 @@ class TestRefreshTokenEndpoint:
 
         assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
-    def test_refresh_token_for_deleted_user(
-        self, client, test_user, test_tokens, rbac_manager
-    ):
+    def test_refresh_token_for_deleted_user(self, client, test_user, test_tokens, rbac_manager):
         """Test that refresh fails if user no longer exists."""
         # Delete the user
         rbac_manager.users.delete_user(test_user.user_id)
@@ -768,12 +759,8 @@ class TestEdgeCasesAndSecurity:
             responses.append(response)
 
         # At least one should succeed, others should get conflict
-        success_count = sum(
-            1 for r in responses if r.status_code == status.HTTP_201_CREATED
-        )
-        conflict_count = sum(
-            1 for r in responses if r.status_code == status.HTTP_409_CONFLICT
-        )
+        success_count = sum(1 for r in responses if r.status_code == status.HTTP_201_CREATED)
+        conflict_count = sum(1 for r in responses if r.status_code == status.HTTP_409_CONFLICT)
 
         assert success_count >= 1
 

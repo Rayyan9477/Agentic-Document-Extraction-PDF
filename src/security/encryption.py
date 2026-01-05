@@ -11,14 +11,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import os
 import secrets
 import struct
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Union
+from typing import BinaryIO
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.backends import default_backend
@@ -114,14 +113,7 @@ class EncryptedData:
         algo_bytes = self.algorithm.value.encode("utf-8")
         tag_bytes = self.tag if self.tag else b""
 
-        return (
-            header
-            + algo_bytes
-            + self.salt
-            + self.nonce
-            + tag_bytes
-            + self.ciphertext
-        )
+        return header + algo_bytes + self.salt + self.nonce + tag_bytes + self.ciphertext
 
     @classmethod
     def from_bytes(cls, data: bytes) -> EncryptedData:
@@ -250,15 +242,11 @@ class KeyManager:
         """
         # Check for all-zero key
         if key == bytes(len(key)):
-            raise KeyDerivationError(
-                "Encryption key cannot be all zeros"
-            )
+            raise KeyDerivationError("Encryption key cannot be all zeros")
 
         # Check for single repeating byte
         if len(set(key)) == 1:
-            raise KeyDerivationError(
-                "Encryption key cannot be a single repeating byte"
-            )
+            raise KeyDerivationError("Encryption key cannot be a single repeating byte")
 
         # Check for very low entropy (less than 4 unique bytes)
         unique_bytes = len(set(key))
@@ -271,7 +259,7 @@ class KeyManager:
         for pattern_len in [2, 4, 8]:
             if len(key) >= pattern_len * 2:
                 pattern = key[:pattern_len]
-                repeats = key[:pattern_len * (len(key) // pattern_len)]
+                repeats = key[: pattern_len * (len(key) // pattern_len)]
                 if repeats == pattern * (len(repeats) // pattern_len):
                     raise KeyDerivationError(
                         f"Encryption key has repeating pattern of length {pattern_len}"
@@ -281,9 +269,7 @@ class KeyManager:
         ascending = all(key[i] == (key[0] + i) % 256 for i in range(len(key)))
         descending = all(key[i] == (key[0] - i) % 256 for i in range(len(key)))
         if ascending or descending:
-            raise KeyDerivationError(
-                "Encryption key cannot be sequential bytes"
-            )
+            raise KeyDerivationError("Encryption key cannot be sequential bytes")
 
         # Calculate Shannon entropy
         entropy = self._calculate_entropy(key)
@@ -343,8 +329,7 @@ class KeyManager:
         min_length = 12
         if len(passphrase) < min_length:
             raise KeyDerivationError(
-                f"Passphrase must be at least {min_length} characters, "
-                f"got {len(passphrase)}"
+                f"Passphrase must be at least {min_length} characters, " f"got {len(passphrase)}"
             )
 
         # Character class checks
@@ -360,23 +345,44 @@ class KeyManager:
                 missing.append("lowercase letter")
             if not has_digit:
                 missing.append("digit")
-            raise KeyDerivationError(
-                f"Passphrase must contain at least one: {', '.join(missing)}"
-            )
+            raise KeyDerivationError(f"Passphrase must contain at least one: {', '.join(missing)}")
 
         # Check against common weak passphrases
-        weak_passphrases = frozenset([
-            "password", "password1", "password123", "password1234",
-            "123456789012", "qwertyuiopas", "abcdefghijkl",
-            "letmein12345", "welcome12345", "admin1234567",
-            "master123456", "changeme1234", "secret123456",
-            "passw0rd1234", "p@ssw0rd1234", "test12345678",
-            "default12345", "trustno12345", "sunshine1234",
-            "iloveyou1234", "princess1234", "football1234",
-            "baseball1234", "dragon123456", "monkey123456",
-            "shadow123456", "michael12345", "jennifer1234",
-            "superman1234", "batman123456", "starwars1234",
-        ])
+        weak_passphrases = frozenset(
+            [
+                "password",
+                "password1",
+                "password123",
+                "password1234",
+                "123456789012",
+                "qwertyuiopas",
+                "abcdefghijkl",
+                "letmein12345",
+                "welcome12345",
+                "admin1234567",
+                "master123456",
+                "changeme1234",
+                "secret123456",
+                "passw0rd1234",
+                "p@ssw0rd1234",
+                "test12345678",
+                "default12345",
+                "trustno12345",
+                "sunshine1234",
+                "iloveyou1234",
+                "princess1234",
+                "football1234",
+                "baseball1234",
+                "dragon123456",
+                "monkey123456",
+                "shadow123456",
+                "michael12345",
+                "jennifer1234",
+                "superman1234",
+                "batman123456",
+                "starwars1234",
+            ]
+        )
 
         # Normalize and check
         normalized = passphrase.lower().strip()
@@ -387,20 +393,23 @@ class KeyManager:
 
         # Check for keyboard patterns
         keyboard_patterns = [
-            "qwertyuiop", "asdfghjkl", "zxcvbnm",
-            "1234567890", "0987654321",
-            "qazwsxedc", "rfvtgbyhn",
+            "qwertyuiop",
+            "asdfghjkl",
+            "zxcvbnm",
+            "1234567890",
+            "0987654321",
+            "qazwsxedc",
+            "rfvtgbyhn",
         ]
         for pattern in keyboard_patterns:
             if pattern in normalized:
                 raise KeyDerivationError(
-                    "Passphrase contains keyboard pattern. "
-                    "Please use a stronger passphrase."
+                    "Passphrase contains keyboard pattern. " "Please use a stronger passphrase."
                 )
 
         # Check for excessive repetition
         for i in range(len(passphrase) - 3):
-            if passphrase[i] == passphrase[i+1] == passphrase[i+2] == passphrase[i+3]:
+            if passphrase[i] == passphrase[i + 1] == passphrase[i + 2] == passphrase[i + 3]:
                 raise KeyDerivationError(
                     "Passphrase contains too many consecutive repeated characters"
                 )
@@ -430,7 +439,7 @@ class KeyManager:
                 backend=default_backend(),
             )
             return kdf.derive(password)
-        elif self._config.kdf == KeyDerivationFunction.SCRYPT:
+        if self._config.kdf == KeyDerivationFunction.SCRYPT:
             kdf = Scrypt(
                 salt=salt,
                 length=AES_KEY_SIZE,
@@ -440,8 +449,7 @@ class KeyManager:
                 backend=default_backend(),
             )
             return kdf.derive(password)
-        else:
-            raise KeyDerivationError(f"Unknown KDF: {self._config.kdf}")
+        raise KeyDerivationError(f"Unknown KDF: {self._config.kdf}")
 
     def get_encryption_key(self, salt: bytes | None = None) -> tuple[bytes, bytes]:
         """
@@ -532,10 +540,9 @@ class AESEncryptor:
 
             if self._config.algorithm == EncryptionAlgorithm.AES_256_GCM:
                 return self._encrypt_gcm(plaintext, key, nonce, salt, associated_data)
-            elif self._config.algorithm == EncryptionAlgorithm.AES_256_CBC:
+            if self._config.algorithm == EncryptionAlgorithm.AES_256_CBC:
                 return self._encrypt_cbc(plaintext, key, nonce, salt)
-            else:
-                raise EncryptionError(f"Unsupported algorithm: {self._config.algorithm}")
+            raise EncryptionError(f"Unsupported algorithm: {self._config.algorithm}")
         except Exception as e:
             if isinstance(e, EncryptionError):
                 raise
@@ -625,12 +632,11 @@ class AESEncryptor:
 
             if encrypted_data.algorithm == EncryptionAlgorithm.AES_256_GCM:
                 return self._decrypt_gcm(encrypted_data, key, associated_data)
-            elif encrypted_data.algorithm == EncryptionAlgorithm.AES_256_CBC:
+            if encrypted_data.algorithm == EncryptionAlgorithm.AES_256_CBC:
                 return self._decrypt_cbc(encrypted_data, key)
-            else:
-                raise DecryptionError(f"Unsupported algorithm: {encrypted_data.algorithm}")
+            raise DecryptionError(f"Unsupported algorithm: {encrypted_data.algorithm}")
         except (InvalidTag, IntegrityError) as e:
-            raise DecryptionError(f"Authentication failed: data may be tampered") from e
+            raise DecryptionError("Authentication failed: data may be tampered") from e
         except Exception as e:
             if isinstance(e, DecryptionError):
                 raise
@@ -723,7 +729,9 @@ class FileEncryptor:
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
 
-        output_path = Path(output_path) if output_path else input_path.with_suffix(input_path.suffix + ".enc")
+        output_path = (
+            Path(output_path) if output_path else input_path.with_suffix(input_path.suffix + ".enc")
+        )
 
         # Read and encrypt file contents
         with open(input_path, "rb") as f:
@@ -817,7 +825,9 @@ class FileEncryptor:
                 break
 
             # Create unique nonce for each chunk
-            chunk_nonce = hashlib.sha256(nonce + struct.pack(">Q", chunk_num)).digest()[:GCM_NONCE_SIZE]
+            chunk_nonce = hashlib.sha256(nonce + struct.pack(">Q", chunk_num)).digest()[
+                :GCM_NONCE_SIZE
+            ]
             aesgcm = AESGCM(key)
             encrypted_chunk = aesgcm.encrypt(chunk_nonce, chunk, None)
 

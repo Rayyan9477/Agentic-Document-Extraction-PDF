@@ -110,9 +110,7 @@ class ExtractionConfidence:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
-            "field_confidences": {
-                k: v.to_dict() for k, v in self.field_confidences.items()
-            },
+            "field_confidences": {k: v.to_dict() for k, v in self.field_confidences.items()},
             "overall_confidence": self.overall_confidence,
             "overall_level": self.overall_level.value,
             "recommended_action": self.recommended_action.value,
@@ -355,9 +353,7 @@ class ConfidenceScorer:
         for critical_field in self.critical_fields:
             if critical_field in field_confs:
                 conf = field_confs[critical_field]
-                result.critical_fields_status[critical_field] = (
-                    conf.level != ConfidenceLevel.LOW
-                )
+                result.critical_fields_status[critical_field] = conf.level != ConfidenceLevel.LOW
             else:
                 result.critical_fields_status[critical_field] = False
 
@@ -376,12 +372,11 @@ class ConfidenceScorer:
         result.overall_confidence = weighted_sum / total_weight if total_weight > 0 else 0.0
 
         # Penalize if critical fields have issues
-        critical_issues = sum(
-            1 for status in result.critical_fields_status.values()
-            if not status
-        )
+        critical_issues = sum(1 for status in result.critical_fields_status.values() if not status)
         if critical_issues > 0:
-            penalty = self.PENALTIES["missing_required"] * (critical_issues / max(len(self.critical_fields), 1))
+            penalty = self.PENALTIES["missing_required"] * (
+                critical_issues / max(len(self.critical_fields), 1)
+            )
             result.overall_confidence = max(0.0, result.overall_confidence - penalty)
 
         # Determine overall level
@@ -477,9 +472,7 @@ class ConfidenceScorer:
         low = len(result.low_confidence_fields)
         total = high + medium + low
 
-        parts.append(
-            f"Fields: {high}/{total} high, {medium}/{total} medium, {low}/{total} low"
-        )
+        parts.append(f"Fields: {high}/{total} high, {medium}/{total} medium, {low}/{total} low")
 
         # Critical fields status
         if result.critical_fields_status:

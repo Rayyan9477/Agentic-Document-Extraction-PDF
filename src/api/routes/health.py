@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import platform
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
@@ -42,14 +42,14 @@ def _get_system_info() -> dict[str, Any]:
 
         # Memory info
         memory = psutil.virtual_memory()
-        memory_total_gb = memory.total / (1024 ** 3)
-        memory_used_gb = memory.used / (1024 ** 3)
+        memory_total_gb = memory.total / (1024**3)
+        memory_used_gb = memory.used / (1024**3)
         memory_percent = memory.percent
 
         # Disk info
         disk = psutil.disk_usage("/")
-        disk_total_gb = disk.total / (1024 ** 3)
-        disk_used_gb = disk.used / (1024 ** 3)
+        disk_total_gb = disk.total / (1024**3)
+        disk_used_gb = disk.used / (1024**3)
         disk_percent = disk.percent
 
         return {
@@ -108,9 +108,10 @@ def _check_worker_health() -> dict[str, Any]:
 def _check_vlm_health() -> dict[str, Any]:
     """Check VLM (LM Studio) API connectivity."""
     try:
-        import urllib.request
-        import urllib.error
         import json
+        import urllib.error
+        import urllib.request
+
         from src.config import get_settings
 
         settings = get_settings()
@@ -141,7 +142,7 @@ def _check_vlm_health() -> dict[str, Any]:
                 "status": "unhealthy",
                 "provider": "lm_studio",
                 "endpoint": lm_studio_url,
-                "error": f"Cannot connect to LM Studio: {str(e.reason)}",
+                "error": f"Cannot connect to LM Studio: {e.reason!s}",
                 "connected": False,
             }
         except Exception as e:
@@ -181,6 +182,7 @@ def _check_security_components() -> dict[str, Any]:
     # Check encryption service
     try:
         from src.security.encryption import EncryptionService
+
         enc_service = EncryptionService()
         # Test encryption/decryption cycle
         test_data = b"health_check_test"
@@ -207,7 +209,6 @@ def _check_security_components() -> dict[str, Any]:
 
     # Check audit logging
     try:
-        from src.security.audit import AuditLogger
         status["audit_logging"] = {
             "status": "healthy",
             "phi_masking": True,
@@ -221,7 +222,6 @@ def _check_security_components() -> dict[str, Any]:
 
     # Check RBAC
     try:
-        from src.security.rbac import RBACManager
         status["rbac"] = {
             "status": "healthy",
             "jwt_enabled": True,
@@ -234,7 +234,6 @@ def _check_security_components() -> dict[str, Any]:
 
     # Check data cleanup
     try:
-        from src.security.data_cleanup import SecureDataCleanup
         status["data_cleanup"] = {
             "status": "healthy",
             "secure_deletion": True,
@@ -264,6 +263,7 @@ def _check_monitoring_components() -> dict[str, Any]:
     # Check metrics collector
     try:
         from src.monitoring.metrics import MetricsCollector
+
         collector = MetricsCollector()
         status["metrics"] = {
             "status": "healthy",
@@ -278,7 +278,6 @@ def _check_monitoring_components() -> dict[str, Any]:
 
     # Check alert manager
     try:
-        from src.monitoring.alerts import AlertManager
         status["alerts"] = {
             "status": "healthy",
             "channels_available": ["webhook", "slack", "pagerduty", "log"],
@@ -312,7 +311,7 @@ async def health_check(
     Returns:
         Health status of the API and dependencies.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     components: dict[str, dict[str, Any]] = {
         "api": {
@@ -362,7 +361,7 @@ async def detailed_health_check(
     Returns:
         Detailed health status of all components.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     components: dict[str, dict[str, Any]] = {
         "api": {
@@ -498,15 +497,14 @@ async def security_status() -> dict[str, Any]:
     Returns:
         Security components status and compliance indicators.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     security = _check_security_components()
 
     # Calculate compliance score
     total_components = len(security)
     healthy_components = sum(
-        1 for component in security.values()
-        if component.get("status") == "healthy"
+        1 for component in security.values() if component.get("status") == "healthy"
     )
     compliance_score = (healthy_components / total_components) * 100 if total_components > 0 else 0
 
@@ -543,7 +541,7 @@ async def active_alerts() -> dict[str, Any]:
     Returns:
         List of active alerts.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     try:
         from src.monitoring.alerts import AlertManager
@@ -561,13 +559,15 @@ async def active_alerts() -> dict[str, Any]:
         for alert in active:
             severity = alert.severity.value.lower()
             if severity in by_severity:
-                by_severity[severity].append({
-                    "id": alert.id,
-                    "rule_name": alert.rule_name,
-                    "message": alert.message,
-                    "labels": alert.labels,
-                    "created_at": alert.created_at.isoformat(),
-                })
+                by_severity[severity].append(
+                    {
+                        "id": alert.id,
+                        "rule_name": alert.rule_name,
+                        "message": alert.message,
+                        "labels": alert.labels,
+                        "created_at": alert.created_at.isoformat(),
+                    }
+                )
 
         return {
             "total": len(active),
@@ -600,7 +600,7 @@ async def dependency_status() -> dict[str, Any]:
     Returns:
         Status of each external dependency.
     """
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     dependencies = {
         "redis": _check_redis_health(),
@@ -609,10 +609,7 @@ async def dependency_status() -> dict[str, Any]:
     }
 
     # Calculate overall status
-    healthy_count = sum(
-        1 for dep in dependencies.values()
-        if dep.get("status") == "healthy"
-    )
+    healthy_count = sum(1 for dep in dependencies.values() if dep.get("status") == "healthy")
     total = len(dependencies)
 
     if healthy_count == total:

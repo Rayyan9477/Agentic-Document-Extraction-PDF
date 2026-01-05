@@ -7,32 +7,33 @@ checkpointing, and multi-agent coordination.
 
 # State module is always available (no heavy dependencies)
 from src.pipeline.state import (
+    ConfidenceLevel,
+    DocumentAnalysis,
     ExtractionState,
     ExtractionStatus,
     FieldMetadata,
     PageExtraction,
     ValidationResult,
-    ConfidenceLevel,
-    DocumentAnalysis,
-    create_initial_state,
-    update_state,
-    set_status,
     add_error,
     add_warning,
-    increment_vlm_calls,
     complete_extraction,
+    create_initial_state,
+    deserialize_field_metadata,
+    deserialize_page_extraction,
+    deserialize_state,
+    deserialize_validation_result,
+    fail_extraction,
+    increment_vlm_calls,
     request_human_review,
     request_retry,
-    fail_extraction,
-    serialize_state,
-    deserialize_state,
     serialize_field_metadata,
-    deserialize_field_metadata,
     serialize_page_extraction,
-    deserialize_page_extraction,
+    serialize_state,
     serialize_validation_result,
-    deserialize_validation_result,
+    set_status,
+    update_state,
 )
+
 
 # Runner requires client/preprocessing which may not be available
 try:
@@ -41,6 +42,7 @@ try:
         extract_document,
         get_extraction_result,
     )
+
     _RUNNER_AVAILABLE = True
 except ImportError:
     PipelineRunner = None  # type: ignore[misc, assignment]

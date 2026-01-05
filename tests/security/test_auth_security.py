@@ -12,22 +12,22 @@ Focus areas:
 - Session hijacking prevention
 """
 
-import pytest
 import re
 import time
-from datetime import datetime, timedelta, timezone
+
+import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
 from src.security.rbac import (
+    PasswordManager,
+    Permission,
     RBACManager,
     Role,
-    Permission,
-    User,
-    PasswordManager,
-    TokenManager,
     TokenExpiredError,
     TokenInvalidError,
+    TokenManager,
+    User,
 )
 
 
@@ -49,7 +49,8 @@ def rbac_manager():
 def app(rbac_manager):
     """Create FastAPI application for security testing."""
     from fastapi import FastAPI
-    from src.api.routes.auth import router, get_rbac_manager
+
+    from src.api.routes.auth import get_rbac_manager, router
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
@@ -210,9 +211,9 @@ class TestJWTSecurity:
             payload["roles"] = ["admin"]  # Try to escalate privileges
 
             # Re-encode
-            modified_payload = base64.urlsafe_b64encode(
-                json.dumps(payload).encode()
-            ).decode().rstrip("=")
+            modified_payload = (
+                base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+            )
             fake_token = f"{parts[0]}.{modified_payload}.{parts[2]}"
 
             # Should fail validation

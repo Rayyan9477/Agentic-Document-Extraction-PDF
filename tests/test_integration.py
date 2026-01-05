@@ -9,31 +9,43 @@ Tests the full integration of:
 - Agent coordination
 """
 
-import pytest
-from typing import Any
-from pathlib import Path
 import sys
+from pathlib import Path
+
+import pytest
+
 
 # Add src to path for testing
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.schemas.base import DocumentSchema, DocumentType, SchemaRegistry
-from src.schemas.field_types import FieldType, FieldDefinition, CrossFieldRule, RuleOperator
-from src.schemas.schema_builder import (
-    FieldBuilder,
-    SchemaBuilder,
-    RuleBuilder,
-    NestedSchemaBuilder,
-    generate_zero_shot_schema,
-    create_field,
-    create_schema,
-    clone_schema,
+from src.pipeline.state import (
+    ConfidenceLevel,
+    ExtractionStatus,
+    FieldMetadata,
+    ValidationResult,
+    add_error,
+    add_warning,
+    complete_extraction,
+    create_initial_state,
+    deserialize_state,
+    request_human_review,
+    request_retry,
+    serialize_state,
+    set_status,
+    update_state,
 )
+from src.schemas.base import DocumentType
+from src.schemas.field_types import FieldType, RuleOperator
 from src.schemas.nested_schemas import (
-    NestedSchema,
     NestedSchemaRegistry,
     get_nested_schema,
-    CMS1500_SERVICE_LINE_SCHEMA,
+)
+from src.schemas.schema_builder import (
+    FieldBuilder,
+    NestedSchemaBuilder,
+    RuleBuilder,
+    SchemaBuilder,
+    generate_zero_shot_schema,
 )
 from src.schemas.validators import (
     validate_cpt_code,
@@ -41,32 +53,13 @@ from src.schemas.validators import (
     validate_npi,
     validate_phone,
     validate_ssn,
-    validate_date,
-    validate_currency,
-)
-from src.pipeline.state import (
-    ExtractionState,
-    ExtractionStatus,
-    FieldMetadata,
-    PageExtraction,
-    ValidationResult,
-    ConfidenceLevel,
-    create_initial_state,
-    update_state,
-    set_status,
-    add_error,
-    add_warning,
-    complete_extraction,
-    request_human_review,
-    request_retry,
-    serialize_state,
-    deserialize_state,
 )
 
 
 # =============================================================================
 # Schema Builder Tests
 # =============================================================================
+
 
 class TestZeroShotSchemaGeneration:
     """Tests for zero-shot schema generation."""
@@ -131,11 +124,7 @@ class TestFluentSchemaBuilder:
                 .required()
                 .pattern(r"^INV-\d{6}$")
             )
-            .field(
-                FieldBuilder("total_amount")
-                .type(FieldType.CURRENCY)
-                .min_value(0.01)
-            )
+            .field(FieldBuilder("total_amount").type(FieldType.CURRENCY).min_value(0.01))
             .build()
         )
 
@@ -242,21 +231,9 @@ class TestNestedSchemas:
             NestedSchemaBuilder("custom_line_item")
             .display_name("Custom Line Item")
             .description("A custom line item for testing")
-            .field(
-                FieldBuilder("item_code")
-                .type(FieldType.STRING)
-                .required()
-            )
-            .field(
-                FieldBuilder("quantity")
-                .type(FieldType.INTEGER)
-                .min_value(1)
-            )
-            .field(
-                FieldBuilder("unit_price")
-                .type(FieldType.CURRENCY)
-                .required()
-            )
+            .field(FieldBuilder("item_code").type(FieldType.STRING).required())
+            .field(FieldBuilder("quantity").type(FieldType.INTEGER).min_value(1))
+            .field(FieldBuilder("unit_price").type(FieldType.CURRENCY).required())
             .build()
         )
 
@@ -267,6 +244,7 @@ class TestNestedSchemas:
 # =============================================================================
 # Validator Tests
 # =============================================================================
+
 
 class TestMedicalCodeValidation:
     """Tests for medical code validators."""
@@ -325,6 +303,7 @@ class TestMedicalCodeValidation:
 # Pipeline State Tests
 # =============================================================================
 
+
 class TestPipelineState:
     """Tests for pipeline state management."""
 
@@ -348,10 +327,13 @@ class TestPipelineState:
         """Test state updates."""
         state = create_initial_state("/path/to/doc.pdf")
 
-        updated = update_state(state, {
-            "document_type": "CMS-1500",
-            "selected_schema_name": "cms1500_schema",
-        })
+        updated = update_state(
+            state,
+            {
+                "document_type": "CMS-1500",
+                "selected_schema_name": "cms1500_schema",
+            },
+        )
 
         assert updated["document_type"] == "CMS-1500"
         assert updated["selected_schema_name"] == "cms1500_schema"
@@ -387,9 +369,12 @@ class TestPipelineState:
     def test_complete_extraction(self) -> None:
         """Test extraction completion."""
         state = create_initial_state("/path/to/doc.pdf")
-        state = update_state(state, {
-            "merged_extraction": {"patient_name": {"value": "John Doe"}},
-        })
+        state = update_state(
+            state,
+            {
+                "merged_extraction": {"patient_name": {"value": "John Doe"}},
+            },
+        )
 
         completed = complete_extraction(
             state,
@@ -422,10 +407,13 @@ class TestPipelineState:
     def test_state_serialization(self) -> None:
         """Test state serialization/deserialization."""
         state = create_initial_state("/path/to/doc.pdf")
-        state = update_state(state, {
-            "document_type": "CMS-1500",
-            "overall_confidence": 0.85,
-        })
+        state = update_state(
+            state,
+            {
+                "document_type": "CMS-1500",
+                "overall_confidence": 0.85,
+            },
+        )
 
         serialized = serialize_state(state)
         deserialized = deserialize_state(serialized)
@@ -482,8 +470,8 @@ class TestCustomSchemaIntegration:
         }
 
         # Build schema from definition
-        from src.schemas.schema_builder import SchemaBuilder, FieldBuilder, RuleBuilder
         from src.schemas.field_types import RuleOperator
+        from src.schemas.schema_builder import FieldBuilder, RuleBuilder, SchemaBuilder
 
         builder = SchemaBuilder(
             name=custom_schema["name"],
@@ -550,6 +538,7 @@ class TestCustomSchemaIntegration:
 # =============================================================================
 # Field Metadata Tests
 # =============================================================================
+
 
 class TestFieldMetadata:
     """Tests for field metadata handling."""

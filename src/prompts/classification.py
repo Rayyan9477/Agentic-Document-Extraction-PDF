@@ -10,9 +10,6 @@ Enhanced with:
 - Confidence calibration examples
 """
 
-from typing import Any
-
-
 # Few-shot classification examples for each document type
 CLASSIFICATION_EXAMPLES = """
 ## CLASSIFICATION EXAMPLES - USE THESE AS REFERENCE
@@ -275,15 +272,11 @@ Return a JSON object with the following structure:
 """
 
     if not include_confidence:
-        prompt = prompt.replace(
-            '  "confidence": 0.95,\n',
-            ""
-        )
+        prompt = prompt.replace('  "confidence": 0.95,\n', "")
 
     if not include_reasoning:
         prompt = prompt.replace(
-            '  "reasoning": "Brief explanation of why this classification was chosen",\n',
-            ""
+            '  "reasoning": "Brief explanation of why this classification was chosen",\n', ""
         )
 
     return prompt

@@ -13,20 +13,20 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import httpx
-from openai import OpenAI, AsyncOpenAI, APIConnectionError, APITimeoutError, RateLimitError
+from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, OpenAI, RateLimitError
 from tenacity import (
+    RetryError,
+    before_sleep_log,
     retry,
+    retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
-    before_sleep_log,
-    RetryError,
 )
 
 from src.config import get_logger, get_settings
@@ -39,37 +39,25 @@ logger = get_logger(__name__)
 class LMClientError(Exception):
     """Base exception for LM client errors."""
 
-    pass
-
 
 class LMConnectionError(LMClientError):
     """Raised when connection to LM Studio fails."""
-
-    pass
 
 
 class LMTimeoutError(LMClientError):
     """Raised when request times out."""
 
-    pass
-
 
 class LMRateLimitError(LMClientError):
     """Raised when rate limit is exceeded."""
-
-    pass
 
 
 class LMResponseError(LMClientError):
     """Raised when response parsing fails."""
 
-    pass
-
 
 class LMValidationError(LMClientError):
     """Raised when request validation fails."""
-
-    pass
 
 
 class MessageRole(str, Enum):
@@ -215,7 +203,7 @@ class VisionResponse:
     usage: dict[str, int] = field(default_factory=dict)
     latency_ms: int = 0
     request_id: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @property
     def has_json(self) -> bool:
@@ -457,14 +445,13 @@ class LMStudioClient:
                 raise LMConnectionError(
                     f"Connection failed after {self._max_retries} retries: {last_exception}"
                 ) from e
-            elif isinstance(last_exception, APITimeoutError):
+            if isinstance(last_exception, APITimeoutError):
                 raise LMTimeoutError(
                     f"Request timed out after {self._max_retries} retries: {last_exception}"
                 ) from e
-            else:
-                raise LMClientError(
-                    f"Request failed after {self._max_retries} retries: {last_exception}"
-                ) from e
+            raise LMClientError(
+                f"Request failed after {self._max_retries} retries: {last_exception}"
+            ) from e
 
     @retry(
         stop=stop_after_attempt(3),
@@ -483,10 +470,12 @@ class LMStudioClient:
 
         # System prompt
         if request.system_prompt:
-            messages.append({
-                "role": MessageRole.SYSTEM.value,
-                "content": request.system_prompt,
-            })
+            messages.append(
+                {
+                    "role": MessageRole.SYSTEM.value,
+                    "content": request.system_prompt,
+                }
+            )
 
         # User message with image and text
         user_content: list[dict[str, Any]] = [
@@ -503,10 +492,12 @@ class LMStudioClient:
             },
         ]
 
-        messages.append({
-            "role": MessageRole.USER.value,
-            "content": user_content,
-        })
+        messages.append(
+            {
+                "role": MessageRole.USER.value,
+                "content": user_content,
+            }
+        )
 
         # Send request using thread-local client for thread safety
         client = self._get_client()
@@ -611,10 +602,12 @@ class LMStudioClient:
         messages: list[dict[str, Any]] = []
 
         if request.system_prompt:
-            messages.append({
-                "role": MessageRole.SYSTEM.value,
-                "content": request.system_prompt,
-            })
+            messages.append(
+                {
+                    "role": MessageRole.SYSTEM.value,
+                    "content": request.system_prompt,
+                }
+            )
 
         user_content: list[dict[str, Any]] = [
             {
@@ -630,10 +623,12 @@ class LMStudioClient:
             },
         ]
 
-        messages.append({
-            "role": MessageRole.USER.value,
-            "content": user_content,
-        })
+        messages.append(
+            {
+                "role": MessageRole.USER.value,
+                "content": user_content,
+            }
+        )
 
         try:
             # Send async request using native async client

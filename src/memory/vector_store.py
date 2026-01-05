@@ -7,11 +7,11 @@ Provides unified interface for vector storage backends
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any
-import json
 
 from src.config import get_logger, get_settings
 
@@ -141,8 +141,7 @@ class VectorStoreManager:
 
         except ImportError:
             self._logger.warning(
-                "faiss_not_available",
-                message="Install with: pip install faiss-cpu"
+                "faiss_not_available", message="Install with: pip install faiss-cpu"
             )
             self._initialize_simple()
 
@@ -173,15 +172,12 @@ class VectorStoreManager:
 
         except ImportError:
             self._logger.warning(
-                "qdrant_not_available",
-                message="Install with: pip install qdrant-client"
+                "qdrant_not_available", message="Install with: pip install qdrant-client"
             )
             self._initialize_simple()
         except Exception as e:
             self._logger.warning(
-                "qdrant_connection_failed",
-                error=str(e),
-                message="Falling back to simple store"
+                "qdrant_connection_failed", error=str(e), message="Falling back to simple store"
             )
             self._initialize_simple()
 
@@ -203,7 +199,7 @@ class VectorStoreManager:
                     reason="Invalid JSON format",
                 )
                 self._store = []
-            except (OSError, IOError) as e:
+            except OSError as e:
                 self._logger.warning(
                     "simple_store_load_failed",
                     error=str(e),
@@ -242,10 +238,9 @@ class VectorStoreManager:
         try:
             if self._config.store_type == VectorStoreType.FAISS:
                 return self._add_faiss(id, embedding, metadata)
-            elif self._config.store_type == VectorStoreType.QDRANT:
+            if self._config.store_type == VectorStoreType.QDRANT:
                 return self._add_qdrant(id, embedding, metadata)
-            else:
-                return self._add_simple(id, embedding, metadata)
+            return self._add_simple(id, embedding, metadata)
         except Exception as e:
             self._logger.error("vector_add_failed", error=str(e))
             return False
@@ -306,11 +301,13 @@ class VectorStoreManager:
         # Remove existing entry with same ID
         self._store = [v for v in self._store if v["id"] != id]
 
-        self._store.append({
-            "id": id,
-            "embedding": embedding,
-            "metadata": metadata or {},
-        })
+        self._store.append(
+            {
+                "id": id,
+                "embedding": embedding,
+                "metadata": metadata or {},
+            }
+        )
 
         self._save_simple()
 
@@ -336,10 +333,9 @@ class VectorStoreManager:
         try:
             if self._config.store_type == VectorStoreType.FAISS:
                 return self._search_faiss(embedding, top_k, threshold)
-            elif self._config.store_type == VectorStoreType.QDRANT:
+            if self._config.store_type == VectorStoreType.QDRANT:
                 return self._search_qdrant(embedding, top_k, threshold)
-            else:
-                return self._search_simple(embedding, top_k, threshold)
+            return self._search_simple(embedding, top_k, threshold)
         except Exception as e:
             self._logger.error("vector_search_failed", error=str(e))
             return []
@@ -366,17 +362,19 @@ class VectorStoreManager:
         distances, indices = self._store.search(vec, k)
 
         results = []
-        for score, idx in zip(distances[0], indices[0]):
+        for score, idx in zip(distances[0], indices[0], strict=False):
             if idx < 0 or score < threshold:
                 continue
 
             original_id = self._id_map.get(int(idx))
             if original_id:
-                results.append({
-                    "id": original_id,
-                    "score": float(score),
-                    "metadata": {},
-                })
+                results.append(
+                    {
+                        "id": original_id,
+                        "score": float(score),
+                        "metadata": {},
+                    }
+                )
 
         return results
 
@@ -410,7 +408,6 @@ class VectorStoreManager:
         threshold: float,
     ) -> list[dict[str, Any]]:
         """Search simple store."""
-        import math
 
         results = []
 
@@ -418,11 +415,13 @@ class VectorStoreManager:
             score = self._cosine_similarity(embedding, entry["embedding"])
 
             if score >= threshold:
-                results.append({
-                    "id": entry["id"],
-                    "score": score,
-                    "metadata": entry.get("metadata", {}),
-                })
+                results.append(
+                    {
+                        "id": entry["id"],
+                        "score": score,
+                        "metadata": entry.get("metadata", {}),
+                    }
+                )
 
         # Sort by score
         results.sort(key=lambda x: x["score"], reverse=True)
@@ -433,7 +432,7 @@ class VectorStoreManager:
         """Calculate cosine similarity."""
         import math
 
-        dot = sum(a * b for a, b in zip(vec1, vec2))
+        dot = sum(a * b for a, b in zip(vec1, vec2, strict=False))
         norm1 = math.sqrt(sum(a * a for a in vec1))
         norm2 = math.sqrt(sum(b * b for b in vec2))
 
@@ -487,7 +486,7 @@ class VectorStoreManager:
         """Get number of vectors in store."""
         if self._config.store_type == VectorStoreType.FAISS:
             return self._store.ntotal if self._store else 0
-        elif self._config.store_type == VectorStoreType.QDRANT:
+        if self._config.store_type == VectorStoreType.QDRANT:
             try:
                 info = self._store.get_collection(self._config.qdrant_collection)
                 return info.points_count

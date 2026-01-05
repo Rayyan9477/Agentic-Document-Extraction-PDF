@@ -7,28 +7,26 @@ of configuration options and edge cases.
 
 import json
 import tempfile
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.export.json_exporter import (
-    JSONExporter,
-    JSONExportConfig,
-    ExportFormat,
-    export_to_json,
-)
 from src.export.excel_exporter import (
-    ExcelExporter,
     ExcelExportConfig,
+    ExcelExporter,
     ExcelStyler,
     SheetConfig,
     SheetType,
     export_to_excel,
 )
-from src.pipeline.state import ExtractionStatus, ConfidenceLevel
+from src.export.json_exporter import (
+    ExportFormat,
+    JSONExportConfig,
+    JSONExporter,
+    export_to_json,
+)
+from src.pipeline.state import ConfidenceLevel, ExtractionStatus
 
 
 @pytest.fixture
@@ -244,7 +242,7 @@ class TestJSONExporter:
 
             assert output_path.exists()
 
-            with open(output_path, "r") as f:
+            with open(output_path) as f:
                 loaded = json.load(f)
 
             assert loaded["processing_id"] == "test-proc-001"
@@ -638,7 +636,7 @@ class TestMarkdownExporter:
 
     def test_simple_export(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test simple markdown export."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(style=MarkdownStyle.SIMPLE)
         exporter = MarkdownExporter(config)
@@ -650,7 +648,7 @@ class TestMarkdownExporter:
 
     def test_detailed_export(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test detailed markdown export."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(style=MarkdownStyle.DETAILED)
         exporter = MarkdownExporter(config)
@@ -662,7 +660,7 @@ class TestMarkdownExporter:
 
     def test_summary_export(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test summary markdown export."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(style=MarkdownStyle.SUMMARY)
         exporter = MarkdownExporter(config)
@@ -673,7 +671,7 @@ class TestMarkdownExporter:
 
     def test_technical_export(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test technical markdown export."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(style=MarkdownStyle.TECHNICAL)
         exporter = MarkdownExporter(config)
@@ -683,7 +681,7 @@ class TestMarkdownExporter:
 
     def test_phi_masking(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test PHI masking in markdown export."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(
             style=MarkdownStyle.SIMPLE,
@@ -702,7 +700,7 @@ class TestMarkdownExporter:
         tmp_path: Path,
     ) -> None:
         """Test markdown export to file."""
-        from src.export import export_to_markdown, MarkdownStyle
+        from src.export import MarkdownStyle, export_to_markdown
 
         output_path = tmp_path / "output.md"
         result = export_to_markdown(
@@ -720,7 +718,7 @@ class TestMarkdownExporter:
 
     def test_confidence_indicators(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test confidence indicator emojis."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(
             style=MarkdownStyle.DETAILED,
@@ -734,7 +732,7 @@ class TestMarkdownExporter:
 
     def test_table_of_contents(self, sample_extraction_state: dict[str, Any]) -> None:
         """Test table of contents generation."""
-        from src.export import MarkdownExporter, MarkdownExportConfig, MarkdownStyle
+        from src.export import MarkdownExportConfig, MarkdownExporter, MarkdownStyle
 
         config = MarkdownExportConfig(
             style=MarkdownStyle.DETAILED,

@@ -5,24 +5,18 @@ Tests Celery task definitions, worker management,
 and task status handling.
 """
 
-import tempfile
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch, PropertyMock
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 from src.queue.celery_app import CeleryConfig, create_celery_app
 from src.queue.tasks import (
     TaskResult,
     TaskStatus,
-    get_task_status,
     cancel_task,
+    get_task_status,
 )
 from src.queue.worker import (
-    WorkerManager,
     WorkerConfig,
+    WorkerManager,
     WorkerState,
 )
 
@@ -214,9 +208,7 @@ class TestWorkerManager:
         mock_inspect.active.return_value = {"worker1": []}
         mock_inspect.reserved.return_value = {}
         mock_inspect.scheduled.return_value = {}
-        mock_inspect.stats.return_value = {
-            "worker1": {"total": {}, "pool": {}, "broker": {}}
-        }
+        mock_inspect.stats.return_value = {"worker1": {"total": {}, "pool": {}, "broker": {}}}
         mock_inspect.registered.return_value = {"worker1": ["task1", "task2"]}
         mock_celery.control.inspect.return_value = mock_inspect
 

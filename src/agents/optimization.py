@@ -10,17 +10,16 @@ Provides comprehensive optimization utilities for the multi-agent extraction pip
 - Adaptive agent coordination
 """
 
-import time
 import hashlib
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from functools import lru_cache
-from typing import Any, Callable, TypeVar, Generic
-from collections import defaultdict
 import json
+import threading
+from collections import defaultdict
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any, Generic, TypeVar
 
 from src.config import get_logger
 
@@ -161,7 +160,7 @@ class PerformanceProfiler:
         with self._lock:
             self._current_pipeline = PipelineMetrics(
                 processing_id=processing_id,
-                start_time=datetime.now(timezone.utc),
+                start_time=datetime.now(UTC),
             )
             return self._current_pipeline
 
@@ -169,7 +168,7 @@ class PerformanceProfiler:
         """End current pipeline profiling."""
         with self._lock:
             if self._current_pipeline:
-                self._current_pipeline.end_time = datetime.now(timezone.utc)
+                self._current_pipeline.end_time = datetime.now(UTC)
                 self._history.append(self._current_pipeline)
                 result = self._current_pipeline
                 self._current_pipeline = None
@@ -181,14 +180,14 @@ class PerformanceProfiler:
         metrics = AgentMetrics(
             agent_name=agent_name,
             operation=operation,
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
         self._current_agent = metrics
         return metrics
 
     def end_agent(self, metrics: AgentMetrics) -> None:
         """End agent profiling and add to pipeline."""
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
         with self._lock:
             if self._current_pipeline:
                 self._current_pipeline.add_agent_metrics(metrics)
@@ -353,7 +352,7 @@ class CostOptimizer:
         with self._lock:
             self._usage[model_name]["input"] += input_tokens
             self._usage[model_name]["output"] += output_tokens
-            self._cost_history.append((datetime.now(timezone.utc), model_name, total_cost))
+            self._cost_history.append((datetime.now(UTC), model_name, total_cost))
 
         return total_cost
 
@@ -389,10 +388,7 @@ class CostOptimizer:
         budget_remaining_pct = self.get_remaining_budget() / max(1, self.monthly_budget_usd)
 
         # Filter models by quality threshold
-        viable_models = [
-            m for m in self.models.values()
-            if m.quality_score >= quality_threshold
-        ]
+        viable_models = [m for m in self.models.values() if m.quality_score >= quality_threshold]
 
         if not viable_models:
             viable_models = list(self.models.values())
@@ -498,7 +494,7 @@ class IntelligentCache(Generic[T]):
                 return None
 
             # Check TTL
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             age = (now - entry.created_at).total_seconds()
             if age > entry.ttl_seconds:
                 del self._cache[key]
@@ -531,7 +527,7 @@ class IntelligentCache(Generic[T]):
             if len(self._cache) >= self._max_size:
                 self._evict_lru()
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             self._cache[key] = CacheEntry(
                 key=key,
                 value=value,
@@ -597,6 +593,7 @@ def cached_vlm_call(cache: IntelligentCache[dict[str, Any]]):
     Args:
         cache: Cache instance to use.
     """
+
     def decorator(func: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
         def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
             # Generate cache key from prompt (excluding image data for now)
@@ -617,7 +614,9 @@ def cached_vlm_call(cache: IntelligentCache[dict[str, Any]]):
             logger.debug("vlm_cache_miss", key=cache_key[:8])
 
             return result
+
         return wrapper
+
     return decorator
 
 
@@ -761,7 +760,7 @@ class PerformanceMonitor:
                 "message": f"Pipeline latency {metrics.duration_ms}ms exceeds threshold {self._latency_threshold}ms",
                 "value": metrics.duration_ms,
                 "threshold": self._latency_threshold,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             new_alerts.append(alert)
 
@@ -773,7 +772,7 @@ class PerformanceMonitor:
                 "message": f"Pipeline cost ${metrics.estimated_cost_usd:.4f} exceeds threshold ${self._cost_threshold}",
                 "value": metrics.estimated_cost_usd,
                 "threshold": self._cost_threshold,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             new_alerts.append(alert)
 
@@ -785,7 +784,7 @@ class PerformanceMonitor:
                 "severity": "error" if error_count > 1 else "warning",
                 "message": f"Pipeline had {error_count} errors",
                 "value": error_count,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
             new_alerts.append(alert)
 
@@ -945,7 +944,9 @@ class OptimizedOrchestrator:
             recommendations.append("Consider increasing cache TTL or size - low hit rate detected")
 
         if cost_report["budget_utilization_pct"] > 80:
-            recommendations.append("Budget utilization high - consider using more economical models")
+            recommendations.append(
+                "Budget utilization high - consider using more economical models"
+            )
 
         if profiler_stats.get("avg_vlm_calls", 0) > 4:
             recommendations.append("High VLM call count - consider consolidating prompts")

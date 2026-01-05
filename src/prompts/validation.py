@@ -453,9 +453,7 @@ def _format_validation_rules(rules: list[dict[str, Any]]) -> str:
         operator = rule.get("operator", "")
         message = rule.get("error_message", "")
 
-        formatted.append(
-            f"{i}. **{source}** {operator} **{target}**\n   {message}"
-        )
+        formatted.append(f"{i}. **{source}** {operator} **{target}**\n   {message}")
 
     return "\n\n".join(formatted)
 
@@ -468,9 +466,7 @@ def _format_extracted_data(data: dict[str, Any]) -> str:
         if isinstance(field_data, dict):
             value = field_data.get("value", field_data)
             confidence = field_data.get("confidence", "N/A")
-            formatted.append(
-                f"- **{field_name}**: `{value}` (confidence: {confidence})"
-            )
+            formatted.append(f"- **{field_name}**: `{value}` (confidence: {confidence})")
         else:
             formatted.append(f"- **{field_name}**: `{field_data}`")
 

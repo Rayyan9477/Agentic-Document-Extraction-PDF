@@ -8,10 +8,15 @@ Responsible for:
 - Field-by-field comparison and merging
 """
 
-from typing import Any
 import time
+from typing import Any
 
-from src.agents.base import BaseAgent, AgentResult, ExtractionError
+from src.agents.base import AgentResult, BaseAgent, ExtractionError
+from src.agents.utils import (
+    RetryConfig,
+    build_custom_schema,
+    retry_with_backoff,
+)
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger, get_settings
 from src.pipeline.state import (
@@ -19,31 +24,21 @@ from src.pipeline.state import (
     ExtractionStatus,
     FieldMetadata,
     PageExtraction,
-    update_state,
-    set_status,
-    add_warning,
-    increment_vlm_calls,
-    serialize_page_extraction,
     serialize_field_metadata,
-)
-from src.prompts.grounding_rules import (
-    build_grounded_system_prompt,
-    build_enhanced_system_prompt,
-    build_hallucination_warning,
+    serialize_page_extraction,
+    set_status,
+    update_state,
 )
 from src.prompts.extraction import (
     build_extraction_prompt,
     build_verification_prompt,
-    build_table_extraction_prompt,
 )
-from src.agents.utils import (
-    build_custom_schema,
-    retry_with_backoff,
-    RetryConfig,
-    identify_low_confidence_fields,
+from src.prompts.grounding_rules import (
+    build_enhanced_system_prompt,
+    build_grounded_system_prompt,
 )
-from src.schemas import SchemaRegistry, DocumentSchema, FieldDefinition
-from src.validation import DualPassComparator, ComparisonResult
+from src.schemas import DocumentSchema, FieldDefinition, SchemaRegistry
+from src.validation import ComparisonResult, DualPassComparator
 
 
 logger = get_logger(__name__)
@@ -162,8 +157,7 @@ class ExtractorAgent(BaseAgent):
                     "page_extractions": page_extractions,
                     "merged_extraction": merged_extraction,
                     "field_metadata": {
-                        k: serialize_field_metadata(v)
-                        for k, v in field_metadata.items()
+                        k: serialize_field_metadata(v) for k, v in field_metadata.items()
                     },
                     "status": ExtractionStatus.EXTRACTING.value,
                     "current_step": "extraction_complete",
@@ -221,8 +215,8 @@ class ExtractorAgent(BaseAgent):
         Returns:
             A generic DocumentSchema that extracts common document fields.
         """
-        from src.schemas.schema_builder import SchemaBuilder, FieldBuilder
         from src.schemas import DocumentType, FieldType
+        from src.schemas.schema_builder import FieldBuilder, SchemaBuilder
 
         builder = SchemaBuilder(
             name="generic_document",
@@ -233,29 +227,39 @@ class ExtractorAgent(BaseAgent):
         builder.description("Generic schema for extracting common document information")
 
         # Add common fields using fluent API
-        schema = (builder
-            .field(FieldBuilder("title")
+        schema = (
+            builder.field(
+                FieldBuilder("title")
                 .display_name("Document Title")
                 .type(FieldType.STRING)
                 .description("Main title or heading of the document")
-                .location_hint("top of page, header area"))
-            .field(FieldBuilder("date")
+                .location_hint("top of page, header area")
+            )
+            .field(
+                FieldBuilder("date")
                 .display_name("Date")
                 .type(FieldType.DATE)
                 .description("Primary date on the document")
-                .location_hint("header, top right, or near title"))
-            .field(FieldBuilder("document_type")
+                .location_hint("header, top right, or near title")
+            )
+            .field(
+                FieldBuilder("document_type")
                 .display_name("Document Type")
                 .type(FieldType.STRING)
-                .description("Type or category of the document"))
-            .field(FieldBuilder("summary")
+                .description("Type or category of the document")
+            )
+            .field(
+                FieldBuilder("summary")
                 .display_name("Summary")
                 .type(FieldType.STRING)
-                .description("Brief summary of the document content"))
-            .field(FieldBuilder("key_information")
+                .description("Brief summary of the document content")
+            )
+            .field(
+                FieldBuilder("key_information")
                 .display_name("Key Information")
                 .type(FieldType.STRING)
-                .description("Important facts, figures, or data from the document"))
+                .description("Important facts, figures, or data from the document")
+            )
             .build()
         )
 
@@ -578,7 +582,9 @@ class ExtractorAgent(BaseAgent):
                     # First occurrence - initialize
                     if is_mergeable_type(field_name):
                         # For list/table types, wrap in list if not already
-                        value_list = current_value if isinstance(current_value, list) else [current_value]
+                        value_list = (
+                            current_value if isinstance(current_value, list) else [current_value]
+                        )
                         merged[field_name] = {
                             "value": value_list,
                             "confidence": current_confidence,
@@ -590,42 +596,41 @@ class ExtractorAgent(BaseAgent):
                             "confidence": current_confidence,
                             "source_page": page_number,
                         }
+                # Field exists - merge or overwrite based on type
+                elif is_mergeable_type(field_name):
+                    # Merge list/table values
+                    existing_value = merged[field_name].get("value", [])
+                    if not isinstance(existing_value, list):
+                        existing_value = [existing_value]
+
+                    if current_value is not None:
+                        if isinstance(current_value, list):
+                            existing_value.extend(current_value)
+                        else:
+                            existing_value.append(current_value)
+
+                    # Average confidence for merged values
+                    existing_confidence = merged[field_name].get("confidence", 0.0)
+                    avg_confidence = (existing_confidence + current_confidence) / 2
+
+                    source_pages = merged[field_name].get("source_pages", [])
+                    if page_number not in source_pages:
+                        source_pages.append(page_number)
+
+                    merged[field_name] = {
+                        "value": existing_value,
+                        "confidence": avg_confidence,
+                        "source_pages": source_pages,
+                    }
                 else:
-                    # Field exists - merge or overwrite based on type
-                    if is_mergeable_type(field_name):
-                        # Merge list/table values
-                        existing_value = merged[field_name].get("value", [])
-                        if not isinstance(existing_value, list):
-                            existing_value = [existing_value]
-
-                        if current_value is not None:
-                            if isinstance(current_value, list):
-                                existing_value.extend(current_value)
-                            else:
-                                existing_value.append(current_value)
-
-                        # Average confidence for merged values
-                        existing_confidence = merged[field_name].get("confidence", 0.0)
-                        avg_confidence = (existing_confidence + current_confidence) / 2
-
-                        source_pages = merged[field_name].get("source_pages", [])
-                        if page_number not in source_pages:
-                            source_pages.append(page_number)
-
+                    # For scalar types, keep value with higher confidence
+                    existing_confidence = merged[field_name].get("confidence", 0.0)
+                    if current_confidence > existing_confidence and current_value is not None:
                         merged[field_name] = {
-                            "value": existing_value,
-                            "confidence": avg_confidence,
-                            "source_pages": source_pages,
+                            "value": current_value,
+                            "confidence": current_confidence,
+                            "source_page": page_number,
                         }
-                    else:
-                        # For scalar types, keep value with higher confidence
-                        existing_confidence = merged[field_name].get("confidence", 0.0)
-                        if current_confidence > existing_confidence and current_value is not None:
-                            merged[field_name] = {
-                                "value": current_value,
-                                "confidence": current_confidence,
-                                "source_page": page_number,
-                            }
 
         return merged
 

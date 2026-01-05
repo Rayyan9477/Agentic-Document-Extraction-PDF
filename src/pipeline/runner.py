@@ -8,33 +8,30 @@ Provides the main entry point for running extractions with:
 - Error handling and recovery
 """
 
-from pathlib import Path
-from typing import Any, BinaryIO
-from datetime import datetime, timezone
-import hashlib
 import base64
+import hashlib
 import io
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
-from src.config import get_logger, get_settings
-from src.client.lm_client import LMStudioClient
-from src.pipeline.state import (
-    ExtractionState,
-    ExtractionStatus,
-    ConfidenceLevel,
-    create_initial_state,
-    update_state,
-    set_status,
-    add_error,
-    serialize_state,
-    deserialize_state,
-)
+from src.agents.base import OrchestrationError
 from src.agents.orchestrator import (
     OrchestratorAgent,
     create_extraction_workflow,
     generate_processing_id,
     generate_thread_id,
 )
-from src.agents.base import OrchestrationError
+from src.client.lm_client import LMStudioClient
+from src.config import get_logger, get_settings
+from src.pipeline.state import (
+    ExtractionState,
+    ExtractionStatus,
+    add_error,
+    create_initial_state,
+    set_status,
+    update_state,
+)
 
 
 logger = get_logger(__name__)
@@ -313,7 +310,7 @@ class PipelineRunner:
         Returns:
             Updated state with page images.
         """
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         pdf_path = state.get("pdf_path", "")
 
         self._logger.info("preprocessing_pdf", pdf_path=pdf_path)
@@ -326,9 +323,7 @@ class PipelineRunner:
             pdf_hash = self._calculate_file_hash(pdf_path)
 
             # Update state
-            duration_ms = int(
-                (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
-            )
+            duration_ms = int((datetime.now(UTC) - start_time).total_seconds() * 1000)
 
             state = update_state(
                 state,

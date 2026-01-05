@@ -116,9 +116,7 @@ class DualPassResult:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
-            "field_comparisons": {
-                k: v.to_dict() for k, v in self.field_comparisons.items()
-            },
+            "field_comparisons": {k: v.to_dict() for k, v in self.field_comparisons.items()},
             "overall_agreement_rate": self.overall_agreement_rate,
             "overall_confidence": self.overall_confidence,
             "high_confidence_fields": self.high_confidence_fields,
@@ -265,9 +263,8 @@ class DualPassComparator:
                 merged_value=None,
                 merge_confidence=0.0,
                 requires_review=field_name in self.required_fields,
-                notes="Both passes returned empty" + (
-                    " (required field)" if field_name in self.required_fields else ""
-                ),
+                notes="Both passes returned empty"
+                + (" (required field)" if field_name in self.required_fields else ""),
             )
 
         if p1_empty:
@@ -327,9 +324,7 @@ class DualPassComparator:
             result_type=result_type,
         )
 
-        notes = self._generate_comparison_notes(
-            result_type, similarity, pass1_conf, pass2_conf
-        )
+        notes = self._generate_comparison_notes(result_type, similarity, pass1_conf, pass2_conf)
 
         return FieldComparison(
             field_name=field_name,
@@ -407,6 +402,7 @@ class DualPassComparator:
     def _extract_number(self, text: str) -> float | None:
         """Extract numeric value from text, handling currency and formatting."""
         import re
+
         # Remove currency symbols, commas, and whitespace
         cleaned = re.sub(r"[$,\s]", "", text)
         # Handle parentheses for negative numbers
@@ -547,10 +543,7 @@ class DualPassComparator:
             ComparisonResult.FUZZY_MATCH,
             ComparisonResult.BOTH_EMPTY,
         }
-        agreed = sum(
-            1 for c in comparisons.values()
-            if c.result in agreement_results
-        )
+        agreed = sum(1 for c in comparisons.values() if c.result in agreement_results)
         result.overall_agreement_rate = agreed / len(comparisons)
 
         # Calculate overall confidence

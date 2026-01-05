@@ -13,7 +13,7 @@ import hmac
 import json
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
@@ -319,7 +319,7 @@ class WebhookClient:
                         status_code=response.status_code,
                         response_body=response.text[:500] if response.text else None,
                         attempts=attempts,
-                        delivered_at=datetime.now(timezone.utc).isoformat(),
+                        delivered_at=datetime.now(UTC).isoformat(),
                     )
 
                 # Non-2xx but received response
@@ -371,7 +371,7 @@ class WebhookClient:
 
             # Sleep before retry (exponential backoff)
             if attempt < self._max_retries:
-                sleep_time = self._retry_delay * (2 ** attempt)
+                sleep_time = self._retry_delay * (2**attempt)
                 time.sleep(sleep_time)
 
         # All retries exhausted
@@ -453,7 +453,7 @@ class WebhookClient:
                         status_code=response.status_code,
                         response_body=response.text[:500] if response.text else None,
                         attempts=attempts,
-                        delivered_at=datetime.now(timezone.utc).isoformat(),
+                        delivered_at=datetime.now(UTC).isoformat(),
                     )
 
                 # Non-2xx but received response
@@ -497,7 +497,7 @@ class WebhookClient:
 
             # Sleep before retry (exponential backoff)
             if attempt < self._max_retries:
-                sleep_time = self._retry_delay * (2 ** attempt)
+                sleep_time = self._retry_delay * (2**attempt)
                 await asyncio.sleep(sleep_time)
 
         # All retries exhausted
@@ -585,7 +585,7 @@ def send_webhook_notification(
         event_type=event_type,
         processing_id=processing_id,
         task_id=task_id,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         data=data or {},
     )
 
@@ -619,7 +619,7 @@ async def send_webhook_notification_async(
         event_type=event_type,
         processing_id=processing_id,
         task_id=task_id,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         data=data or {},
     )
 

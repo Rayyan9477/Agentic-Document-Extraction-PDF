@@ -12,7 +12,6 @@ import atexit
 import gzip
 import hashlib
 import json
-import os
 import re
 import threading
 import time
@@ -20,7 +19,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from functools import wraps
 from pathlib import Path
@@ -275,8 +274,11 @@ class PHIMasker:
                 result[key] = cls.mask_dict(value)
             elif isinstance(value, list):
                 result[key] = [
-                    cls.mask(v) if isinstance(v, str) else
-                    cls.mask_dict(v) if isinstance(v, dict) else v
+                    (
+                        cls.mask(v)
+                        if isinstance(v, str)
+                        else cls.mask_dict(v) if isinstance(v, dict) else v
+                    )
                     for v in value
                 ]
             else:
@@ -323,7 +325,7 @@ class AuditLogWriter:
 
     def _get_current_log_file(self) -> Path:
         """Get current log file path."""
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        date_str = datetime.now(UTC).strftime("%Y-%m-%d")
         return self._log_dir / f"audit_{date_str}.jsonl"
 
     def _load_last_hash(self) -> None:
@@ -331,7 +333,7 @@ class AuditLogWriter:
         log_files = sorted(self._log_dir.glob("audit_*.jsonl"), reverse=True)
         for log_file in log_files:
             try:
-                with open(log_file, "r", encoding="utf-8") as f:
+                with open(log_file, encoding="utf-8") as f:
                     lines = f.readlines()
                     if lines:
                         last_event = json.loads(lines[-1])
@@ -353,7 +355,7 @@ class AuditLogWriter:
             return True
 
         # Check date change
-        current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
         if current_date not in self._current_file.name:
             return True
 
@@ -392,7 +394,7 @@ class AuditLogWriter:
     def _cleanup_old_files(self) -> None:
         """Remove old log files beyond retention limit."""
         log_files = sorted(self._log_dir.glob("audit_*"), reverse=True)
-        for old_file in log_files[self._max_files:]:
+        for old_file in log_files[self._max_files :]:
             try:
                 old_file.unlink()
             except OSError:
@@ -549,6 +551,7 @@ class AsyncAuditQueue:
         # (writing to audit log would trigger more audit writes)
         if failed_count > 0:
             import sys
+
             print(
                 f"[AUDIT WARNING] Failed to write {failed_count}/{len(batch)} "
                 f"audit events. Last error: {type(last_error).__name__}: {last_error}",
@@ -703,7 +706,7 @@ class AuditLogger:
         # Create event
         event = AuditEvent(
             event_id=str(uuid.uuid4()),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             event_type=event_type,
             severity=severity,
             outcome=outcome,
@@ -1040,6 +1043,7 @@ def audit_log(
     Returns:
         Decorated function.
     """
+
     def decorator(func: F) -> F:
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -1076,7 +1080,11 @@ def audit_log(
                 logger.log(
                     event_type=event_type,
                     message=message,
-                    severity=AuditSeverity.INFO if outcome == AuditOutcome.SUCCESS else AuditSeverity.ERROR,
+                    severity=(
+                        AuditSeverity.INFO
+                        if outcome == AuditOutcome.SUCCESS
+                        else AuditSeverity.ERROR
+                    ),
                     outcome=outcome,
                     context=context,
                     duration_ms=duration_ms,
@@ -1118,7 +1126,11 @@ def audit_log(
                 logger.log(
                     event_type=event_type,
                     message=message,
-                    severity=AuditSeverity.INFO if outcome == AuditOutcome.SUCCESS else AuditSeverity.ERROR,
+                    severity=(
+                        AuditSeverity.INFO
+                        if outcome == AuditOutcome.SUCCESS
+                        else AuditSeverity.ERROR
+                    ),
                     outcome=outcome,
                     context=context,
                     duration_ms=duration_ms,

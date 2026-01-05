@@ -4,28 +4,41 @@
 import sys
 from pathlib import Path
 
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.schemas.field_types import FieldType, FieldDefinition, CrossFieldRule, RuleOperator
-from src.schemas.base import DocumentSchema, DocumentType, SchemaRegistry
-from src.schemas.schema_builder import (
-    FieldBuilder, SchemaBuilder, RuleBuilder, NestedSchemaBuilder,
-    generate_zero_shot_schema, create_field, create_schema
-)
-from src.schemas.nested_schemas import (
-    NestedSchema, NestedSchemaRegistry, get_nested_schema,
-    CMS1500_SERVICE_LINE_SCHEMA
-)
-from src.schemas.validators import (
-    validate_cpt_code, validate_icd10_code, validate_npi,
-    validate_phone, validate_ssn, validate_date, validate_currency,
-    ValidationResult as VResult
-)
 from src.pipeline.state import (
-    ExtractionState, ExtractionStatus, FieldMetadata, PageExtraction,
-    ValidationResult, ConfidenceLevel, create_initial_state, update_state,
-    set_status, add_error, add_warning, complete_extraction, request_human_review,
-    request_retry, serialize_state, deserialize_state
+    ConfidenceLevel,
+    ExtractionStatus,
+    FieldMetadata,
+    ValidationResult,
+    add_error,
+    add_warning,
+    complete_extraction,
+    create_initial_state,
+    deserialize_state,
+    request_human_review,
+    request_retry,
+    serialize_state,
+    set_status,
+    update_state,
+)
+from src.schemas.base import DocumentType
+from src.schemas.field_types import FieldType
+from src.schemas.nested_schemas import get_nested_schema
+from src.schemas.schema_builder import (
+    FieldBuilder,
+    RuleBuilder,
+    SchemaBuilder,
+    generate_zero_shot_schema,
+)
+from src.schemas.validators import ValidationResult as VResult
+from src.schemas.validators import (
+    validate_cpt_code,
+    validate_icd10_code,
+    validate_npi,
+    validate_phone,
+    validate_ssn,
 )
 
 
@@ -56,16 +69,9 @@ def main():
         .display_name("Invoice")
         .description("Invoice schema")
         .field(
-            FieldBuilder("invoice_number")
-            .type(FieldType.STRING)
-            .required()
-            .pattern(r"^INV-\d+$")
+            FieldBuilder("invoice_number").type(FieldType.STRING).required().pattern(r"^INV-\d+$")
         )
-        .field(
-            FieldBuilder("amount")
-            .type(FieldType.CURRENCY)
-            .min_value(0.01)
-        )
+        .field(FieldBuilder("amount").type(FieldType.CURRENCY).min_value(0.01))
         .rule(
             RuleBuilder("invoice_date", "due_date")
             .date_before()

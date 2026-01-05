@@ -483,10 +483,10 @@ def pad_string(
 
     if align == "left":
         return text.ljust(length, pad_char)
-    elif align == "right":
+    if align == "right":
         return text.rjust(length, pad_char)
-    else:  # center
-        return text.center(length, pad_char)
+    # center
+    return text.center(length, pad_char)
 
 
 def split_on_pattern(

@@ -29,68 +29,67 @@ Usage:
 """
 
 # Dual-pass comparison
-from src.validation.dual_pass import (
-    ComparisonResult,
-    MergeStrategy,
-    FieldComparison,
-    DualPassResult,
-    DualPassComparator,
-    compare_extractions,
-)
-
-# Hallucination pattern detection
-from src.validation.pattern_detector import (
-    HallucinationPattern,
-    PatternSeverity,
-    PatternMatch,
-    PatternDetectionResult,
-    HallucinationPatternDetector,
-    detect_hallucination_patterns,
-)
-
 # Confidence scoring
 from src.validation.confidence import (
-    ConfidenceLevel,
-    ConfidenceAction,
-    FieldConfidence,
-    ExtractionConfidence,
-    ConfidenceScorer,
     AdaptiveConfidenceScorer,
+    ConfidenceAction,
+    ConfidenceLevel,
+    ConfidenceScorer,
+    ExtractionConfidence,
+    FieldConfidence,
     calculate_confidence,
     get_confidence_level,
 )
 
 # Cross-field validation
 from src.validation.cross_field import (
-    RuleType,
-    RuleSeverity,
-    RuleViolation,
     CrossFieldResult,
     CrossFieldRule,
     CrossFieldValidator,
     MedicalDocumentRules,
+    RuleSeverity,
+    RuleType,
+    RuleViolation,
     validate_cross_fields,
+)
+from src.validation.dual_pass import (
+    ComparisonResult,
+    DualPassComparator,
+    DualPassResult,
+    FieldComparison,
+    MergeStrategy,
+    compare_extractions,
+)
+
+# Human review queue
+from src.validation.human_review import (
+    HumanReviewQueue,
+    ReviewField,
+    ReviewPriority,
+    ReviewReason,
+    ReviewStatus,
+    ReviewTask,
+    create_review_task,
 )
 
 # Medical code validation
 from src.validation.medical_codes import (
     CodeType,
-    CodeValidationStatus,
     CodeValidationDetail,
-    MedicalCodeValidationResult,
+    CodeValidationStatus,
     MedicalCodeValidationEngine,
+    MedicalCodeValidationResult,
     validate_medical_codes,
 )
 
-# Human review queue
-from src.validation.human_review import (
-    ReviewPriority,
-    ReviewStatus,
-    ReviewReason,
-    ReviewField,
-    ReviewTask,
-    HumanReviewQueue,
-    create_review_task,
+# Hallucination pattern detection
+from src.validation.pattern_detector import (
+    HallucinationPattern,
+    HallucinationPatternDetector,
+    PatternDetectionResult,
+    PatternMatch,
+    PatternSeverity,
+    detect_hallucination_patterns,
 )
 
 

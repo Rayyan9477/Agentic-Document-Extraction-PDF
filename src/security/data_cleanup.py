@@ -8,21 +8,19 @@ secure memory wiping, and automated data retention management.
 from __future__ import annotations
 
 import gc
-import mmap
 import os
 import secrets
-import shutil
 import stat
-import struct
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import BinaryIO, Callable
 
 import structlog
+
 
 logger = structlog.get_logger(__name__)
 
@@ -98,31 +96,57 @@ class SecureOverwriter:
     DOD_3PASS_PATTERNS: list[bytes | None] = [
         b"\x00",  # Pass 1: All zeros
         b"\xff",  # Pass 2: All ones
-        None,     # Pass 3: Random data
+        None,  # Pass 3: Random data
     ]
 
     # DoD 5220.22-M ECE patterns (7-pass)
     DOD_7PASS_PATTERNS: list[bytes | None] = [
         b"\x00",  # Pass 1: All zeros
         b"\xff",  # Pass 2: All ones
-        None,     # Pass 3: Random
+        None,  # Pass 3: Random
         b"\x00",  # Pass 4: All zeros
         b"\xff",  # Pass 5: All ones
-        None,     # Pass 6: Random
-        None,     # Pass 7: Random
+        None,  # Pass 6: Random
+        None,  # Pass 7: Random
     ]
 
     # Gutmann patterns (35 passes)
     GUTMANN_PATTERNS: list[bytes | None] = [
-        None, None, None, None,  # Passes 1-4: Random
-        b"\x55", b"\xaa", b"\x92\x49\x24", b"\x49\x24\x92",  # Passes 5-8
-        b"\x24\x92\x49", b"\x00", b"\x11", b"\x22",  # Passes 9-12
-        b"\x33", b"\x44", b"\x55", b"\x66",  # Passes 13-16
-        b"\x77", b"\x88", b"\x99", b"\xaa",  # Passes 17-20
-        b"\xbb", b"\xcc", b"\xdd", b"\xee",  # Passes 21-24
-        b"\xff", b"\x92\x49\x24", b"\x49\x24\x92", b"\x24\x92\x49",  # Passes 25-28
-        b"\x6d\xb6\xdb", b"\xb6\xdb\x6d", b"\xdb\x6d\xb6",  # Passes 29-31
-        None, None, None, None,  # Passes 32-35: Random
+        None,
+        None,
+        None,
+        None,  # Passes 1-4: Random
+        b"\x55",
+        b"\xaa",
+        b"\x92\x49\x24",
+        b"\x49\x24\x92",  # Passes 5-8
+        b"\x24\x92\x49",
+        b"\x00",
+        b"\x11",
+        b"\x22",  # Passes 9-12
+        b"\x33",
+        b"\x44",
+        b"\x55",
+        b"\x66",  # Passes 13-16
+        b"\x77",
+        b"\x88",
+        b"\x99",
+        b"\xaa",  # Passes 17-20
+        b"\xbb",
+        b"\xcc",
+        b"\xdd",
+        b"\xee",  # Passes 21-24
+        b"\xff",
+        b"\x92\x49\x24",
+        b"\x49\x24\x92",
+        b"\x24\x92\x49",  # Passes 25-28
+        b"\x6d\xb6\xdb",
+        b"\xb6\xdb\x6d",
+        b"\xdb\x6d\xb6",  # Passes 29-31
+        None,
+        None,
+        None,
+        None,  # Passes 32-35: Random
     ]
 
     def __init__(self, buffer_size: int = 64 * 1024) -> None:
@@ -138,16 +162,15 @@ class SecureOverwriter:
         """Get overwrite patterns for the specified method."""
         if method == DeletionMethod.SIMPLE:
             return [b"\x00"]
-        elif method == DeletionMethod.DOD_3PASS:
+        if method == DeletionMethod.DOD_3PASS:
             return self.DOD_3PASS_PATTERNS.copy()
-        elif method == DeletionMethod.DOD_7PASS:
+        if method == DeletionMethod.DOD_7PASS:
             return self.DOD_7PASS_PATTERNS.copy()
-        elif method == DeletionMethod.GUTMANN:
+        if method == DeletionMethod.GUTMANN:
             return self.GUTMANN_PATTERNS.copy()
-        elif method == DeletionMethod.RANDOM:
+        if method == DeletionMethod.RANDOM:
             return [None, None, None]  # 3 random passes
-        else:
-            return self.DOD_3PASS_PATTERNS.copy()
+        return self.DOD_3PASS_PATTERNS.copy()
 
     def create_pattern_buffer(
         self,
@@ -413,8 +436,7 @@ class SecureDataCleanup:
         # Delete files in parallel
         with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
             futures = {
-                executor.submit(self.secure_delete_file, f, method): f
-                for f in files_to_delete
+                executor.submit(self.secure_delete_file, f, method): f for f in files_to_delete
             }
 
             for future in as_completed(futures):
@@ -594,7 +616,7 @@ class RetentionManager:
         if not directory.exists():
             return []
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         min_age = timedelta(days=policy.min_age_days)
         max_age = timedelta(days=policy.max_age_days)
 
@@ -619,7 +641,7 @@ class RetentionManager:
                 try:
                     mtime = datetime.fromtimestamp(
                         file_path.stat().st_mtime,
-                        tz=timezone.utc,
+                        tz=UTC,
                     )
                     age = now - mtime
 

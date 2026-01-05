@@ -7,19 +7,19 @@ fine-grained permissions, and JWT token management for HIPAA compliance.
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import threading
-import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from enum import Enum, auto
+from datetime import UTC, datetime, timedelta
+from enum import Enum
 from functools import wraps
-from typing import Any, Callable, ClassVar, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 import structlog
 from jose import ExpiredSignatureError, JWTError, jwt
 from passlib.context import CryptContext
+
 
 logger = structlog.get_logger(__name__)
 
@@ -183,9 +183,31 @@ class User:
     is_locked: bool = False
     failed_login_attempts: int = 0
     last_login: datetime | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, Any] = field(default_factory=dict)
+    # SEC-MED-003: Password expiration tracking
+    password_changed_at: datetime | None = field(default=None)
+    password_expires_days: int = 90  # HIPAA compliance: 90-day password rotation
+    # SEC-MED-002: Concurrent session management
+    max_concurrent_sessions: int = 3  # Limit concurrent logins
+    active_session_count: int = 0
+
+    def is_password_expired(self, expiry_days: int | None = None) -> bool:
+        """Check if password has expired based on password_changed_at."""
+        if self.password_changed_at is None:
+            # If never set, use created_at as baseline
+            baseline = self.created_at
+        else:
+            baseline = self.password_changed_at
+
+        days = expiry_days if expiry_days is not None else self.password_expires_days
+        expiry_date = baseline + timedelta(days=days)
+        return datetime.now(UTC) > expiry_date
+
+    def can_create_session(self) -> bool:
+        """Check if user can create a new session (within limit)."""
+        return self.active_session_count < self.max_concurrent_sessions
 
     def get_all_permissions(self) -> set[Permission]:
         """Get all permissions from roles and direct assignments."""
@@ -223,6 +245,12 @@ class User:
             "last_login": self.last_login.isoformat() if self.last_login else None,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "password_changed_at": (
+                self.password_changed_at.isoformat() if self.password_changed_at else None
+            ),
+            "password_expires_days": self.password_expires_days,
+            "max_concurrent_sessions": self.max_concurrent_sessions,
+            "active_session_count": self.active_session_count,
         }
 
 
@@ -260,8 +288,8 @@ class TokenPayload:
             username=data.get("username", ""),
             roles=data.get("roles", []),
             permissions=data.get("permissions", []),
-            exp=datetime.fromtimestamp(data["exp"], tz=timezone.utc),
-            iat=datetime.fromtimestamp(data["iat"], tz=timezone.utc),
+            exp=datetime.fromtimestamp(data["exp"], tz=UTC),
+            iat=datetime.fromtimestamp(data["iat"], tz=UTC),
             jti=data.get("jti", ""),
             token_type=data.get("token_type", "access"),
         )
@@ -372,7 +400,6 @@ class TokenManager:
             refresh_token_expire_days: Refresh token lifetime.
             revocation_storage_path: Path to file for storing revoked tokens.
         """
-        import json
         import os
         from pathlib import Path as FilePath
 
@@ -407,7 +434,7 @@ class TokenManager:
         Returns:
             Tuple of (token, expiration).
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + self._access_expire
 
         payload = TokenPayload(
@@ -439,7 +466,7 @@ class TokenManager:
         Returns:
             Tuple of (token, expiration).
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + self._refresh_expire
 
         payload = TokenPayload(
@@ -524,7 +551,7 @@ class TokenManager:
             return
 
         try:
-            with open(self._revocation_path, "r") as f:
+            with open(self._revocation_path) as f:
                 data = json.load(f)
             self._revoked_tokens = {k: float(v) for k, v in data.get("revoked", {}).items()}
             logger.info("revoked_tokens_loaded", count=len(self._revoked_tokens))
@@ -550,7 +577,7 @@ class TokenManager:
         Returns:
             Number of entries cleaned up.
         """
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
         expired = [jti for jti, exp_time in self._revoked_tokens.items() if exp_time < now]
 
         for jti in expired:
@@ -599,7 +626,7 @@ class TokenManager:
 
         # Check if the revocation entry has expired
         exp_time = self._revoked_tokens[jti]
-        if exp_time < datetime.now(timezone.utc).timestamp():
+        if exp_time < datetime.now(UTC).timestamp():
             # Entry expired, remove it
             del self._revoked_tokens[jti]
             self._save_revoked_tokens()
@@ -629,9 +656,7 @@ class TokenManager:
 
         # Use provided expiration or default to 1 year from now
         if expires_at is None:
-            expires_at = (
-                datetime.now(timezone.utc) + timedelta(days=365)
-            ).timestamp()
+            expires_at = (datetime.now(UTC) + timedelta(days=365)).timestamp()
 
         self._revoked_tokens[jti] = float(expires_at)
         self._save_revoked_tokens()
@@ -665,7 +690,6 @@ class UserStore:
             storage_path: Path to JSON file for user storage.
                          Defaults to ./data/users.json
         """
-        import json
         import os
         from pathlib import Path
 
@@ -694,7 +718,7 @@ class UserStore:
             return
 
         try:
-            with open(self._storage_path, "r") as f:
+            with open(self._storage_path) as f:
                 data = json.load(f)
 
             for user_data in data.get("users", []):
@@ -708,9 +732,21 @@ class UserStore:
                     is_active=user_data.get("is_active", True),
                     is_locked=user_data.get("is_locked", False),
                     failed_login_attempts=user_data.get("failed_login_attempts", 0),
-                    last_login=datetime.fromisoformat(user_data["last_login"]) if user_data.get("last_login") else None,
-                    created_at=datetime.fromisoformat(user_data["created_at"]) if user_data.get("created_at") else datetime.now(timezone.utc),
-                    updated_at=datetime.fromisoformat(user_data["updated_at"]) if user_data.get("updated_at") else datetime.now(timezone.utc),
+                    last_login=(
+                        datetime.fromisoformat(user_data["last_login"])
+                        if user_data.get("last_login")
+                        else None
+                    ),
+                    created_at=(
+                        datetime.fromisoformat(user_data["created_at"])
+                        if user_data.get("created_at")
+                        else datetime.now(UTC)
+                    ),
+                    updated_at=(
+                        datetime.fromisoformat(user_data["updated_at"])
+                        if user_data.get("updated_at")
+                        else datetime.now(UTC)
+                    ),
                     metadata=user_data.get("metadata", {}),
                 )
                 self._users[user.user_id] = user
@@ -728,21 +764,23 @@ class UserStore:
         try:
             users_data = []
             for user in self._users.values():
-                users_data.append({
-                    "user_id": user.user_id,
-                    "username": user.username,
-                    "email": user.email,
-                    "password_hash": user.password_hash,
-                    "roles": [r.value for r in user.roles],
-                    "permissions": [p.value for p in user.permissions],
-                    "is_active": user.is_active,
-                    "is_locked": user.is_locked,
-                    "failed_login_attempts": user.failed_login_attempts,
-                    "last_login": user.last_login.isoformat() if user.last_login else None,
-                    "created_at": user.created_at.isoformat() if user.created_at else None,
-                    "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-                    "metadata": user.metadata,
-                })
+                users_data.append(
+                    {
+                        "user_id": user.user_id,
+                        "username": user.username,
+                        "email": user.email,
+                        "password_hash": user.password_hash,
+                        "roles": [r.value for r in user.roles],
+                        "permissions": [p.value for p in user.permissions],
+                        "is_active": user.is_active,
+                        "is_locked": user.is_locked,
+                        "failed_login_attempts": user.failed_login_attempts,
+                        "last_login": user.last_login.isoformat() if user.last_login else None,
+                        "created_at": user.created_at.isoformat() if user.created_at else None,
+                        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+                        "metadata": user.metadata,
+                    }
+                )
 
             with open(self._storage_path, "w") as f:
                 json.dump({"users": users_data}, f, indent=2)
@@ -818,7 +856,7 @@ class UserStore:
 
     def update_user(self, user: User) -> None:
         """Update user in store."""
-        user.updated_at = datetime.now(timezone.utc)
+        user.updated_at = datetime.now(UTC)
         self._users[user.user_id] = user
         # Persist to file
         self._save_users()
@@ -877,7 +915,7 @@ class UserStore:
         if self._password_manager.verify_password(password, user.password_hash):
             # Reset failed attempts on success
             user.failed_login_attempts = 0
-            user.last_login = datetime.now(timezone.utc)
+            user.last_login = datetime.now(UTC)
 
             # Check if password needs rehash
             if self._password_manager.needs_rehash(user.password_hash):
@@ -1063,15 +1101,11 @@ class RBACManager:
         if required_permissions:
             if not required_permissions <= user_permissions:
                 missing = required_permissions - user_permissions
-                raise AuthorizationError(
-                    f"Missing permissions: {[p.value for p in missing]}"
-                )
+                raise AuthorizationError(f"Missing permissions: {[p.value for p in missing]}")
 
         if required_roles:
             if not required_roles & user_roles:
-                raise AuthorizationError(
-                    f"Required roles: {[r.value for r in required_roles]}"
-                )
+                raise AuthorizationError(f"Required roles: {[r.value for r in required_roles]}")
 
         return payload
 
@@ -1125,7 +1159,7 @@ class RBACManager:
         Returns:
             API key string.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + timedelta(days=expires_days)
 
         payload = {
@@ -1171,9 +1205,7 @@ def require_permissions(*permissions: Permission) -> Callable[[F], F]:
 
             if not user.has_all_permissions(required):
                 missing = required - user.get_all_permissions()
-                raise AuthorizationError(
-                    f"Missing permissions: {[p.value for p in missing]}"
-                )
+                raise AuthorizationError(f"Missing permissions: {[p.value for p in missing]}")
 
             return func(*args, **kwargs)
 
@@ -1202,9 +1234,7 @@ def require_roles(*roles: Role) -> Callable[[F], F]:
                 raise AuthorizationError("No authenticated user")
 
             if not (required & user.roles):
-                raise AuthorizationError(
-                    f"Required roles: {[r.value for r in required]}"
-                )
+                raise AuthorizationError(f"Required roles: {[r.value for r in required]}")
 
             return func(*args, **kwargs)
 

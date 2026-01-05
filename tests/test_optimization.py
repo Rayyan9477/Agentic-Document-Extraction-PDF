@@ -10,40 +10,34 @@ Tests cover:
 - Integration utilities
 """
 
-import time
 import threading
-from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+import time
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
 
 import pytest
 
 from src.agents.optimization import (
+    DEFAULT_MODELS,
     AgentMetrics,
-    PipelineMetrics,
-    PerformanceProfiler,
-    ModelCostTier,
-    ModelConfig,
     CostOptimizer,
     IntelligentCache,
-    CacheEntry,
+    ModelCostTier,
+    OptimizedOrchestrator,
     ParallelExecutor,
     PerformanceMonitor,
-    OptimizedOrchestrator,
+    PerformanceProfiler,
+    PipelineMetrics,
     get_profiler,
-    DEFAULT_MODELS,
 )
 from src.agents.optimization_integration import (
-    ProfiledAgentMixin,
-    profile_operation,
-    create_vlm_cache,
     create_extraction_cache_key,
-    create_validation_cache_key,
-    CostAwareAgent,
-    extract_pages_parallel,
     create_optimized_orchestrator,
-    OptimizedPipeline,
+    create_validation_cache_key,
+    create_vlm_cache,
     estimate_task_complexity,
     format_optimization_report,
+    profile_operation,
 )
 
 
@@ -60,7 +54,7 @@ class TestAgentMetrics:
         metrics = AgentMetrics(
             agent_name="extractor",
             operation="extract",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
 
         assert metrics.agent_name == "extractor"
@@ -71,7 +65,7 @@ class TestAgentMetrics:
 
     def test_duration_calculation(self) -> None:
         """Test duration calculation."""
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         metrics = AgentMetrics(
             agent_name="test",
             operation="test",
@@ -83,7 +77,7 @@ class TestAgentMetrics:
 
         # After end time is set
         time.sleep(0.01)  # 10ms
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
         assert metrics.duration_ms >= 10
 
     def test_avg_vlm_latency(self) -> None:
@@ -91,7 +85,7 @@ class TestAgentMetrics:
         metrics = AgentMetrics(
             agent_name="test",
             operation="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
             vlm_calls=3,
             vlm_latency_ms=300,
         )
@@ -103,7 +97,7 @@ class TestAgentMetrics:
         metrics = AgentMetrics(
             agent_name="test",
             operation="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
 
         assert metrics.avg_vlm_latency_ms == 0.0
@@ -113,7 +107,7 @@ class TestAgentMetrics:
         metrics = AgentMetrics(
             agent_name="test",
             operation="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
             cache_hits=7,
             cache_misses=3,
         )
@@ -125,7 +119,7 @@ class TestAgentMetrics:
         metrics = AgentMetrics(
             agent_name="test",
             operation="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
 
         assert metrics.cache_hit_rate == 0.0
@@ -135,12 +129,12 @@ class TestAgentMetrics:
         metrics = AgentMetrics(
             agent_name="test",
             operation="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
             vlm_calls=2,
             input_tokens=100,
             output_tokens=50,
         )
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
 
         result = metrics.to_dict()
 
@@ -163,7 +157,7 @@ class TestPipelineMetrics:
         """Test pipeline metrics initialization."""
         metrics = PipelineMetrics(
             processing_id="test_123",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
 
         assert metrics.processing_id == "test_123"
@@ -174,13 +168,13 @@ class TestPipelineMetrics:
         """Test adding agent metrics to pipeline."""
         pipeline = PipelineMetrics(
             processing_id="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
 
         agent_metrics = AgentMetrics(
             agent_name="extractor",
             operation="extract",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
             vlm_calls=2,
             vlm_latency_ms=500,
             input_tokens=200,
@@ -197,7 +191,7 @@ class TestPipelineMetrics:
 
     def test_vlm_time_percentage(self) -> None:
         """Test VLM time percentage calculation."""
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         pipeline = PipelineMetrics(
             processing_id="test",
             start_time=start,
@@ -206,7 +200,7 @@ class TestPipelineMetrics:
 
         # Set end time to create 1000ms duration
         time.sleep(0.1)
-        pipeline.end_time = datetime.now(timezone.utc)
+        pipeline.end_time = datetime.now(UTC)
 
         # VLM percentage should be calculated
         assert pipeline.vlm_time_percentage > 0
@@ -557,6 +551,7 @@ class TestParallelExecutor:
 
     def test_execute_parallel(self) -> None:
         """Test parallel execution of tasks."""
+
         def slow_task(x: int) -> int:
             time.sleep(0.01)
             return x * 2
@@ -574,6 +569,7 @@ class TestParallelExecutor:
 
     def test_execute_parallel_with_exceptions(self) -> None:
         """Test handling of exceptions in parallel tasks."""
+
         def failing_task(x: int) -> int:
             if x == 2:
                 raise ValueError("Task failed")
@@ -594,6 +590,7 @@ class TestParallelExecutor:
 
     def test_map_parallel(self) -> None:
         """Test parallel map operation."""
+
         def double(x: int) -> int:
             return x * 2
 
@@ -627,9 +624,9 @@ class TestPerformanceMonitor:
 
         metrics = PipelineMetrics(
             processing_id="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
         metrics.estimated_cost_usd = 0.01
 
         alerts = monitor.process_metrics(metrics)
@@ -639,14 +636,14 @@ class TestPerformanceMonitor:
         """Test latency alert generation."""
         monitor = PerformanceMonitor(alert_latency_threshold_ms=100)
 
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         time.sleep(0.15)  # 150ms
 
         metrics = PipelineMetrics(
             processing_id="test",
             start_time=start,
         )
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
 
         alerts = monitor.process_metrics(metrics)
 
@@ -660,10 +657,10 @@ class TestPerformanceMonitor:
 
         metrics = PipelineMetrics(
             processing_id="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
             estimated_cost_usd=2.0,
         )
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
 
         alerts = monitor.process_metrics(metrics)
 
@@ -676,15 +673,15 @@ class TestPerformanceMonitor:
 
         metrics = PipelineMetrics(
             processing_id="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
         )
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
 
         # Add agent with errors
         agent_metrics = AgentMetrics(
             agent_name="test",
             operation="test",
-            start_time=datetime.now(timezone.utc),
+            start_time=datetime.now(UTC),
             errors=["Error 1", "Error 2"],
         )
         metrics.add_agent_metrics(agent_metrics)
@@ -710,9 +707,9 @@ class TestPerformanceMonitor:
         for i in range(5):
             metrics = PipelineMetrics(
                 processing_id=f"test_{i}",
-                start_time=datetime.now(timezone.utc),
+                start_time=datetime.now(UTC),
             )
-            metrics.end_time = datetime.now(timezone.utc)
+            metrics.end_time = datetime.now(UTC)
             monitor.process_metrics(metrics)
 
         data = monitor.get_dashboard_data()
@@ -725,13 +722,13 @@ class TestPerformanceMonitor:
         monitor = PerformanceMonitor(alert_latency_threshold_ms=1)
 
         # Generate an alert
-        start = datetime.now(timezone.utc)
+        start = datetime.now(UTC)
         time.sleep(0.01)
         metrics = PipelineMetrics(
             processing_id="test",
             start_time=start,
         )
-        metrics.end_time = datetime.now(timezone.utc)
+        metrics.end_time = datetime.now(UTC)
         monitor.process_metrics(metrics)
 
         # Should have alerts

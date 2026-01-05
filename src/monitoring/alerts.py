@@ -8,22 +8,21 @@ channels, alert rules, and escalation policies.
 from __future__ import annotations
 
 import asyncio
-import json
-import threading
-import time
-from abc import ABC, abstractmethod
-from collections import defaultdict
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from enum import Enum
-from queue import Empty, Queue
-from typing import Any, Callable
-from urllib.parse import urljoin
-
-import httpx
 import operator
 import re
+import threading
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from enum import Enum
+from queue import Empty, Queue
+from typing import Any
+
+import httpx
 import structlog
+
 
 logger = structlog.get_logger(__name__)
 
@@ -31,6 +30,7 @@ logger = structlog.get_logger(__name__)
 # ============================================================================
 # Alert Rule Evaluation Engine (CRIT-003 Fix)
 # ============================================================================
+
 
 class AlertConditionEvaluator:
     """
@@ -60,15 +60,13 @@ class AlertConditionEvaluator:
     CONDITION_PATTERN = re.compile(
         r"^\s*"
         r"(?P<left>[\w.]+(?:\s*[+\-*/]\s*[\w.]+)*)"  # Left side (metric or expression)
-        r"\s*(?P<operator>>=|<=|==|!=|>|<)\s*"        # Operator
+        r"\s*(?P<operator>>=|<=|==|!=|>|<)\s*"  # Operator
         r"(?P<right>[\w.'\"]+(?:\s*[+\-*/]\s*[\w.'\"]+)*)"  # Right side (value or expression)
         r"\s*$"
     )
 
     # Pattern to match arithmetic expressions
-    ARITHMETIC_PATTERN = re.compile(
-        r"(?P<var>[\w.]+)\s*(?P<op>[+\-*/])\s*(?P<val>[\w.]+)"
-    )
+    ARITHMETIC_PATTERN = re.compile(r"(?P<var>[\w.]+)\s*(?P<op>[+\-*/])\s*(?P<val>[\w.]+)")
 
     def __init__(self, metrics: dict[str, Any] | None = None) -> None:
         """
@@ -131,7 +129,7 @@ class AlertConditionEvaluator:
             return bool(result), None
 
         except Exception as e:
-            return False, f"Evaluation error: {str(e)}"
+            return False, f"Evaluation error: {e!s}"
 
     def _evaluate_expression(self, expr: str) -> Any:
         """
@@ -146,8 +144,9 @@ class AlertConditionEvaluator:
         expr = expr.strip()
 
         # Check for string literal (single or double quoted)
-        if (expr.startswith("'") and expr.endswith("'")) or \
-           (expr.startswith('"') and expr.endswith('"')):
+        if (expr.startswith("'") and expr.endswith("'")) or (
+            expr.startswith('"') and expr.endswith('"')
+        ):
             return expr[1:-1]
 
         # Check for arithmetic expression
@@ -174,11 +173,11 @@ class AlertConditionEvaluator:
 
                 if arith_op == "+":
                     return var_value + arith_operand
-                elif arith_op == "-":
+                if arith_op == "-":
                     return var_value - arith_operand
-                elif arith_op == "*":
+                if arith_op == "*":
                     return var_value * arith_operand
-                elif arith_op == "/":
+                if arith_op == "/":
                     if arith_operand == 0:
                         return None
                     return var_value / arith_operand
@@ -271,7 +270,7 @@ class AlertRuleEvaluator:
     Evaluates alert rules against current metrics and fires alerts.
     """
 
-    def __init__(self, alert_manager: "AlertManager") -> None:
+    def __init__(self, alert_manager: AlertManager) -> None:
         """
         Initialize the rule evaluator.
 
@@ -339,7 +338,7 @@ class AlertRuleEvaluator:
             )
             return None
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if condition_met:
             # Check for_duration
@@ -358,13 +357,9 @@ class AlertRuleEvaluator:
             self._pending_conditions.pop(rule.name, None)
 
             # Get metric value and threshold for alert
-            metric_name = self._condition_evaluator.get_metric_name_from_condition(
-                rule.condition
-            )
+            metric_name = self._condition_evaluator.get_metric_name_from_condition(rule.condition)
             current_value = metrics.get(metric_name) if metric_name else None
-            threshold = self._condition_evaluator.get_threshold_from_condition(
-                rule.condition
-            )
+            threshold = self._condition_evaluator.get_threshold_from_condition(rule.condition)
 
             # Format message
             message = rule.message_template
@@ -402,16 +397,15 @@ class AlertRuleEvaluator:
             )
 
             return alert
-        else:
-            # Condition not met - clear pending state and potentially resolve
-            self._pending_conditions.pop(rule.name, None)
+        # Condition not met - clear pending state and potentially resolve
+        self._pending_conditions.pop(rule.name, None)
 
-            # Check if there's an active alert for this rule that should be resolved
-            active_alerts = self._alert_manager.get_active_alerts()
-            for alert in active_alerts:
-                if alert.name == rule.name:
-                    self._alert_manager.resolve_alert(alert.fingerprint)
-                    logger.info("alert_auto_resolved", rule=rule.name)
+        # Check if there's an active alert for this rule that should be resolved
+        active_alerts = self._alert_manager.get_active_alerts()
+        for alert in active_alerts:
+            if alert.name == rule.name:
+                self._alert_manager.resolve_alert(alert.fingerprint)
+                logger.info("alert_auto_resolved", rule=rule.name)
 
         return None
 
@@ -458,7 +452,7 @@ class Alert:
     annotations: dict[str, str] = field(default_factory=dict)
     value: float | None = None
     threshold: float | None = None
-    fired_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    fired_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     resolved_at: datetime | None = None
     acknowledged_at: datetime | None = None
     acknowledged_by: str | None = None
@@ -472,6 +466,7 @@ class Alert:
     def _generate_fingerprint(self) -> str:
         """Generate unique fingerprint for deduplication."""
         import hashlib
+
         data = f"{self.name}:{self.source}:{sorted(self.labels.items())}"
         return hashlib.sha256(data.encode()).hexdigest()[:16]
 
@@ -498,12 +493,12 @@ class Alert:
     def resolve(self) -> None:
         """Mark alert as resolved."""
         self.status = AlertStatus.RESOLVED
-        self.resolved_at = datetime.now(timezone.utc)
+        self.resolved_at = datetime.now(UTC)
 
     def acknowledge(self, user: str) -> None:
         """Acknowledge the alert."""
         self.status = AlertStatus.ACKNOWLEDGED
-        self.acknowledged_at = datetime.now(timezone.utc)
+        self.acknowledged_at = datetime.now(UTC)
         self.acknowledged_by = user
 
 
@@ -639,31 +634,43 @@ class SlackHandler(NotificationHandler):
             AlertStatus.SILENCED: ":mute:",
         }
 
-        attachments = [{
-            "color": color_map.get(alert.severity, "#808080"),
-            "title": f"{status_emoji.get(alert.status, '')} [{alert.severity.value.upper()}] {alert.name}",
-            "text": alert.message,
-            "fields": [
-                {"title": "Source", "value": alert.source, "short": True},
-                {"title": "Status", "value": alert.status.value, "short": True},
-            ],
-            "footer": f"Alert ID: {alert.alert_id}",
-            "ts": int(alert.fired_at.timestamp()),
-        }]
+        attachments = [
+            {
+                "color": color_map.get(alert.severity, "#808080"),
+                "title": f"{status_emoji.get(alert.status, '')} [{alert.severity.value.upper()}] {alert.name}",
+                "text": alert.message,
+                "fields": [
+                    {"title": "Source", "value": alert.source, "short": True},
+                    {"title": "Status", "value": alert.status.value, "short": True},
+                ],
+                "footer": f"Alert ID: {alert.alert_id}",
+                "ts": int(alert.fired_at.timestamp()),
+            }
+        ]
 
         if alert.value is not None:
-            attachments[0]["fields"].append({
-                "title": "Value",
-                "value": f"{alert.value:.2f}" if isinstance(alert.value, float) else str(alert.value),
-                "short": True,
-            })
+            attachments[0]["fields"].append(
+                {
+                    "title": "Value",
+                    "value": (
+                        f"{alert.value:.2f}" if isinstance(alert.value, float) else str(alert.value)
+                    ),
+                    "short": True,
+                }
+            )
 
         if alert.threshold is not None:
-            attachments[0]["fields"].append({
-                "title": "Threshold",
-                "value": f"{alert.threshold:.2f}" if isinstance(alert.threshold, float) else str(alert.threshold),
-                "short": True,
-            })
+            attachments[0]["fields"].append(
+                {
+                    "title": "Threshold",
+                    "value": (
+                        f"{alert.threshold:.2f}"
+                        if isinstance(alert.threshold, float)
+                        else str(alert.threshold)
+                    ),
+                    "short": True,
+                }
+            )
 
         message: dict[str, Any] = {
             "username": self._username,
@@ -868,9 +875,9 @@ class EmailHandler(NotificationHandler):
     def _get_severity_color(self, severity: AlertSeverity) -> str:
         """Get HTML color for severity level."""
         color_map = {
-            AlertSeverity.INFO: "#17a2b8",      # Blue
-            AlertSeverity.WARNING: "#ffc107",   # Yellow/Amber
-            AlertSeverity.ERROR: "#dc3545",     # Red
+            AlertSeverity.INFO: "#17a2b8",  # Blue
+            AlertSeverity.WARNING: "#ffc107",  # Yellow/Amber
+            AlertSeverity.ERROR: "#dc3545",  # Red
             AlertSeverity.CRITICAL: "#721c24",  # Dark Red
         }
         return color_map.get(severity, "#6c757d")  # Gray default
@@ -894,8 +901,7 @@ class EmailHandler(NotificationHandler):
         labels_html = ""
         if alert.labels:
             labels_list = "".join(
-                f"<li><strong>{k}:</strong> {v}</li>"
-                for k, v in alert.labels.items()
+                f"<li><strong>{k}:</strong> {v}</li>" for k, v in alert.labels.items()
             )
             labels_html = f"""
             <tr>
@@ -919,7 +925,11 @@ class EmailHandler(NotificationHandler):
 
         threshold_html = ""
         if alert.threshold is not None:
-            threshold_str = f"{alert.threshold:.2f}" if isinstance(alert.threshold, float) else str(alert.threshold)
+            threshold_str = (
+                f"{alert.threshold:.2f}"
+                if isinstance(alert.threshold, float)
+                else str(alert.threshold)
+            )
             threshold_html = f"""
             <tr>
                 <td style="padding: 8px; border-bottom: 1px solid #ddd;"><strong>Threshold</strong></td>
@@ -1028,7 +1038,11 @@ class EmailHandler(NotificationHandler):
             lines.append(f"  Current Value: {value_str}")
 
         if alert.threshold is not None:
-            threshold_str = f"{alert.threshold:.2f}" if isinstance(alert.threshold, float) else str(alert.threshold)
+            threshold_str = (
+                f"{alert.threshold:.2f}"
+                if isinstance(alert.threshold, float)
+                else str(alert.threshold)
+            )
             lines.append(f"  Threshold: {threshold_str}")
 
         if alert.labels:
@@ -1041,14 +1055,16 @@ class EmailHandler(NotificationHandler):
             lines.append(f"  Resolved At: {alert.resolved_at.strftime('%Y-%m-%d %H:%M:%S UTC')}")
             lines.append(f"  Duration: {str(duration).split('.')[0]}")
 
-        lines.extend([
-            f"  Fingerprint: {alert.fingerprint}",
-            "",
-            "=" * 50,
-            "",
-            "This is an automated alert from the Document Extraction System.",
-            "Do not reply to this email.",
-        ])
+        lines.extend(
+            [
+                f"  Fingerprint: {alert.fingerprint}",
+                "",
+                "=" * 50,
+                "",
+                "This is an automated alert from the Document Extraction System.",
+                "Do not reply to this email.",
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -1147,7 +1163,7 @@ class EmailHandler(NotificationHandler):
             )
             return False
 
-    def _send_smtp(self, msg: "MIMEMultipart") -> None:
+    def _send_smtp(self, msg: MIMEMultipart) -> None:
         """
         Send email via SMTP (synchronous, run in executor).
 
@@ -1233,10 +1249,9 @@ class AlertStore:
                     existing.resolved_at = alert.resolved_at
                     self._move_to_history(fingerprint)
                 return False
-            else:
-                # New alert
-                self._active[fingerprint] = alert
-                return True
+            # New alert
+            self._active[fingerprint] = alert
+            return True
 
     def resolve(self, fingerprint: str) -> Alert | None:
         """
@@ -1282,7 +1297,7 @@ class AlertStore:
 
             # Trim history
             if len(self._history) > self._max_history:
-                self._history = self._history[-self._max_history:]
+                self._history = self._history[-self._max_history :]
 
     def get_active(self, severity: AlertSeverity | None = None) -> list[Alert]:
         """Get active alerts."""
@@ -1478,7 +1493,7 @@ class AlertManager:
             # Queue for notification
             channels = channels or [AlertChannel.LOG]
             self._notification_queue.put((alert, channels))
-            self._last_fired[alert.fingerprint] = datetime.now(timezone.utc)
+            self._last_fired[alert.fingerprint] = datetime.now(UTC)
 
         return alert
 
@@ -1555,7 +1570,7 @@ class AlertManager:
             fingerprint: Alert fingerprint.
             duration: Silence duration.
         """
-        self._silences[fingerprint] = datetime.now(timezone.utc) + duration
+        self._silences[fingerprint] = datetime.now(UTC) + duration
         logger.info("alert_silenced", fingerprint=fingerprint, duration=duration)
 
     def unsilence(self, fingerprint: str) -> None:
@@ -1569,7 +1584,7 @@ class AlertManager:
         if fingerprint not in self._silences:
             return False
 
-        if datetime.now(timezone.utc) >= self._silences[fingerprint]:
+        if datetime.now(UTC) >= self._silences[fingerprint]:
             del self._silences[fingerprint]
             return False
 
@@ -1587,7 +1602,7 @@ class AlertManager:
         repeat_interval = rule.repeat_interval if rule else timedelta(minutes=5)
 
         last = self._last_fired[fingerprint]
-        return datetime.now(timezone.utc) - last >= repeat_interval
+        return datetime.now(UTC) - last >= repeat_interval
 
     def cleanup_stale_entries(self, max_age: timedelta | None = None) -> int:
         """
@@ -1605,23 +1620,17 @@ class AlertManager:
         if max_age is None:
             max_age = timedelta(hours=24)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         cleaned = 0
 
         # Clean up expired silences
-        expired_silences = [
-            fp for fp, until in self._silences.items()
-            if now >= until
-        ]
+        expired_silences = [fp for fp, until in self._silences.items() if now >= until]
         for fp in expired_silences:
             del self._silences[fp]
             cleaned += 1
 
         # Clean up old last_fired entries
-        stale_fired = [
-            fp for fp, fired_at in self._last_fired.items()
-            if now - fired_at > max_age
-        ]
+        stale_fired = [fp for fp, fired_at in self._last_fired.items() if now - fired_at > max_age]
         for fp in stale_fired:
             del self._last_fired[fp]
             cleaned += 1

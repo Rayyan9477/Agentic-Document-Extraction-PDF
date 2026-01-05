@@ -11,7 +11,10 @@ from urllib.parse import urlparse, urlunparse
 
 from celery import Celery
 
-from src.config import get_settings
+from src.config import get_logger, get_settings
+
+
+logger = get_logger(__name__)
 
 
 @dataclass(slots=True)
@@ -55,11 +58,13 @@ class CeleryConfig:
     worker_concurrency: int = 4
     result_expires: int = 86400  # 24 hours
     task_default_queue: str = "document_processing"
-    task_routes: dict[str, dict[str, str]] = field(default_factory=lambda: {
-        "src.queue.tasks.process_document_task": {"queue": "document_processing"},
-        "src.queue.tasks.batch_process_task": {"queue": "batch_processing"},
-        "src.queue.tasks.reprocess_failed_task": {"queue": "reprocessing"},
-    })
+    task_routes: dict[str, dict[str, str]] = field(
+        default_factory=lambda: {
+            "src.queue.tasks.process_document_task": {"queue": "document_processing"},
+            "src.queue.tasks.batch_process_task": {"queue": "batch_processing"},
+            "src.queue.tasks.reprocess_failed_task": {"queue": "reprocessing"},
+        }
+    )
 
     def to_celery_config(self) -> dict[str, Any]:
         """Convert to Celery configuration dictionary."""
