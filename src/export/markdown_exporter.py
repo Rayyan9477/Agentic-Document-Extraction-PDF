@@ -183,13 +183,13 @@ class MarkdownExporter:
         validation = state.get("validation", {})
         if validation:
             is_valid = validation.get("is_valid", False)
-            val_status = "" if is_valid else ""
+            val_status = "✅" if is_valid else "❌"
             sections.append(f"**Validation**: {val_status} {'Passed' if is_valid else 'Failed'}")
 
         # Human review status
         if state.get("requires_human_review"):
             reason = state.get("human_review_reason", "")
-            sections.append(f"** Requires Human Review**: {reason}")
+            sections.append(f"**⚠️ Requires Human Review**: {reason}")
 
         return sections
 

@@ -355,7 +355,7 @@ class TestRBACPermissions:
         user = rbac_manager.users.create_user(
             username="regularuser",
             email="regular@example.com",
-            "Password123!",
+            password="Password123!",
             roles={Role.VIEWER},
         )
 

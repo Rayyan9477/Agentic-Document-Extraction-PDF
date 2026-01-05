@@ -398,52 +398,52 @@
 ## Medium Priority Issues
 
 ### MED-001: Duplicate Routing Logic
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/agents/orchestrator.py`
 - **Lines:** 245-290 vs 597-647
 - **Description:** Two methods implement routing logic with subtle differences
 - **Impact:** Maintenance risk, potential behavior inconsistency
-- **Fix:** Consolidate into single routing implementation
+- **Fix:** `_make_routing_decision` now delegates to `_determine_route()` for single source of truth
 
 ---
 
 ### MED-002: Multi-Page Merge Overwrites Values
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/agents/extractor.py`
 - **Lines:** 577-584
 - **Description:** Higher confidence silently replaces lower, no array/list merge for multi-value fields
 - **Impact:** Data loss for array fields spanning multiple pages
-- **Fix:** Implement proper merge logic for array fields
+- **Fix:** Implemented `is_mergeable_type()` function to detect list/table fields and merge them properly
 
 ---
 
 ### MED-003: Cross-Field Validation Passes on Null
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/agents/validator.py`
 - **Lines:** 632-633
 - **Description:** Returns `True` when either value is None
 - **Impact:** Masks extraction failures, allows incomplete data through
-- **Fix:** Return `False` or flag for human review when required fields are null
+- **Fix:** Now returns `(True, "skipped")` for both null and `(False, "inconclusive")` for one null - NOT a pass
 
 ---
 
 ### MED-004: SQLite Defaults to Memory
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/agents/orchestrator.py`
 - **Line:** 167
 - **Description:** If `sqlite_path` is None, defaults to `:memory:`
 - **Impact:** Defeats persistent checkpointing purpose
-- **Fix:** Require path or log warning about non-persistent checkpointing
+- **Fix:** Added clear warning log when using in-memory database explaining checkpoints won't persist
 
 ---
 
 ### MED-005: VLM Call Counter Accumulates
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/agents/analyzer.py`
 - **Line:** 179
 - **Description:** `self._vlm_calls` accumulates across all agent calls
 - **Impact:** Incorrect VLM call counts if agent is reused
-- **Fix:** Reset counter per document or use state-based tracking
+- **Fix:** Added `reset_metrics()` call at start of `process()` method
 
 ---
 
@@ -458,82 +458,82 @@
 ---
 
 ### MED-007: PIL Image Never Closed (runner.py)
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/pipeline/runner.py`
 - **Lines:** 497-514
 - **Description:** `_resize_image` creates PIL Image objects that are never closed
 - **Impact:** Memory/file handle leak on repeated calls
-- **Fix:** Use context manager or explicit `img.close()`
+- **Fix:** Added `img.close()` and `img_resized.close()` in finally block
 
 ---
 
 ### MED-008: PIL Image Leak in Image Enhancer
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/preprocessing/image_enhancer.py`
 - **Line:** 340
 - **Description:** `_cv2_to_page` creates PIL image but never closes it
 - **Impact:** Resource leak
-- **Fix:** Add `pil_image.close()` after saving to buffer
+- **Fix:** Added `pil_image.close()` in finally block after saving to buffer
 
 ---
 
 ### MED-009: PyMuPDF Pixmap Not Freed
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/pipeline/runner.py`
 - **Lines:** 382-415
 - **Description:** PyMuPDF pixmap objects hold native memory that isn't freed
 - **Impact:** Memory accumulation during large document processing
-- **Fix:** Call `pixmap = None` or use context manager pattern
+- **Fix:** Added `pixmap = None` in finally block to release native memory
 
 ---
 
 ### MED-010: No File Locking for JSON Persistence
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/memory/mem0_client.py`
 - **Lines:** 142-165
 - **Description:** JSON files written without locking, no atomic write pattern
 - **Impact:** Concurrent access corrupts data, crash mid-write loses data
-- **Fix:** Implement file locking and atomic write (temp file + rename)
+- **Fix:** Added `self._file_lock = threading.Lock()` and atomic write pattern (temp file + rename)
 
 ---
 
 ### MED-011: SentenceTransformer Never Unloaded
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/memory/mem0_client.py`
 - **Lines:** 167-180
 - **Description:** Large transformer model stays in memory indefinitely
 - **Impact:** Memory consumption, no way to free GPU/CPU memory
-- **Fix:** Add `unload()` method or implement lifecycle management
+- **Fix:** Added `unload_embedder()` method with gc.collect() and torch.cuda.empty_cache()
 
 ---
 
 ### MED-012: Thread-Local Storage Declared But Unused
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/client/lm_client.py`
 - **Lines:** 307-309
 - **Description:** `self._thread_local` declared for thread safety but never used
 - **Impact:** Shared client may have issues under concurrent access
-- **Fix:** Use thread-local storage as intended or remove declaration
+- **Fix:** Thread-local storage IS used - `_get_client()` stores client in `self._thread_local.client`
 
 ---
 
 ### MED-013: execute_async Wraps Sync Code
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/client/connection_manager.py`
 - **Lines:** 422-435
 - **Description:** Async method just wraps synchronous code in executor
 - **Impact:** Blocks executor thread, defeats async purpose
-- **Fix:** Implement true async I/O with httpx.AsyncClient
+- **Fix:** Now detects coroutines and awaits them directly for true async I/O
 
 ---
 
 ### MED-014: check_health_async Uses Blocking Client
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/client/health_monitor.py`
 - **Lines:** 348-356
 - **Description:** Uses run_in_executor with blocking HTTP client
 - **Impact:** Not truly async, wastes thread pool resources
-- **Fix:** Use native httpx.AsyncClient
+- **Fix:** Implemented `_get_async_client()` using native httpx.AsyncClient
 
 ---
 
@@ -548,98 +548,98 @@
 ---
 
 ### MED-016: No Cancellation Support for monitor_continuous
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/client/health_monitor.py`
 - **Lines:** 358-370
 - **Description:** `while True` loop with no cancellation mechanism
 - **Impact:** Cannot gracefully stop monitoring
-- **Fix:** Add cancellation token or event check
+- **Fix:** Added `self._stop_event = threading.Event()` with `_stop_event.set()` in stop_monitoring()
 
 ---
 
 ### MED-017: Missing HCPCS Code Validation
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/schemas/validators.py`
 - **Lines:** 620-631
 - **Description:** `FieldType.HCPCS_CODE` mapped but no validator function exists
 - **Impact:** HCPCS codes not validated
-- **Fix:** Implement `validate_hcpcs_code()` function
+- **Fix:** Implemented `validate_hcpcs_code()` function with Level II code pattern matching
 
 ---
 
 ### MED-018: Missing NDC Code Validation
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/schemas/validators.py`
 - **Description:** `FieldType.NDC_CODE` exists but no validation
 - **Impact:** NDC codes for pharmacy claims not validated
-- **Fix:** Implement `validate_ndc_code()` function
+- **Fix:** Implemented `validate_ndc_code()` with 10/11-digit format support
 
 ---
 
 ### MED-019: Missing Taxonomy Code Validation
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/schemas/validators.py`
 - **Description:** `FieldType.TAXONOMY_CODE` defined but no validator
 - **Impact:** Provider taxonomy codes not validated
-- **Fix:** Implement `validate_taxonomy_code()` function
+- **Fix:** Implemented `validate_taxonomy_code()` for 10-character alphanumeric codes
 
 ---
 
 ### MED-020: Missing Revenue Code Validation
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/validation/medical_codes.py`
 - **Description:** UB-04 revenue codes (0100-0999) not validated
 - **Impact:** Invalid revenue codes not detected
-- **Fix:** Add revenue code validation for UB-04 forms
+- **Fix:** Implemented `validate_revenue_code()` for UB-04 4-digit codes
 
 ---
 
 ### MED-021: Duplicate ConfidenceLevel Enum
-- **Status:** [ ] Not Started
+- **Status:** [ ] Not Started (Low Priority Refactor)
 - **Files:** `src/schemas/base.py:43-61` and `src/validation/confidence.py:28-33`
 - **Description:** Two different implementations with different thresholds
 - **Impact:** Inconsistent confidence classification
-- **Fix:** Unify to single implementation
+- **Fix:** Unify to single implementation (requires careful refactoring to avoid import issues)
 
 ---
 
 ### MED-022: Human Review Queue Not Thread-Safe
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/validation/human_review.py`
 - **Lines:** 196-220
 - **Description:** `_tasks` dict modified without locking
 - **Impact:** Race conditions in multi-threaded environments
-- **Fix:** Add threading.Lock for dict operations
+- **Fix:** Added `self._lock = threading.Lock()` with `with self._lock:` guards on all methods accessing `_tasks`
 
 ---
 
 ### MED-023: Non-Thread-Safe Metrics Singleton
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/monitoring/metrics.py`
 - **Lines:** 96-100
 - **Description:** Singleton pattern lacks thread synchronization
 - **Impact:** Race condition if multiple threads initialize
-- **Fix:** Add threading.Lock with double-checked locking
+- **Fix:** Already has `cls._lock` with double-checked locking in `get_instance()`
 
 ---
 
 ### MED-024: Missing Emojis in Markdown Exporter
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/export/markdown_exporter.py`
 - **Lines:** 186-187, 356, 358, 395-396, 407-408
 - **Description:** Empty string placeholders where emojis should be
 - **Impact:** Markdown output missing status indicators
-- **Fix:** Add appropriate emoji characters
+- **Fix:** Added ✅/❌ for validation status and ⚠️ for human review required
 
 ---
 
 ### MED-025: Alert Silences/Last Fired Memory Leak
-- **Status:** [ ] Not Started
+- **Status:** [x] Completed (2025-01-05)
 - **File:** `src/monitoring/alerts.py`
 - **Lines:** 563-564
 - **Description:** `_silences` and `_last_fired` dicts grow unbounded
 - **Impact:** Memory leak in long-running processes
-- **Fix:** Implement periodic cleanup of old entries
+- **Fix:** Added `cleanup_stale_entries()` method to remove expired silences and old last_fired entries
 
 ---
 
@@ -928,9 +928,9 @@
 |-------|-------------|-----------|-------------|-------------|------------|
 | Phase 1 | 13 | 13 | 0 | 0 | 100% |
 | Phase 2 | 13 | 13 | 0 | 0 | 100% |
-| Phase 3 | 13 | 4 | 0 | 9 | 31% |
-| Phase 4 | 10 | 4 | 0 | 6 | 40% |
-| **Total** | **49** | **34** | **0** | **15** | **69%** |
+| Phase 3 | 13 | 12 | 0 | 1 | 92% |
+| Phase 4 | 10 | 6 | 0 | 4 | 60% |
+| **Total** | **49** | **44** | **0** | **5** | **90%** |
 
 ### Issue Resolution Summary
 
@@ -938,7 +938,7 @@
 |----------|-------|----------|-----------|
 | Critical | 13 | 13 | 0 |
 | High | 20 | 20 | 0 |
-| Medium | 25 | 0 | 25 |
+| Medium | 25 | 23 | 2 |
 | Low | 10 | 10 | 0 |
 | Security | 10 | 7 | 3 |
 | Missing Features | 28 | 24 | 4 |
@@ -994,6 +994,11 @@
 | 2025-12-14 | Implemented MISS-BE-012: Created result storage module and connected preview endpoint to actual stored results | Claude Code |
 | 2025-12-14 | Updated tracker: Marked SEC-CRIT-001, SEC-CRIT-002, SEC-HIGH-002/003/004 as complete (fixed in HIGH priority batch) | Claude Code |
 | 2025-12-14 | Updated tracker: Marked MISS-FE-001 through MISS-FE-009 and MISS-FE-013 as complete (fixed in CRIT/HIGH batches) | Claude Code |
+| 2025-01-05 | Verified MED-001 through MED-020 were already fixed in codebase | Claude Code |
+| 2025-01-05 | Fixed MED-022: Added threading.Lock to HumanReviewQueue for thread-safe operations | Claude Code |
+| 2025-01-05 | Fixed MED-024: Added ✅/❌/⚠️ emojis to markdown_exporter.py for status indicators | Claude Code |
+| 2025-01-05 | Fixed MED-025: Added cleanup_stale_entries() method to AlertManager for memory leak prevention | Claude Code |
+| 2025-01-05 | Updated tracker: Marked 23 of 25 Medium priority issues as complete (92% of Phase 3) | Claude Code |
 
 ---
 

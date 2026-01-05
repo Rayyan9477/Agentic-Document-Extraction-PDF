@@ -425,7 +425,7 @@ class PDFProcessor:
                 # Check for forms and annotations
                 has_forms = any(page.widgets() for page in doc)
                 has_annotations = any(
-                    len(page.annots()) > 0 for page in doc if page.annots() is not None
+                    len(list(page.annots() or [])) > 0 for page in doc
                 )
 
                 # Generate processing ID

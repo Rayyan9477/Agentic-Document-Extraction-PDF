@@ -1589,6 +1589,52 @@ class AlertManager:
         last = self._last_fired[fingerprint]
         return datetime.now(timezone.utc) - last >= repeat_interval
 
+    def cleanup_stale_entries(self, max_age: timedelta | None = None) -> int:
+        """
+        Clean up stale entries from _silences and _last_fired dicts.
+
+        This prevents unbounded memory growth in long-running processes.
+        Removes expired silences and old last_fired entries.
+
+        Args:
+            max_age: Maximum age for last_fired entries. Defaults to 24 hours.
+
+        Returns:
+            Number of entries cleaned up.
+        """
+        if max_age is None:
+            max_age = timedelta(hours=24)
+
+        now = datetime.now(timezone.utc)
+        cleaned = 0
+
+        # Clean up expired silences
+        expired_silences = [
+            fp for fp, until in self._silences.items()
+            if now >= until
+        ]
+        for fp in expired_silences:
+            del self._silences[fp]
+            cleaned += 1
+
+        # Clean up old last_fired entries
+        stale_fired = [
+            fp for fp, fired_at in self._last_fired.items()
+            if now - fired_at > max_age
+        ]
+        for fp in stale_fired:
+            del self._last_fired[fp]
+            cleaned += 1
+
+        if cleaned > 0:
+            logger.debug(
+                "alert_manager_cleanup",
+                silences_cleaned=len(expired_silences),
+                last_fired_cleaned=len(stale_fired),
+            )
+
+        return cleaned
+
     def _notification_worker(self) -> None:
         """Background worker for sending notifications."""
         loop = asyncio.new_event_loop()

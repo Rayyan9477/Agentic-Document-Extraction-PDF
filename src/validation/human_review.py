@@ -15,6 +15,7 @@ Provides:
 """
 
 import json
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -216,6 +217,10 @@ class HumanReviewQueue:
             ReviewPriority.LOW,
         ]
 
+        # Thread lock for concurrent access protection
+        # Protects _tasks dict from race conditions in multi-threaded environments
+        self._lock = threading.Lock()
+
         # Load existing queue if path exists
         if self.queue_path and self.queue_path.exists():
             self._load_queue()
@@ -281,10 +286,11 @@ class HumanReviewQueue:
             overall_confidence=overall_confidence,
         )
 
-        self._tasks[task_id] = task
+        with self._lock:
+            self._tasks[task_id] = task
 
-        if self.auto_persist:
-            self._save_queue()
+            if self.auto_persist:
+                self._save_queue()
 
         logger.info(
             f"Created review task {task_id} for {document_path} "
@@ -295,7 +301,8 @@ class HumanReviewQueue:
 
     def get_task(self, task_id: str) -> ReviewTask | None:
         """Get a specific task by ID."""
-        return self._tasks.get(task_id)
+        with self._lock:
+            return self._tasks.get(task_id)
 
     def get_next_task(
         self,
@@ -312,14 +319,15 @@ class HumanReviewQueue:
         Returns:
             Next ReviewTask or None if queue is empty.
         """
-        for priority in self._priority_order:
-            for task in self._tasks.values():
-                if (
-                    task.status == ReviewStatus.PENDING
-                    and task.priority == priority
-                ):
-                    if assignee:
-                        task.status = ReviewStatus.IN_PROGRESS
+        with self._lock:
+            for priority in self._priority_order:
+                for task in self._tasks.values():
+                    if (
+                        task.status == ReviewStatus.PENDING
+                        and task.priority == priority
+                    ):
+                        if assignee:
+                            task.status = ReviewStatus.IN_PROGRESS
                         task.assigned_to = assignee
                         if self.auto_persist:
                             self._save_queue()
@@ -342,19 +350,20 @@ class HumanReviewQueue:
         Returns:
             True if assignment successful.
         """
-        task = self._tasks.get(task_id)
-        if not task:
-            return False
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
 
-        if task.status != ReviewStatus.PENDING:
-            logger.warning(f"Cannot assign task {task_id}: status is {task.status.value}")
-            return False
+            if task.status != ReviewStatus.PENDING:
+                logger.warning(f"Cannot assign task {task_id}: status is {task.status.value}")
+                return False
 
-        task.status = ReviewStatus.IN_PROGRESS
-        task.assigned_to = assignee
+            task.status = ReviewStatus.IN_PROGRESS
+            task.assigned_to = assignee
 
-        if self.auto_persist:
-            self._save_queue()
+            if self.auto_persist:
+                self._save_queue()
 
         logger.info(f"Assigned task {task_id} to {assignee}")
         return True
@@ -378,27 +387,28 @@ class HumanReviewQueue:
         Returns:
             True if completion successful.
         """
-        task = self._tasks.get(task_id)
-        if not task:
-            return False
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
 
-        if task.status not in (ReviewStatus.PENDING, ReviewStatus.IN_PROGRESS):
-            logger.warning(f"Cannot complete task {task_id}: status is {task.status.value}")
-            return False
+            if task.status not in (ReviewStatus.PENDING, ReviewStatus.IN_PROGRESS):
+                logger.warning(f"Cannot complete task {task_id}: status is {task.status.value}")
+                return False
 
-        task.status = ReviewStatus.COMPLETED
-        task.completed_at = datetime.now(timezone.utc)
-        task.corrections = corrections or {}
-        task.reviewer_decision = decision
+            task.status = ReviewStatus.COMPLETED
+            task.completed_at = datetime.now(timezone.utc)
+            task.corrections = corrections or {}
+            task.reviewer_decision = decision
 
-        # Update field corrections
-        for field in task.fields_to_review:
-            if field.field_name in task.corrections:
-                field.corrected_value = task.corrections[field.field_name]
-            field.reviewer_notes = reviewer_notes
+            # Update field corrections
+            for field in task.fields_to_review:
+                if field.field_name in task.corrections:
+                    field.corrected_value = task.corrections[field.field_name]
+                field.reviewer_notes = reviewer_notes
 
-        if self.auto_persist:
-            self._save_queue()
+            if self.auto_persist:
+                self._save_queue()
 
         logger.info(f"Completed task {task_id} with decision: {decision}")
         return True
@@ -418,16 +428,17 @@ class HumanReviewQueue:
         Returns:
             True if rejection successful.
         """
-        task = self._tasks.get(task_id)
-        if not task:
-            return False
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
 
-        task.status = ReviewStatus.REJECTED
-        task.completed_at = datetime.now(timezone.utc)
-        task.reviewer_decision = f"rejected: {reason}"
+            task.status = ReviewStatus.REJECTED
+            task.completed_at = datetime.now(timezone.utc)
+            task.reviewer_decision = f"rejected: {reason}"
 
-        if self.auto_persist:
-            self._save_queue()
+            if self.auto_persist:
+                self._save_queue()
 
         logger.info(f"Rejected task {task_id}: {reason}")
         return True
@@ -447,42 +458,46 @@ class HumanReviewQueue:
         Returns:
             True if escalation successful.
         """
-        task = self._tasks.get(task_id)
-        if not task:
-            return False
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task:
+                return False
 
-        task.status = ReviewStatus.ESCALATED
-        task.priority = ReviewPriority.CRITICAL
-        task.reviewer_decision = f"escalated: {reason}"
+            task.status = ReviewStatus.ESCALATED
+            task.priority = ReviewPriority.CRITICAL
+            task.reviewer_decision = f"escalated: {reason}"
 
-        if self.auto_persist:
-            self._save_queue()
+            if self.auto_persist:
+                self._save_queue()
 
         logger.info(f"Escalated task {task_id}: {reason}")
         return True
 
     def get_pending_count(self) -> int:
         """Get count of pending tasks."""
-        return sum(
-            1 for t in self._tasks.values()
-            if t.status == ReviewStatus.PENDING
-        )
+        with self._lock:
+            return sum(
+                1 for t in self._tasks.values()
+                if t.status == ReviewStatus.PENDING
+            )
 
     def get_pending_by_priority(self) -> dict[str, int]:
         """Get pending task counts by priority."""
-        counts = {p.value: 0 for p in ReviewPriority}
-        for task in self._tasks.values():
-            if task.status == ReviewStatus.PENDING:
-                counts[task.priority.value] += 1
-        return counts
+        with self._lock:
+            counts = {p.value: 0 for p in ReviewPriority}
+            for task in self._tasks.values():
+                if task.status == ReviewStatus.PENDING:
+                    counts[task.priority.value] += 1
+            return counts
 
     def get_tasks_by_status(
         self,
         status: ReviewStatus,
     ) -> list[ReviewTask]:
         """Get all tasks with a specific status."""
-        return [
-            t for t in self._tasks.values()
+        with self._lock:
+            return [
+                t for t in self._tasks.values()
             if t.status == status
         ]
 
@@ -499,45 +514,47 @@ class HumanReviewQueue:
         Returns:
             Corrected extraction data or None.
         """
-        task = self._tasks.get(task_id)
-        if not task or task.status != ReviewStatus.COMPLETED:
-            return None
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if not task or task.status != ReviewStatus.COMPLETED:
+                return None
 
-        # Start with extracted data and apply corrections
-        corrected = dict(task.extracted_data)
-        corrected.update(task.corrections)
+            # Start with extracted data and apply corrections
+            corrected = dict(task.extracted_data)
+            corrected.update(task.corrections)
 
-        return corrected
+            return corrected
 
     def get_queue_statistics(self) -> dict[str, Any]:
         """Get statistics about the review queue."""
-        total = len(self._tasks)
-        by_status = {s.value: 0 for s in ReviewStatus}
-        by_priority = {p.value: 0 for p in ReviewPriority}
-        by_reason: dict[str, int] = {}
+        with self._lock:
+            total = len(self._tasks)
+            by_status = {s.value: 0 for s in ReviewStatus}
+            by_priority = {p.value: 0 for p in ReviewPriority}
+            by_reason: dict[str, int] = {}
 
-        for task in self._tasks.values():
-            by_status[task.status.value] += 1
-            by_priority[task.priority.value] += 1
-            for reason in task.reasons:
-                by_reason[reason.value] = by_reason.get(reason.value, 0) + 1
+            for task in self._tasks.values():
+                by_status[task.status.value] += 1
+                by_priority[task.priority.value] += 1
+                for reason in task.reasons:
+                    by_reason[reason.value] = by_reason.get(reason.value, 0) + 1
 
-        # Calculate average wait time for completed tasks
-        wait_times = []
-        for task in self._tasks.values():
-            if task.status == ReviewStatus.COMPLETED and task.completed_at:
-                wait_time = (task.completed_at - task.created_at).total_seconds()
-                wait_times.append(wait_time)
+            # Calculate average wait time for completed tasks
+            wait_times = []
+            for task in self._tasks.values():
+                if task.status == ReviewStatus.COMPLETED and task.completed_at:
+                    wait_time = (task.completed_at - task.created_at).total_seconds()
+                    wait_times.append(wait_time)
 
-        avg_wait_time = sum(wait_times) / len(wait_times) if wait_times else 0
+            avg_wait_time = sum(wait_times) / len(wait_times) if wait_times else 0
 
-        return {
-            "total_tasks": total,
-            "by_status": by_status,
-            "by_priority": by_priority,
-            "by_reason": by_reason,
-            "average_wait_time_seconds": avg_wait_time,
-        }
+            return {
+                "total_tasks": total,
+                "by_status": by_status,
+                "by_priority": by_priority,
+                "by_reason": by_reason,
+                "average_wait_time_seconds": avg_wait_time,
+            }
 
     def _calculate_priority(
         self,
