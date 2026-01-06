@@ -34,7 +34,9 @@
       "Bash(cd:*)",
       "Bash(git -C \"d:/Repo/PDF\" log --oneline -10)",
       "Bash(python3:*)",
-      "Bash(LM_STUDIO_MODEL=\"qwen/qwen3-vl-8b\" python:*)"
+      "Bash(LM_STUDIO_MODEL=\"qwen/qwen3-vl-8b\" python:*)",
+      "Bash(powershell -Command \"Get-Process -Name python* | Where-Object {$_Path -like ''*anaconda*''} | ForEach-Object { Stop-Process -Id $_Id -Force }\")",
+      "Bash(powershell -Command:*)"
     ],
     "deny": [],
     "ask": []
