@@ -22,7 +22,6 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 
 # Project root directory
@@ -64,7 +63,7 @@ class ServerConfig:
     cwd: Path
     port: int
     health_url: str
-    env: Optional[dict] = None
+    env: dict | None = None
 
 
 def log(message: str, color: str = "", prefix: str = "MAIN") -> None:
@@ -112,7 +111,7 @@ def check_python_version() -> bool:
 def check_node_version() -> bool:
     """Check Node.js is installed."""
     try:
-        result = subprocess.run(["node", "--version"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["node", "--version"], check=False, capture_output=True, text=True, timeout=10)
         if result.returncode == 0:
             version = result.stdout.strip()
             log_success(f"Node.js version: {version}")
@@ -128,7 +127,7 @@ def check_npm() -> bool:
     try:
         result = subprocess.run(
             ["npm", "--version"],
-            capture_output=True,
+            check=False, capture_output=True,
             text=True,
             timeout=10,
             shell=True,  # Required for Windows
@@ -232,7 +231,6 @@ def check_env_file() -> bool:
 def run_checks() -> bool:
     """Run all dependency and configuration checks."""
     log(f"{Color.BOLD}Running pre-flight checks...{Color.RESET}")
-    print()
 
     checks = [
         ("Python Version", check_python_version),
@@ -252,7 +250,6 @@ def run_checks() -> bool:
             log_error(f"{name} check failed: {e}")
             all_passed = False
 
-    print()
     if all_passed:
         log_success("All checks passed!")
     else:
@@ -516,11 +513,9 @@ class ProcessManager:
                     )  # Longer timeout for frontend
 
             # Print access information
-            print()
             log(f"{Color.BOLD}{'='*50}{Color.RESET}")
             log(f"{Color.BOLD}PDF Document Extraction System is running!{Color.RESET}")
             log(f"{Color.BOLD}{'='*50}{Color.RESET}")
-            print()
             if run_backend:
                 log(f"  Backend API:    {Color.CYAN}http://localhost:8000{Color.RESET}")
                 log(f"  API Docs:       {Color.CYAN}http://localhost:8000/docs{Color.RESET}")
@@ -530,9 +525,7 @@ class ProcessManager:
                 log(
                     f"  Frontend:       {Color.MAGENTA}http://localhost:{frontend_port}{Color.RESET}"
                 )
-            print()
             log(f"Press {Color.BOLD}Ctrl+C{Color.RESET} to stop all servers")
-            print()
 
             # Monitor processes
             while self.running:
@@ -548,7 +541,7 @@ class ProcessManager:
                 try:
                     await asyncio.wait_for(self._shutdown_event.wait(), timeout=1.0)
                     break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
 
         except KeyboardInterrupt:
@@ -571,7 +564,6 @@ async def main_async(args: argparse.Namespace) -> int:
             log_error("Pre-flight checks failed. Use --skip-checks to bypass.")
             return 1
 
-    print()
 
     # Determine what to run
     if args.both:
@@ -626,17 +618,14 @@ Examples:
     args = parser.parse_args()
 
     # Print banner
-    print()
-    print(f"{Color.BOLD}{Color.BLUE}{'='*50}{Color.RESET}")
+    print(f"\n{Color.BOLD}{Color.BLUE}{'='*50}{Color.RESET}")
     print(f"{Color.BOLD}{Color.BLUE}  PDF Document Extraction System{Color.RESET}")
     print(f"{Color.BOLD}{Color.BLUE}  4-Agent Architecture with Anti-Hallucination{Color.RESET}")
-    print(f"{Color.BOLD}{Color.BLUE}{'='*50}{Color.RESET}")
-    print()
+    print(f"{Color.BOLD}{Color.BLUE}{'='*50}{Color.RESET}\n")
 
     try:
         return asyncio.run(main_async(args))
     except KeyboardInterrupt:
-        print()
         log("Interrupted by user", Color.YELLOW)
         return 130
 

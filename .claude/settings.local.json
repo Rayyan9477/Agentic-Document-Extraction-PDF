@@ -36,7 +36,12 @@
       "Bash(python3:*)",
       "Bash(LM_STUDIO_MODEL=\"qwen/qwen3-vl-8b\" python:*)",
       "Bash(powershell -Command \"Get-Process -Name python* | Where-Object {$_Path -like ''*anaconda*''} | ForEach-Object { Stop-Process -Id $_Id -Force }\")",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(ruff check:*)",
+      "Bash(pip show:*)",
+      "Bash(yamllint:*)",
+      "Bash(python -c:*)",
+      "Bash(python -m json.tool:*)"
     ],
     "deny": [],
     "ask": []

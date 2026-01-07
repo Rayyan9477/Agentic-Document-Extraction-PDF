@@ -10,7 +10,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Optional
+
 
 # ANSI colors
 RED = "\033[91m"
@@ -34,27 +34,23 @@ test_results = {
 def log_success(msg: str) -> None:
     test_results["passed"] += 1
     test_results["total"] += 1
-    print(f"{GREEN}[OK]{RESET} {msg}")
 
 
 def log_error(msg: str) -> None:
     test_results["failed"] += 1
     test_results["total"] += 1
-    print(f"{RED}[FAIL]{RESET} {msg}")
 
 
 def log_info(msg: str) -> None:
-    print(f"{BLUE}[INFO]{RESET} {msg}")
+    pass
 
 
 def log_warning(msg: str) -> None:
-    print(f"{YELLOW}[WARN]{RESET} {msg}")
+    pass
 
 
 def print_section(title: str) -> None:
-    print(f"\n{BOLD}{BLUE}{'='*70}{RESET}")
-    print(f"{BOLD}{BLUE}{title}{RESET}")
-    print(f"{BOLD}{BLUE}{'='*70}{RESET}\n")
+    pass
 
 
 def test_server_running() -> bool:
@@ -70,7 +66,7 @@ def test_server_running() -> bool:
                 return True
     except Exception as e:
         log_error(f"Backend server not running: {e}")
-        log_warning(f"Start server with: python main.py")
+        log_warning("Start server with: python main.py")
         return False
     return False
 
@@ -111,7 +107,7 @@ def test_auth_routes_exist() -> bool:
     return all_exist
 
 
-def test_signup() -> tuple[bool, Optional[str], str]:
+def test_signup() -> tuple[bool, str | None, str]:
     """Test user signup."""
     print_section("User Signup - Success Case")
 
@@ -141,14 +137,13 @@ def test_signup() -> tuple[bool, Optional[str], str]:
             result = json.loads(response.read().decode("utf-8"))
 
             if response.status == 201:
-                log_success(f"Signup successful")
+                log_success("Signup successful")
                 log_info(f"Username: {username}")
                 log_info(f"Email: {email}")
                 log_info(f"Message: {result.get('message', 'OK')}")
                 return True, username, password
-            else:
-                log_error(f"Unexpected status {response.status}")
-                return False, None, password
+            log_error(f"Unexpected status {response.status}")
+            return False, None, password
 
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
@@ -170,7 +165,6 @@ def test_signup_errors() -> bool:
     all_passed = True
 
     # Test 1: Duplicate username
-    print(f"{BOLD}Test: Duplicate Username{RESET}")
     try:
         data = json.dumps({
             "username": "testuser_duplicate",
@@ -211,7 +205,6 @@ def test_signup_errors() -> bool:
         all_passed = False
 
     # Test 2: Password mismatch
-    print(f"\n{BOLD}Test: Password Mismatch{RESET}")
     try:
         data = json.dumps({
             "username": "testuser_pwd",
@@ -242,7 +235,6 @@ def test_signup_errors() -> bool:
         all_passed = False
 
     # Test 3: Invalid email
-    print(f"\n{BOLD}Test: Invalid Email{RESET}")
     try:
         data = json.dumps({
             "username": "testuser_email",
@@ -277,7 +269,6 @@ def test_signup_errors() -> bool:
 
 def test_login(username: str, password: str = "TestPassword123!") -> tuple[bool, str | None]:
     """Test user login."""
-    print(f"\n{BOLD}4. Testing User Login{RESET}")
 
     try:
         data = json.dumps({
@@ -308,12 +299,10 @@ def test_login(username: str, password: str = "TestPassword123!") -> tuple[bool,
                     log_info(f"  Refresh token: {refresh_token[:30]}...")
                     log_info(f"  Token type: {result.get('token_type', 'bearer')}")
                     return True, access_token
-                else:
-                    log_error("Login succeeded but no tokens received")
-                    return False, None
-            else:
-                log_error(f"Login returned status {response.status}")
+                log_error("Login succeeded but no tokens received")
                 return False, None
+            log_error(f"Login returned status {response.status}")
+            return False, None
 
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
@@ -330,7 +319,6 @@ def test_login(username: str, password: str = "TestPassword123!") -> tuple[bool,
 
 def test_get_user(access_token: str) -> bool:
     """Test get current user."""
-    print(f"\n{BOLD}5. Testing Get Current User{RESET}")
 
     try:
         req = urllib.request.Request(
@@ -352,9 +340,8 @@ def test_get_user(access_token: str) -> bool:
                 log_info(f"  Email: {result.get('email')}")
                 log_info(f"  Roles: {', '.join(result.get('roles', []))}")
                 return True
-            else:
-                log_error(f"Get user returned status {response.status}")
-                return False
+            log_error(f"Get user returned status {response.status}")
+            return False
 
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
@@ -371,7 +358,6 @@ def test_get_user(access_token: str) -> bool:
 
 def test_cors() -> bool:
     """Test CORS configuration."""
-    print(f"\n{BOLD}6. Testing CORS Configuration{RESET}")
 
     try:
         req = urllib.request.Request(
@@ -390,18 +376,16 @@ def test_cors() -> bool:
                 if cors_origin:
                     log_success(f"CORS is configured: {cors_origin}")
                     return True
-                else:
-                    log_warning("CORS headers not found (might still work)")
-                    return True
+                log_warning("CORS headers not found (might still work)")
+                return True
         except urllib.error.HTTPError as e:
             # Check CORS headers even on error
             cors_origin = e.headers.get("Access-Control-Allow-Origin")
             if cors_origin:
                 log_success(f"CORS is configured: {cors_origin}")
                 return True
-            else:
-                log_error("CORS headers not found - this will cause frontend issues")
-                return False
+            log_error("CORS headers not found - this will cause frontend issues")
+            return False
 
     except Exception as e:
         log_error(f"CORS test error: {e}")
@@ -410,9 +394,6 @@ def test_cors() -> bool:
 
 def main() -> int:
     """Main test runner."""
-    print(f"\n{BOLD}{BLUE}{'='*60}{RESET}")
-    print(f"{BOLD}{BLUE}  Authentication Flow Test{RESET}")
-    print(f"{BOLD}{BLUE}{'='*60}{RESET}")
 
     # Test 1: Server running
     if not test_server_running():
@@ -448,15 +429,7 @@ def main() -> int:
     cors_ok = test_cors()
 
     # Summary
-    print(f"\n{BOLD}{GREEN}{'='*60}{RESET}")
-    print(f"{BOLD}{GREEN}  SUCCESS: All Authentication Tests Passed!{RESET}")
-    print(f"{BOLD}{GREEN}{'='*60}{RESET}")
 
-    print(f"\n{BOLD}Frontend should now work!{RESET}")
-    print(f"  1. Visit: {FRONTEND_URL}/signup")
-    print(f"  2. Create an account")
-    print(f"  3. Login at: {FRONTEND_URL}/login")
-    print()
 
     return 0
 
@@ -465,5 +438,4 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print(f"\n{YELLOW}Test interrupted by user{RESET}")
         sys.exit(130)

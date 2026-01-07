@@ -170,7 +170,8 @@ jobs:
       - name: Check for vulnerable dependencies
         run: |
           pip install -r requirements.txt
-          pip-audit --desc --format json --output pip-audit-report.json || echo "{}" > pip-audit-report.json
+          pip-audit --desc --format json \
+            --output pip-audit-report.json || echo "{}" > pip-audit-report.json
           pip-audit --desc || true
         continue-on-error: true
 
@@ -210,7 +211,8 @@ jobs:
 
       - name: Test Docker image
         run: |
-          docker run --rm doc-extraction:${{ github.sha }} python -c "import src; print('Import successful')"
+          docker run --rm doc-extraction:${{ github.sha }} \
+            python -c "import src; print('Import successful')"
 
   # ---------------------------------------------------------------------------
   # Job 5: Integration Tests (on main branch only)
