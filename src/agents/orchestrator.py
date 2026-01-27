@@ -63,10 +63,19 @@ NODE_RETRY = "retry"
 NODE_HUMAN_REVIEW = "human_review"
 NODE_COMPLETE = "complete"
 
+# VLM-first pipeline nodes
+NODE_LAYOUT = "layout"
+NODE_COMPONENTS = "components"
+NODE_SCHEMA = "schema"
+
 # Routing decisions
 ROUTE_COMPLETE = "complete"
 ROUTE_RETRY = "retry"
 ROUTE_HUMAN_REVIEW = "human_review"
+
+# Pipeline routing decisions
+ROUTE_ADAPTIVE = "adaptive"  # VLM-first pipeline
+ROUTE_LEGACY = "legacy"  # Hardcoded schema pipeline
 
 
 class OrchestratorAgent(BaseAgent):
@@ -128,9 +137,16 @@ class OrchestratorAgent(BaseAgent):
         # Agent instances - injected via build_workflow()
         # These are NOT lazy loaded. They're passed in when build_workflow() is called
         # and remain None until that point. The workflow graph owns the lifecycle.
+        
+        # Legacy pipeline agents
         self._analyzer: BaseAgent | None = None
         self._extractor: BaseAgent | None = None
         self._validator: BaseAgent | None = None
+        
+        # VLM-first pipeline agents
+        self._layout_agent: BaseAgent | None = None
+        self._component_agent: BaseAgent | None = None
+        self._schema_agent: BaseAgent | None = None
 
         # Workflow graph
         self._workflow: StateGraph | None = None
@@ -341,42 +357,88 @@ class OrchestratorAgent(BaseAgent):
         analyzer: BaseAgent,
         extractor: BaseAgent,
         validator: BaseAgent,
+        layout_agent: BaseAgent | None = None,
+        component_agent: BaseAgent | None = None,
+        schema_agent: BaseAgent | None = None,
     ) -> StateGraph:
         """
         Build the LangGraph workflow with all agent nodes.
 
+        Supports both legacy (hardcoded schema) and VLM-first (adaptive) pipelines.
+        If VLM-first agents are provided, the workflow will route conditionally
+        based on the use_adaptive_extraction flag in state.
+
         Args:
             preprocess_fn: Function to preprocess PDF and create initial state.
-            analyzer: Analyzer agent instance.
-            extractor: Extractor agent instance.
-            validator: Validator agent instance.
+            analyzer: Analyzer agent instance (legacy pipeline).
+            extractor: Extractor agent instance (both pipelines).
+            validator: Validator agent instance (both pipelines).
+            layout_agent: Optional layout analysis agent (VLM-first pipeline).
+            component_agent: Optional component detector agent (VLM-first pipeline).
+            schema_agent: Optional schema generator agent (VLM-first pipeline).
 
         Returns:
             Configured StateGraph workflow.
         """
+        # Store agent references
         self._analyzer = analyzer
         self._extractor = extractor
         self._validator = validator
+        self._layout_agent = layout_agent
+        self._component_agent = component_agent
+        self._schema_agent = schema_agent
+
+        # Determine if VLM-first pipeline is available
+        has_vlm_first = all([layout_agent, component_agent, schema_agent])
 
         # Create the state graph
         workflow = StateGraph(ExtractionState)
 
-        # Add nodes
+        # Add common nodes
         workflow.add_node(NODE_PREPROCESS, preprocess_fn)
-        workflow.add_node(NODE_ANALYZE, self._run_analyzer)
-        workflow.add_node(NODE_EXTRACT, self._run_extractor)
         workflow.add_node(NODE_VALIDATE, self._run_validator)
         workflow.add_node(NODE_ROUTE, self._route_node)
         workflow.add_node(NODE_RETRY, self._retry_node)
         workflow.add_node(NODE_HUMAN_REVIEW, self._human_review_node)
         workflow.add_node(NODE_COMPLETE, self._complete_node)
 
+        # Add legacy pipeline nodes
+        workflow.add_node(NODE_ANALYZE, self._run_analyzer)
+        workflow.add_node(NODE_EXTRACT, self._run_extractor)
+
+        # Add VLM-first pipeline nodes if available
+        if has_vlm_first:
+            workflow.add_node(NODE_LAYOUT, self._run_layout)
+            workflow.add_node(NODE_COMPONENTS, self._run_components)
+            workflow.add_node(NODE_SCHEMA, self._run_schema_generator)
+
         # Set entry point
         workflow.set_entry_point(NODE_PREPROCESS)
 
-        # Add edges for main flow
-        workflow.add_edge(NODE_PREPROCESS, NODE_ANALYZE)
+        # Add conditional routing after preprocess
+        if has_vlm_first:
+            # Route to either VLM-first or legacy pipeline
+            workflow.add_conditional_edges(
+                NODE_PREPROCESS,
+                self._determine_pipeline,
+                {
+                    ROUTE_ADAPTIVE: NODE_LAYOUT,
+                    ROUTE_LEGACY: NODE_ANALYZE,
+                },
+            )
+
+            # VLM-first pipeline flow
+            workflow.add_edge(NODE_LAYOUT, NODE_COMPONENTS)
+            workflow.add_edge(NODE_COMPONENTS, NODE_SCHEMA)
+            workflow.add_edge(NODE_SCHEMA, NODE_EXTRACT)
+        else:
+            # Only legacy pipeline available
+            workflow.add_edge(NODE_PREPROCESS, NODE_ANALYZE)
+
+        # Legacy pipeline flow (after analyze)
         workflow.add_edge(NODE_ANALYZE, NODE_EXTRACT)
+
+        # Both pipelines converge at extract -> validate -> route
         workflow.add_edge(NODE_EXTRACT, NODE_VALIDATE)
         workflow.add_edge(NODE_VALIDATE, NODE_ROUTE)
 
@@ -391,7 +453,7 @@ class OrchestratorAgent(BaseAgent):
             },
         )
 
-        # Retry loops back to extract
+        # Retry loops back to extract (works for both pipelines)
         workflow.add_edge(NODE_RETRY, NODE_EXTRACT)
 
         # Terminal nodes
@@ -399,6 +461,12 @@ class OrchestratorAgent(BaseAgent):
         workflow.add_edge(NODE_HUMAN_REVIEW, END)
 
         self._workflow = workflow
+        
+        if has_vlm_first:
+            self._logger.info("workflow_built_with_vlm_first_support")
+        else:
+            self._logger.info("workflow_built_legacy_only")
+        
         return workflow
 
     def compile_workflow(self) -> Any:
@@ -605,6 +673,83 @@ class OrchestratorAgent(BaseAgent):
             state = set_status(state, ExtractionStatus.FAILED, "validation_failed")
             return state
 
+    # VLM-first pipeline node implementations
+
+    def _run_layout(self, state: ExtractionState) -> ExtractionState:
+        """Run the layout analysis agent node."""
+        if self._layout_agent is None:
+            raise OrchestrationError(
+                "Layout agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+
+        try:
+            return self._layout_agent.process(state)
+        except AgentError as e:
+            # On VLM-first stage failure, fall back to legacy pipeline
+            self._logger.warning(
+                "layout_analysis_failed_fallback_to_legacy",
+                error=str(e),
+            )
+            state = add_warning(
+                state,
+                f"Layout analysis failed, using legacy pipeline: {e}",
+            )
+            # Disable adaptive extraction to force legacy path
+            state = update_state(state, {"use_adaptive_extraction": False})
+            return state
+
+    def _run_components(self, state: ExtractionState) -> ExtractionState:
+        """Run the component detector agent node."""
+        if self._component_agent is None:
+            raise OrchestrationError(
+                "Component detector agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+
+        try:
+            return self._component_agent.process(state)
+        except AgentError as e:
+            # On VLM-first stage failure, fall back to legacy pipeline
+            self._logger.warning(
+                "component_detection_failed_fallback_to_legacy",
+                error=str(e),
+            )
+            state = add_warning(
+                state,
+                f"Component detection failed, using legacy pipeline: {e}",
+            )
+            # Disable adaptive extraction to force legacy path
+            state = update_state(state, {"use_adaptive_extraction": False})
+            return state
+
+    def _run_schema_generator(self, state: ExtractionState) -> ExtractionState:
+        """Run the schema generator agent node."""
+        if self._schema_agent is None:
+            raise OrchestrationError(
+                "Schema generator agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+
+        try:
+            return self._schema_agent.process(state)
+        except AgentError as e:
+            # On VLM-first stage failure, fall back to legacy pipeline
+            self._logger.warning(
+                "schema_generation_failed_fallback_to_legacy",
+                error=str(e),
+            )
+            state = add_warning(
+                state,
+                f"Schema generation failed, using legacy pipeline: {e}",
+            )
+            # Disable adaptive extraction to force legacy path
+            state = update_state(state, {"use_adaptive_extraction": False})
+            return state
+
     def _route_node(self, state: ExtractionState) -> ExtractionState:
         """
         Route node - determines next step based on validation results.
@@ -662,6 +807,30 @@ class OrchestratorAgent(BaseAgent):
         if retry_count < 1:
             return ROUTE_RETRY
         return ROUTE_HUMAN_REVIEW
+
+    def _determine_pipeline(
+        self,
+        state: ExtractionState,
+    ) -> Literal["adaptive", "legacy"]:
+        """
+        Determine which pipeline to use based on state configuration.
+
+        This is the conditional edge function after preprocessing.
+
+        Args:
+            state: Current extraction state after preprocessing.
+
+        Returns:
+            Pipeline route name (adaptive or legacy).
+        """
+        use_adaptive = state.get("use_adaptive_extraction", True)
+
+        if use_adaptive:
+            self._logger.info("using_vlm_first_adaptive_pipeline")
+            return ROUTE_ADAPTIVE
+
+        self._logger.info("using_legacy_hardcoded_schema_pipeline")
+        return ROUTE_LEGACY
 
     def _retry_node(self, state: ExtractionState) -> ExtractionState:
         """
@@ -749,6 +918,7 @@ def create_extraction_workflow(
     client: LMStudioClient | None = None,
     enable_checkpointing: bool = True,
     max_retries: int = 2,
+    enable_vlm_first: bool = True,
 ) -> tuple[OrchestratorAgent, Any]:
     """
     Factory function to create a complete extraction workflow.
@@ -760,6 +930,7 @@ def create_extraction_workflow(
         client: Optional pre-configured LM Studio client.
         enable_checkpointing: Whether to enable state checkpointing.
         max_retries: Maximum retry attempts.
+        enable_vlm_first: Whether to enable VLM-first adaptive pipeline (default: True).
 
     Returns:
         Tuple of (orchestrator_agent, compiled_workflow).
@@ -772,10 +943,34 @@ def create_extraction_workflow(
     # Create shared client
     shared_client = client or LMStudioClient()
 
-    # Create agents
+    # Create legacy pipeline agents (always needed)
     analyzer = AnalyzerAgent(client=shared_client)
     extractor = ExtractorAgent(client=shared_client)
     validator = ValidatorAgent(client=shared_client)
+
+    # Create VLM-first pipeline agents if enabled
+    layout_agent = None
+    component_agent = None
+    schema_agent = None
+
+    if enable_vlm_first:
+        try:
+            from src.agents.layout_agent import LayoutAgent
+            from src.agents.component_detector import ComponentDetectorAgent
+            from src.agents.schema_generator import SchemaGeneratorAgent
+
+            layout_agent = LayoutAgent(client=shared_client)
+            component_agent = ComponentDetectorAgent(client=shared_client)
+            schema_agent = SchemaGeneratorAgent(client=shared_client)
+
+            logger.info("vlm_first_agents_created")
+        except ImportError as e:
+            logger.warning(
+                "vlm_first_agents_import_failed",
+                error=str(e),
+                message="Falling back to legacy pipeline only",
+            )
+            enable_vlm_first = False
 
     # Create orchestrator
     orchestrator = OrchestratorAgent(
@@ -784,12 +979,15 @@ def create_extraction_workflow(
         max_retries=max_retries,
     )
 
-    # Build and compile workflow
+    # Build workflow with appropriate agents
     orchestrator.build_workflow(
         preprocess_fn=preprocess_fn,
         analyzer=analyzer,
         extractor=extractor,
         validator=validator,
+        layout_agent=layout_agent,
+        component_agent=component_agent,
+        schema_agent=schema_agent,
     )
 
     compiled_workflow = orchestrator.compile_workflow()
@@ -798,6 +996,7 @@ def create_extraction_workflow(
         "extraction_workflow_created",
         checkpointing=enable_checkpointing,
         max_retries=max_retries,
+        vlm_first_enabled=enable_vlm_first,
     )
 
     return orchestrator, compiled_workflow

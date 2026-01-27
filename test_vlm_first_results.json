@@ -1,0 +1,1690 @@
+{
+  "pdf_path": "superbill1.pdf",
+  "page_count": 21,
+  "total_vlm_calls": 42,
+  "total_processing_time_ms": 318075,
+  "layout_analyses": [
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.12
+          },
+          "description": "Document title 'Patient List' with date and total patient count",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.12,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient data, findings, and plans organized in tabular format",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.95,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 1 of 21' at bottom right",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 7,
+      "reading_order": "table row-by-row, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 120,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Header has 3-column layout for patient/provider/insurance info. Body contains multiple patient records with structured sections (INDICATIONS, FINDINGS, ICD CODES, PLAN). All data is pre-printed and typed, no handwritten content. Visual structure is maintained by horizontal lines separating sections and boxes for data fields.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "table_extraction",
+      "page_number": 1,
+      "analysis_time_ms": 12397
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, each containing structured fields like name, CPT codes, findings, and plan.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 2 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right, with each patient record forming a vertical block",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a tabular form with pre-printed labels and filled-in data. Each patient record is visually separated by whitespace and horizontal lines. No visual marks (checkboxes, ticks, etc.) are present. The layout is consistent and grid-aligned, making it suitable for form extraction.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 2,
+      "analysis_time_ms": 9184
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.95,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.12
+          },
+          "description": "Document title 'Patient List' with date and patient count",
+          "confidence": 0.95
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.12,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, findings, and codes",
+          "confidence": 0.95
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.95,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 3 of 21' at bottom right",
+          "confidence": 0.95
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 45,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document has a tabular form layout with pre-printed fields for patient data, findings, and codes. Sections are visually separated by horizontal lines and boxes. No handwritten content or visual marks detected.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 3,
+      "analysis_time_ms": 8809
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with structured sections: FINDINGS, ICD CODES, PLAN, CPT Codes, patient lists, and INDICATIONS.",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 4 of 21' at bottom right.",
+          "confidence": 0.98
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured report with clear section headers and tabular patient data. Sections are visually separated by horizontal lines and bold headings. No visual marks (checkboxes, ticks, etc.) are present. The layout is consistent with a pre-printed form with typed content.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 4,
+      "analysis_time_ms": 9113
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, findings, ICD codes, and plans.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 5 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a report with clear sections for patient data, findings, and plans. Each patient record is organized in a consistent grid-like format with labeled sections. No visual marks (checkboxes, ticks, etc.) are present. The layout is clean and well-spaced, facilitating easy extraction.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 5,
+      "analysis_time_ms": 9091
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.12
+          },
+          "description": "Document title 'Patient List' with date and patient count in top section",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.12,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, each containing structured sections like CPT Codes, INDICATIONS, FINDINGS, ICD CODES, and PLAN",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.95,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 6 of 21' in bottom right corner",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right, with each patient record structured in a consistent left-aligned format",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a pre-printed form with consistent left-aligned sections for each patient. Visual structure is maintained by horizontal lines and whitespace. No handwritten marks or annotations are visible. Each patient record follows a uniform layout with clear section headers.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 6,
+      "analysis_time_ms": 8986
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Top section with document title 'Patient List', date '12/03/2019', day 'Tuesday', and patient count '61'.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, including patient names, CPT/ICD codes, findings, and plans. Structured with labeled sections and tabular-like alignment.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Bottom section with page number 'Page 7 of 21'.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 6,
+      "reading_order": "top-to-bottom, left-to-right, with sections grouped under patient records",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a pre-printed form with structured fields for patient data. Sections are clearly delineated with horizontal lines and labeled headers. No visual marks (checkboxes, ticks, etc.) are present. Layout is consistent with tabular form structure, with columns for patient name, sex, ID, type, DOB, and referring physician.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 7,
+      "analysis_time_ms": 9240
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, CPT codes, indications, findings, and plans.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 8 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a tabular form with clear sections for patient data, CPT codes, indications, findings, and plans. Each patient record is visually separated by whitespace and horizontal lines. No visual marks (checkboxes, ticks, etc.) are present.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 8,
+      "analysis_time_ms": 8782
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date and patient count in top section",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, CPT codes, findings, and plans",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 9 of 21' at bottom right",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 50,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a tabular form with pre-printed fields for patient data, CPT codes, and medical findings. Visual structure is maintained by horizontal lines and whitespace. No handwritten marks or annotations are visible.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 9,
+      "analysis_time_ms": 8704
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date and patient count in top section",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, findings, ICD codes, and CPT codes",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 10 of 21' at bottom right",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured report with clear section headers and consistent spacing. Each patient record is visually separated by whitespace and horizontal lines. No visual marks (checkboxes, ticks, etc.) are present. The layout is designed for easy extraction of structured data.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 10,
+      "analysis_time_ms": 9211
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, findings, ICD codes, and CPT codes in structured blocks.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 11 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 45,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document has a clear tabular form structure with pre-printed labels and data fields. Each patient record is visually separated by horizontal lines and consistent spacing. No visual marks (checkboxes, ticks, etc.) are present. The layout is designed for easy extraction of structured data.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 11,
+      "analysis_time_ms": 9191
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.9
+          },
+          "description": "Main content area with patient records, ICD/CPT codes, and clinical notes.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.95,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 12 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 7,
+      "reading_order": "table row-by-row, left-to-right across columns",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 120,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured tabular form with pre-printed columns for patient data, ICD/CPT codes, and clinical notes. No visual marks or annotations are present. Layout is consistent with medical record forms.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "table_extraction",
+      "page_number": 12,
+      "analysis_time_ms": 9133
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with structured sections: INDICATIONS, FINDINGS, ICD CODES, PLAN, CPT Codes, and patient records.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 13 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured report with clear section headers and consistent columnar layout. No visual marks (checkboxes, ticks, etc.) are present. Sections are visually separated by horizontal lines and whitespace. The layout is designed for easy extraction of structured data.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 13,
+      "analysis_time_ms": 9062
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, ICD/CPT codes, findings, and plans.",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 14 of 21' at bottom right.",
+          "confidence": 0.98
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a report with clear sections. Each patient record is organized with labeled fields (ICD Codes, PLAN, CPT Codes, FINDINGS, etc.). Horizontal lines separate sections, and whitespace provides visual hierarchy. No visual marks (checkboxes, ticks, etc.) are present.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 14,
+      "analysis_time_ms": 9023
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Top section with document title 'Patient List', date '12/03/2019', day 'Tuesday', and total patient count '61'.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with structured sections: INDICATIONS, FINDINGS, ICD CODES, PLAN, CPT Codes, and patient-specific data blocks.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Bottom section with page number 'Page 15 of 21'.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 1,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 45,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured medical report with clear section headers and consistent indentation. No visual marks (checkboxes, ticks, etc.) are present. Sections are visually separated by horizontal lines and whitespace. The layout is designed for easy reading and data extraction.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 15,
+      "analysis_time_ms": 9153
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, CPT/ICD codes, and medical findings.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 16 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 45,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a report with clear sections for patient data, CPT/ICD codes, and findings. No visual marks (checkboxes, ticks, etc.) are present. Layout is grid-aligned with consistent spacing.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 16,
+      "analysis_time_ms": 8957
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Top section with document title 'Patient List', date '12/03/2019', day 'Tuesday', and total patient count '61'.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with structured sections: FINDINGS, ICD CODES, PLAN, CPT Codes, and patient-specific data blocks.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Bottom section with page number 'Page 17 of 21'.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 1,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured report with clear section headers and consistent spacing. No visual marks (checkboxes, ticks, etc.) are present. Sections are separated by horizontal lines and whitespace. The layout is designed for easy extraction of structured data.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 17,
+      "analysis_time_ms": 9374
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, each containing sections like SEDATION, INDICATIONS, FINDINGS, ICD CODES, PLAN, and CPT Codes.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 18 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 120,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a tabular form with pre-printed headers and data fields. Each patient record is visually separated by horizontal lines and consistent column alignment. No visual marks (checkboxes, ticks, etc.) are present.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 18,
+      "analysis_time_ms": 8990
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, each containing structured sections like INDICATIONS, FINDINGS, ICD CODES, PLAN, and CPT Codes.",
+          "confidence": 0.99
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 19 of 21' at bottom right.",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 120,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is structured as a tabular form with pre-printed headers and data fields. Each patient record is visually separated by horizontal lines and contains multiple sections with consistent column alignment. No visual marks (checkboxes, ticks, etc.) are present.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 19,
+      "analysis_time_ms": 9167
+    },
+    {
+      "layout_type": "tabular_form",
+      "layout_confidence": 0.95,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.1
+          },
+          "description": "Document title 'Patient List' with date and patient count",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.1,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with patient records, findings, and codes",
+          "confidence": 0.97
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.9,
+            "width": 1.0,
+            "height": 0.05
+          },
+          "description": "Page number 'Page 20 of 21'",
+          "confidence": 0.99
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "whitespace"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 45,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document has a structured tabular form with clear horizontal lines separating sections. Each patient record is organized in a consistent grid with labeled fields. No visual marks (checkboxes, ticks, etc.) are present.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 20,
+      "analysis_time_ms": 8602
+    },
+    {
+      "layout_type": "report",
+      "layout_confidence": 0.98,
+      "regions": [
+        {
+          "region_id": "header",
+          "region_type": "header",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.0,
+            "width": 1.0,
+            "height": 0.08
+          },
+          "description": "Document title 'Patient List' with date, day, and total patient count.",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "body",
+          "region_type": "body",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.08,
+            "width": 1.0,
+            "height": 0.85
+          },
+          "description": "Main content area with structured sections: FINDINGS, ICD CODES, PLAN, CPT Codes, patient data, and INDICATIONS.",
+          "confidence": 0.98
+        },
+        {
+          "region_id": "footer",
+          "region_type": "footer",
+          "bounding_box": {
+            "x": 0.0,
+            "y": 0.93,
+            "width": 1.0,
+            "height": 0.07
+          },
+          "description": "Page number 'Page 21 of 21' at bottom right.",
+          "confidence": 0.98
+        }
+      ],
+      "column_count": 2,
+      "reading_order": "top-to-bottom, left-to-right",
+      "visual_separators": [
+        "horizontal_lines",
+        "boxes"
+      ],
+      "density_estimate": "moderate",
+      "estimated_field_count": 60,
+      "has_pre_printed_structure": true,
+      "has_handwritten_content": false,
+      "alignment_style": "grid-aligned",
+      "spacing_quality": "normal",
+      "visual_marks": [],
+      "vlm_observations": "Document is a structured report with clear section headers and patient data organized in a grid-like format. No visual marks (checkboxes, ticks, etc.) are present. Sections are visually separated by horizontal lines and consistent spacing.",
+      "extraction_difficulty": "easy",
+      "recommended_strategy": "form_extraction",
+      "page_number": 21,
+      "analysis_time_ms": 8841
+    }
+  ],
+  "component_maps": [
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "The document is structured as a patient list with narrative text sections (INDICATIONS, FINDINGS, ICD CODES, PLAN) but does not contain any tabular data, form fields, checkboxes, signatures, or visual marks like stamps or barcodes. All data is pre-printed and typed. No extractable components were found that match the specified component types.",
+      "page_number": 1,
+      "detection_time_ms": 6130
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a list of patient records with labeled sections (e.g., INDICATIONS, FINDINGS, PLAN) but lacks formal tabular structure, form fields, or visual marks. All data is presented in narrative text format with clear section headers. No checkboxes, signatures, or form inputs are present. Extraction should focus on text extraction by section rather than structured component detection.",
+      "page_number": 2,
+      "detection_time_ms": 6097
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document contains narrative text sections with headings and data, but no structured tables, form fields, checkboxes, or visual marks were detected. All content appears as free-form text with no pre-printed fields or visual indicators for extraction.",
+      "page_number": 3,
+      "detection_time_ms": 5825
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured report with clear section headers and tabular patient data. Sections are visually separated by horizontal lines and bold headings. No visual marks (checkboxes, ticks, etc.) are present. The layout is consistent with a pre-printed form with typed content.",
+      "page_number": 4,
+      "detection_time_ms": 5999
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a narrative report with labeled sections (e.g., FINDINGS, PLAN, ICD CODES) but does not contain tables, form fields, checkboxes, or signatures. All data is presented in free-form text blocks with clear section headers. No visual marks or structured input fields are present.",
+      "page_number": 5,
+      "detection_time_ms": 5956
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a pre-printed form with consistent left-aligned sections for each patient. No visual marks, checkboxes, or signatures are present. The content is structured as narrative text under section headers like 'CPT Codes', 'INDICATIONS', 'FINDINGS', etc. No form fields or tables are visually detectable with clear boundaries or headers. All data is presented in plain text blocks without structured input areas.",
+      "page_number": 6,
+      "detection_time_ms": 6126
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured patient list with narrative text sections. No tables, form fields, checkboxes, or visual marks are present. All data is presented in labeled text blocks without interactive elements or visual indicators.",
+      "page_number": 7,
+      "detection_time_ms": 5708
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a narrative form with patient records, not tabular or form-based components. No visual marks, checkboxes, or structured fields detected. All data is presented in free-text narrative format with clear section headings.",
+      "page_number": 8,
+      "detection_time_ms": 5763
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a narrative medical report with patient-specific data blocks. No tabular data, form fields, checkboxes, or signatures are visually present. All information is presented in free-form text with labeled sections (e.g., 'INDICATIONS', 'FINDINGS').",
+      "page_number": 9,
+      "detection_time_ms": 5866
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured report with clear section headers and consistent spacing. Each patient record is visually separated by whitespace and horizontal lines. No visual marks (checkboxes, ticks, etc.) are present. The layout is designed for easy extraction of structured data. However, no extractable components (tables, form fields, key-value pairs, visual marks, or special elements) were detected in the provided image. All content appears to be narrative text with section headers, not structured data fields.",
+      "page_number": 10,
+      "detection_time_ms": 6235
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document contains narrative text with structured headings (e.g., FINDINGS, ICD CODES, PLAN) but no visual marks, tables, or form fields. No checkboxes or signatures detected. All data is presented in text blocks with clear section headers.",
+      "page_number": 11,
+      "detection_time_ms": 5791
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured medical record form with pre-printed columns for patient data, ICD/CPT codes, and clinical notes. No visual marks or annotations are present. Layout is consistent with medical record forms. No extractable components were detected in the specified formats.",
+      "page_number": 12,
+      "detection_time_ms": 5818
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured report with clear section headers and consistent columnar layout. No visual marks (checkboxes, ticks, etc.) are present. Sections are visually separated by horizontal lines and whitespace. The layout is designed for easy extraction of structured data. However, no extractable components (tables, form fields, key-value pairs, visual marks, or special elements) were detected in the provided image. All content appears as narrative text under section headers.",
+      "page_number": 13,
+      "detection_time_ms": 6179
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a narrative report with labeled sections (ICD Codes, PLAN, CPT Codes, FINDINGS, etc.). No tabular data, form fields, checkboxes, signatures, or visual marks are present. All content is textual and organized in a free-form layout. Extraction should focus on spatially identifying labeled sections and their content.",
+      "page_number": 14,
+      "detection_time_ms": 5979
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured medical report with clear section headers and consistent indentation. No visual marks (checkboxes, ticks, etc.) are present. Sections are visually separated by horizontal lines and whitespace. The layout is designed for easy reading and data extraction. No extractable components (tables, forms, key-value pairs, visual marks, or special elements) were detected based on the provided guidelines and visual evidence.",
+      "page_number": 15,
+      "detection_time_ms": 6115
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document contains narrative text with structured patient data but no tables, form fields, checkboxes, or visual marks. All data is presented in free-form text blocks with labels and values.",
+      "page_number": 16,
+      "detection_time_ms": 5654
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured report with clear section headers and consistent spacing. No visual marks (checkboxes, ticks, etc.) are present. Sections are separated by horizontal lines and whitespace. The layout is designed for easy extraction of structured data. However, no extractable components (tables, form fields, key-value pairs, visual marks, or special elements) were detected based on the provided layout context and visual inspection. All content appears to be narrative text organized under section headers.",
+      "page_number": 17,
+      "detection_time_ms": 6221
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a narrative form with patient records, not tabular or form-based components. No visual marks, checkboxes, or structured fields detected. All data is presented in free-text narrative format with section headers.",
+      "page_number": 18,
+      "detection_time_ms": 5729
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is structured as a narrative form with patient records, not a tabular or form-based layout with extractable fields. No visual marks, checkboxes, or structured form fields detected. Text is primarily narrative with section headers (INDICATIONS, FINDINGS, etc.) but no input fields or key-value pairs suitable for extraction as defined in the task.",
+      "page_number": 19,
+      "detection_time_ms": 6017
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document contains narrative text with structured sections (e.g., FINDINGS, ICD CODES, PLAN) but no visual marks, tables, or form fields as defined in the component types. All data is presented in text blocks with no visual structure matching the specified component types.",
+      "page_number": 20,
+      "detection_time_ms": 5840
+    },
+    {
+      "tables": [],
+      "forms": [],
+      "key_value_pairs": [],
+      "visual_marks": [],
+      "special_elements": [],
+      "has_tabular_data": false,
+      "has_form_fields": false,
+      "has_narrative_text": true,
+      "has_checkboxes": false,
+      "has_signatures": false,
+      "has_handwriting": false,
+      "component_count": 0,
+      "extraction_order": [],
+      "challenging_regions": [],
+      "suggested_extraction_strategies": {},
+      "vlm_notes": "Document is a structured report with clear section headers and patient data organized in a grid-like format. No visual marks (checkboxes, ticks, etc.) are present. Sections are visually separated by horizontal lines and consistent spacing. No form fields, tables, or key-value pairs with extractable structure were detected. All content is narrative text with no structured data elements for extraction.",
+      "page_number": 21,
+      "detection_time_ms": 5996
+    }
+  ]
+}

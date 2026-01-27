@@ -228,7 +228,13 @@ class ExtractionState(TypedDict, total=False):
     custom_schema: dict[str, Any] | None
     processing_id: str
 
-    # === Analysis Fields ===
+    # === VLM-First Analysis Fields (NEW) ===
+    layout_analyses: list[dict[str, Any]]  # Per-page LayoutAnalysis (layout_types.py)
+    component_maps: list[dict[str, Any]]  # Per-page ComponentMap (layout_types.py)
+    adaptive_schema: dict[str, Any] | None  # VLM-generated AdaptiveSchema (layout_types.py)
+    use_adaptive_extraction: bool  # Flag: use VLM-first or fallback to old schema
+
+    # === Legacy Analysis Fields (Kept for Compatibility) ===
     analysis: DocumentAnalysis
     selected_schema_name: str
     document_type: str
@@ -305,7 +311,12 @@ def create_initial_state(
         page_images=page_images or [],
         custom_schema=custom_schema,
         processing_id=processing_id,
-        # Analysis
+        # VLM-First Analysis (NEW)
+        layout_analyses=[],
+        component_maps=[],
+        adaptive_schema=None,
+        use_adaptive_extraction=True,  # Default to VLM-first approach
+        # Legacy Analysis (Compatibility)
         analysis={},
         selected_schema_name="",
         document_type="",

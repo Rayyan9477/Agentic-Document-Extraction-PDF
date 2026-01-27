@@ -83,6 +83,8 @@ class ExtractorAgent(BaseAgent):
         Extract data from all pages using dual-pass strategy.
 
         This is the main entry point for the LangGraph workflow.
+        
+        Routes to either adaptive (VLM-first) or legacy (schema-based) extraction.
 
         Args:
             state: Current extraction state.
@@ -92,7 +94,34 @@ class ExtractorAgent(BaseAgent):
         """
         # Reset metrics to prevent accumulation across documents
         self.reset_metrics()
-
+        
+        # Check if using VLM-first adaptive extraction
+        use_adaptive = state.get("use_adaptive_extraction", False)
+        has_adaptive_schema = state.get("adaptive_schema") is not None
+        
+        if use_adaptive and has_adaptive_schema:
+            self._logger.info(
+                "using_adaptive_extraction",
+                processing_id=state.get("processing_id", ""),
+            )
+            return self._process_adaptive(state)
+        else:
+            self._logger.info(
+                "using_legacy_extraction",
+                processing_id=state.get("processing_id", ""),
+            )
+            return self._process_legacy(state)
+    
+    def _process_legacy(self, state: ExtractionState) -> ExtractionState:
+        """
+        Legacy extraction using hardcoded schemas (backward compatibility).
+        
+        Args:
+            state: Current extraction state.
+        
+        Returns:
+            Updated state with extraction results.
+        """
         start_time = self.log_operation_start(
             "dual_pass_extraction",
             processing_id=state.get("processing_id", ""),
@@ -179,6 +208,547 @@ class ExtractorAgent(BaseAgent):
                 agent_name=self.name,
                 recoverable=True,
             ) from e
+    
+    def _process_adaptive(self, state: ExtractionState) -> ExtractionState:
+        """
+        Adaptive zero-shot extraction using VLM-first pipeline.
+        
+        Uses layout analysis, component detection, and adaptive schema
+        for structure-aware extraction without hardcoded templates.
+        
+        Args:
+            state: Current extraction state with VLM-first analysis.
+        
+        Returns:
+            Updated state with extraction results.
+        """
+        start_time = self.log_operation_start(
+            "adaptive_extraction",
+            processing_id=state.get("processing_id", ""),
+            page_count=len(state.get("page_images", [])),
+        )
+        
+        try:
+            # Update status
+            state = set_status(state, ExtractionStatus.EXTRACTING, "adaptive_extracting")
+            
+            # Get VLM-first analysis
+            adaptive_schema = state.get("adaptive_schema")
+            layout_analyses = state.get("layout_analyses", [])
+            component_maps = state.get("component_maps", [])
+            
+            if not adaptive_schema:
+                raise ExtractionError(
+                    "No adaptive schema available for extraction",
+                    agent_name=self.name,
+                    recoverable=False,
+                )
+            
+            # Get page images
+            page_images = state.get("page_images", [])
+            if not page_images:
+                raise ExtractionError(
+                    "No page images available for extraction",
+                    agent_name=self.name,
+                    recoverable=False,
+                )
+            
+            self._logger.info(
+                "adaptive_extraction_started",
+                pages=len(page_images),
+                fields=adaptive_schema.get("total_field_count", 0),
+                strategy=adaptive_schema.get("overall_strategy", "unknown"),
+            )
+            
+            # Extract from each page using adaptive strategy
+            page_extractions: list[dict[str, Any]] = []
+            total_vlm_calls = 0
+            
+            for idx, page_data in enumerate(page_images):
+                page_number = page_data.get("page_number", idx + 1)
+                
+                # Get corresponding layout and components for this page
+                layout = None
+                components = None
+                
+                for la in layout_analyses:
+                    if la.get("page_number") == page_number:
+                        layout = la
+                        break
+                
+                for cm in component_maps:
+                    if cm.get("page_number") == page_number:
+                        components = cm
+                        break
+                
+                # Extract page with full context
+                page_result = self._extract_page_adaptive(
+                    page_data=page_data,
+                    adaptive_schema=adaptive_schema,
+                    layout=layout,
+                    components=components,
+                    page_number=page_number,
+                    total_pages=len(page_images),
+                )
+                
+                page_extractions.append(serialize_page_extraction(page_result))
+                total_vlm_calls += page_result.vlm_calls
+                
+                self._logger.debug(
+                    "page_extracted_adaptive",
+                    page_number=page_number,
+                    fields_extracted=len(page_result.merged_fields),
+                    confidence=page_result.overall_confidence,
+                )
+            
+            # Merge results from all pages
+            merged_extraction = self._merge_page_extractions_adaptive(
+                page_extractions, adaptive_schema
+            )
+            
+            # Build field metadata
+            field_metadata = self._build_field_metadata(merged_extraction)
+            
+            # Calculate processing time
+            duration_ms = self.log_operation_complete(
+                "adaptive_extraction",
+                start_time,
+                success=True,
+                pages_extracted=len(page_extractions),
+                vlm_calls=total_vlm_calls,
+            )
+            
+            # Update state
+            state = update_state(
+                state,
+                {
+                    "page_extractions": page_extractions,
+                    "merged_extraction": merged_extraction,
+                    "field_metadata": {
+                        k: serialize_field_metadata(v) for k, v in field_metadata.items()
+                    },
+                    "status": ExtractionStatus.EXTRACTING.value,
+                    "current_step": "adaptive_extraction_complete",
+                    "total_vlm_calls": state.get("total_vlm_calls", 0) + total_vlm_calls,
+                    "total_processing_time_ms": (
+                        state.get("total_processing_time_ms", 0) + duration_ms
+                    ),
+                },
+            )
+            
+            self._logger.info(
+                "adaptive_extraction_completed",
+                total_fields=len(field_metadata),
+                total_vlm_calls=total_vlm_calls,
+                duration_ms=duration_ms,
+            )
+            
+            return state
+        
+        except ExtractionError:
+            raise
+        except Exception as e:
+            self.log_operation_complete("adaptive_extraction", start_time, success=False)
+            raise ExtractionError(
+                f"Adaptive extraction failed: {e}",
+                agent_name=self.name,
+                recoverable=True,
+            ) from e
+    
+    def _extract_page_adaptive(
+        self,
+        page_data: dict[str, Any],
+        adaptive_schema: dict[str, Any],
+        layout: dict[str, Any] | None,
+        components: dict[str, Any] | None,
+        page_number: int,
+        total_pages: int,
+    ) -> PageExtraction:
+        """
+        Extract data from a single page using adaptive schema and context.
+        
+        Performs dual-pass extraction with full layout and component context.
+        
+        Args:
+            page_data: Page image data.
+            adaptive_schema: VLM-generated adaptive schema.
+            layout: Layout analysis for this page.
+            components: Component map for this page.
+            page_number: Current page number.
+            total_pages: Total page count.
+        
+        Returns:
+            PageExtraction with merged dual-pass results.
+        """
+        image_data_uri = page_data.get("data_uri")
+        if not image_data_uri:
+            raise ExtractionError(
+                f"No image data for page {page_number}",
+                agent_name=self.name,
+                recoverable=False,
+            )
+        
+        # Build field definitions from adaptive schema
+        field_defs = adaptive_schema.get("fields", [])
+        document_desc = adaptive_schema.get("document_type_description", "unknown document")
+        
+        # Pass 1: Structure-aware extraction (completeness focus)
+        pass1_start = time.time()
+        pass1_result = self._extract_page_pass_adaptive(
+            image_data=image_data_uri,
+            field_defs=field_defs,
+            document_desc=document_desc,
+            layout=layout,
+            components=components,
+            page_number=page_number,
+            total_pages=total_pages,
+            is_first_pass=True,
+        )
+        pass1_time = int((time.time() - pass1_start) * 1000)
+        
+        # Pass 2: Verification pass (accuracy focus)
+        pass2_start = time.time()
+        pass2_result = self._extract_page_pass_adaptive(
+            image_data=image_data_uri,
+            field_defs=field_defs,
+            document_desc=document_desc,
+            layout=layout,
+            components=components,
+            page_number=page_number,
+            total_pages=total_pages,
+            is_first_pass=False,
+        )
+        pass2_time = int((time.time() - pass2_start) * 1000)
+        
+        # Merge results using dual-pass comparator
+        pass1_fields = pass1_result.get("fields", {})
+        pass2_fields = pass2_result.get("fields", {})
+        
+        merged_fields = self._merge_pass_results(pass1_fields, pass2_fields, page_number)
+        
+        # Create PageExtraction
+        page_extraction = PageExtraction(
+            page_number=page_number,
+            pass1_raw=pass1_result,
+            pass2_raw=pass2_result,
+            merged_fields=merged_fields,
+            extraction_time_ms=pass1_time + pass2_time,
+            vlm_calls=2,  # Dual-pass
+            errors=[],
+        )
+        
+        return page_extraction
+    
+    def _extract_page_pass_adaptive(
+        self,
+        image_data: str,
+        field_defs: list[dict[str, Any]],
+        document_desc: str,
+        layout: dict[str, Any] | None,
+        components: dict[str, Any] | None,
+        page_number: int,
+        total_pages: int,
+        is_first_pass: bool,
+    ) -> dict[str, Any]:
+        """
+        Perform single extraction pass with full VLM context.
+        
+        Args:
+            image_data: Base64-encoded image.
+            field_defs: Adaptive field definitions.
+            document_desc: Document type description.
+            layout: Layout analysis context.
+            components: Component map context.
+            page_number: Current page number.
+            total_pages: Total pages.
+            is_first_pass: Whether this is pass 1 or 2.
+        
+        Returns:
+            Extraction result dictionary.
+        """
+        # Build structure-aware system prompt
+        system_prompt = self._build_adaptive_system_prompt(
+            document_desc=document_desc,
+            is_verification=not is_first_pass,
+        )
+        
+        # Build structure-aware extraction prompt
+        user_prompt = self._build_adaptive_extraction_prompt(
+            field_defs=field_defs,
+            document_desc=document_desc,
+            layout=layout,
+            components=components,
+            page_number=page_number,
+            total_pages=total_pages,
+            is_first_pass=is_first_pass,
+        )
+        
+        # Retry with backoff
+        settings = get_settings()
+        retry_config = RetryConfig(
+            max_retries=settings.extraction.max_retries,
+            base_delay_ms=500,
+            max_delay_ms=settings.agent.max_retry_delay_ms,
+        )
+        
+        def make_vlm_call() -> dict[str, Any]:
+            return self.send_vision_request_with_json(
+                image_data=image_data,
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                temperature=0.1,
+                max_tokens=6000,  # Adaptive extraction may need more tokens
+            )
+        
+        try:
+            return retry_with_backoff(
+                func=make_vlm_call,
+                config=retry_config,
+                on_retry=lambda attempt, e: self._logger.warning(
+                    "adaptive_extraction_retry",
+                    page_number=page_number,
+                    pass_number=1 if is_first_pass else 2,
+                    attempt=attempt + 1,
+                    error=str(e),
+                ),
+            )
+        except Exception as e:
+            self._logger.warning(
+                "adaptive_extraction_pass_failed",
+                page_number=page_number,
+                pass_number=1 if is_first_pass else 2,
+                error=str(e),
+            )
+            return {"fields": {}, "error": str(e)}
+    
+    def _build_adaptive_system_prompt(
+        self,
+        document_desc: str,
+        is_verification: bool,
+    ) -> str:
+        """Build system prompt for adaptive extraction."""
+        mode = "VERIFICATION" if is_verification else "EXTRACTION"
+        
+        return f"""You are an expert document data extractor specializing in zero-shot extraction.
+
+DOCUMENT TYPE: {document_desc}
+
+MODE: {mode} Pass
+
+You have full context about this document's structure:
+- Layout analysis (regions, reading order, visual marks)
+- Component detection (tables, forms, checkboxes, key-value pairs)
+- Adaptive schema (fields proposed based on structure)
+
+CRITICAL INSTRUCTIONS:
+
+1. **Use Structural Context**: Leverage layout and component information to guide extraction
+2. **Respect Component Types**: Extract tables row-by-row, forms field-by-field, checkboxes by state
+3. **Visual Mark Detection**: Pay attention to checkmarks, ticks, crosses in checkboxes
+4. **Spatial Validation**: Values should be in expected regions based on layout
+5. **Confidence Scoring**: Be honest about uncertainty, especially for handwriting
+6. **Anti-Hallucination**: Return null for unclear values, do NOT guess
+
+{'VERIFICATION MODE: You are a skeptical auditor. Verify each value independently.' if is_verification else 'EXTRACTION MODE: Focus on completeness. Extract all visible values.'}
+
+Return structured JSON with extracted fields, confidences, and locations."""
+    
+    def _build_adaptive_extraction_prompt(
+        self,
+        field_defs: list[dict[str, Any]],
+        document_desc: str,
+        layout: dict[str, Any] | None,
+        components: dict[str, Any] | None,
+        page_number: int,
+        total_pages: int,
+        is_first_pass: bool,
+    ) -> str:
+        """Build extraction prompt with full structural context."""
+        
+        # Build context sections
+        layout_context = "No layout analysis available"
+        if layout:
+            visual_marks = layout.get("visual_marks", [])
+            mark_summary = {}
+            for mark in visual_marks:
+                mtype = mark.get("mark_type", "unknown")
+                mark_summary[mtype] = mark_summary.get(mtype, 0) + 1
+            
+            layout_context = f"""
+**Layout Structure:**
+- Type: {layout.get('layout_type', 'unknown')}
+- Reading Order: {layout.get('reading_order', 'unknown')}
+- Columns: {layout.get('column_count', 1)}
+- Density: {layout.get('density_estimate', 'unknown')}
+- Handwriting: {"Yes" if layout.get('has_handwritten_content') else "No"}
+
+**Visual Marks Detected:** {len(visual_marks)}
+"""
+            for mtype, count in sorted(mark_summary.items()):
+                layout_context += f"  - {mtype}: {count}\n"
+        
+        component_context = "No component analysis available"
+        if components:
+            tables = components.get("tables", [])
+            forms = components.get("forms", [])
+            checkboxes = [f for f in forms if "checkbox" in f.get("field_type", "")]
+            
+            component_context = f"""
+**Components Detected:**
+- Tables: {len(tables)}
+- Form Fields: {len(forms)}
+- Checkboxes: {len(checkboxes)}
+- Key-Value Pairs: {len(components.get('key_value_pairs', []))}
+
+**Extraction Strategy:** {components.get('suggested_extraction_strategies', {})}
+"""
+        
+        # Build field instructions
+        field_instructions = ""
+        for field in field_defs[:30]:  # Limit to first 30 fields per page
+            name = field.get("field_name", "unknown")
+            display = field.get("display_name", name)
+            ftype = field.get("field_type", "text")
+            desc = field.get("description", "")
+            required = field.get("required", False)
+            location_hint = field.get("location_hint", "")
+            
+            req_marker = "**REQUIRED**" if required else "optional"
+            
+            field_instructions += f"""
+### {display} (`{name}`) - {req_marker}
+- Type: {ftype}
+- Description: {desc}
+- Location Hint: {location_hint}
+- Component: {field.get('source_component_id', 'unknown')}
+"""
+        
+        pass_instruction = "PASS 1: Extract all visible values. Focus on completeness." if is_first_pass else "PASS 2: Verify each value independently. Focus on accuracy. Be skeptical."
+        
+        return f"""# ADAPTIVE EXTRACTION - Page {page_number}/{total_pages}
+
+{pass_instruction}
+
+## Document Context
+
+**Document Type:** {document_desc}
+
+{layout_context}
+
+{component_context}
+
+## Fields to Extract
+
+{field_instructions}
+
+## Extraction Instructions
+
+1. **Use Layout Context**: Pay attention to regions, reading order, and visual structure
+2. **Component-Specific Strategies**:
+   - Tables: Extract row-by-row, maintaining column structure
+   - Forms: Match field labels to values spatially
+   - Checkboxes: Detect visual marks (✓ ✗ ☑ ☐) to determine state
+   - Key-Value Pairs: Associate labels with values based on separators
+
+3. **Visual Mark Detection**:
+   - Look for checkmarks, ticks, crosses in checkbox areas
+   - Note stamps, signatures, handwritten annotations
+   - Identify redactions or obscured content
+
+4. **Confidence Scoring** (0.0-1.0):
+   - 0.95+: Crystal clear, no doubt
+   - 0.85-0.94: Clear but minor uncertainty
+   - 0.70-0.84: Readable but needs verification
+   - <0.70: Too uncertain → return null
+
+5. **Spatial Validation**:
+   - Values should be in expected regions
+   - Check if location matches component bounding boxes
+   - Verify reading order makes sense
+
+## Required Output Format
+
+```json
+{{
+  "page_number": {page_number},
+  "extraction_pass": {1 if is_first_pass else 2},
+  "fields": {{
+    "field_name": {{
+      "value": "extracted value or null",
+      "confidence": 0.92,
+      "location": "description of where found",
+      "component_type": "table|form|checkbox|key_value",
+      "visual_marks": ["any marks associated with this field"]
+    }}
+  }},
+  "extraction_notes": "Observations about extraction quality",
+  "uncertain_fields": ["list of fields with low confidence"],
+  "component_extractions": {{
+    "table_1": [/* extracted table rows */],
+    "checkboxes": {{"checkbox_id": "checked|unchecked"}}
+  }}
+}}
+```
+
+## Critical Reminders
+
+- **Return null for uncertain values** - Do NOT guess
+- **Use component context** - Extract appropriately for each component type
+- **Detect visual marks** - Checkboxes, stamps, signatures, ticks, crosses
+- **Spatial awareness** - Values should match expected locations
+- **Confidence honesty** - Be realistic about uncertainty
+
+Begin adaptive extraction now."""
+    
+    def _merge_page_extractions_adaptive(
+        self,
+        page_extractions: list[dict[str, Any]],
+        adaptive_schema: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Merge extractions from multiple pages for adaptive schema.
+        
+        Args:
+            page_extractions: List of per-page extraction results.
+            adaptive_schema: Adaptive schema definition.
+        
+        Returns:
+            Merged extraction dictionary.
+        """
+        # For now, use simple page-by-page aggregation
+        # Could be enhanced to handle multi-page fields intelligently
+        
+        merged = {}
+        fields = adaptive_schema.get("fields", [])
+        
+        for field in fields:
+            field_name = field.get("field_name")
+            values = []
+            
+            # Collect values from all pages
+            for page_ext in page_extractions:
+                merged_fields = page_ext.get("merged_fields", {})
+                if field_name in merged_fields:
+                    field_data = merged_fields[field_name]
+                    value = field_data.get("value")
+                    if value is not None:
+                        values.append({
+                            "value": value,
+                            "confidence": field_data.get("confidence", 0.5),
+                            "page": page_ext.get("page_number", 0),
+                        })
+            
+            # For single-value fields, take highest confidence
+            # For list fields, aggregate all values
+            if values:
+                if field.get("field_type") in ["list", "table"]:
+                    merged[field_name] = [v["value"] for v in values]
+                else:
+                    # Take value with highest confidence
+                    best = max(values, key=lambda v: v["confidence"])
+                    merged[field_name] = best["value"]
+        
+        return merged
 
     def _get_schema(self, state: ExtractionState) -> DocumentSchema | None:
         """
@@ -650,12 +1220,23 @@ class ExtractorAgent(BaseAgent):
         metadata: dict[str, FieldMetadata] = {}
 
         for field_name, field_data in merged_extraction.items():
-            metadata[field_name] = FieldMetadata(
-                field_name=field_name,
-                value=field_data.get("value"),
-                confidence=field_data.get("confidence", 0.0),
-                source_page=field_data.get("source_page", 1),
-            )
+            # Handle both old format (dict with value/confidence) and new format (direct values)
+            if isinstance(field_data, dict) and "value" in field_data:
+                # Old format: {"value": x, "confidence": y, "source_page": z}
+                metadata[field_name] = FieldMetadata(
+                    field_name=field_name,
+                    value=field_data.get("value"),
+                    confidence=field_data.get("confidence", 0.0),
+                    source_page=field_data.get("source_page", 1),
+                )
+            else:
+                # New format: Direct value (string, list, etc.)
+                metadata[field_name] = FieldMetadata(
+                    field_name=field_name,
+                    value=field_data,
+                    confidence=0.85,  # Default confidence for adaptive extraction
+                    source_page=1,
+                )
 
         return metadata
 
