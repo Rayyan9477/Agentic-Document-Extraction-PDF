@@ -233,6 +233,14 @@ INSURED_FIELDS = [
         required=False,
         location_hint="Box 11c",
     ),
+    FieldDefinition(
+        name="other_health_benefit_plan",
+        display_name="Is There Another Health Benefit Plan?",
+        field_type=FieldType.BOOLEAN,
+        description="Is there another health benefit plan? Required for Coordination of Benefits",
+        required=False,
+        location_hint="Box 11d",
+    ),
 ]
 
 # Section 4: Condition Information
@@ -268,6 +276,14 @@ CONDITION_FIELDS = [
         description="Is condition related to another type of accident?",
         required=False,
         location_hint="Box 10c",
+    ),
+    FieldDefinition(
+        name="claim_codes",
+        display_name="Claim Codes",
+        field_type=FieldType.STRING,
+        description="Condition codes designated by NUCC (e.g., W1, W2)",
+        required=False,
+        location_hint="Box 10d",
     ),
     FieldDefinition(
         name="illness_date",
@@ -361,10 +377,45 @@ PROVIDER_FIELDS = [
         required=False,
         location_hint="Box 20 - charges",
     ),
+    FieldDefinition(
+        name="resubmission_code",
+        display_name="Resubmission Code",
+        field_type=FieldType.STRING,
+        description="Frequency code for original/replacement/void claim (7=replacement, 8=void)",
+        required=False,
+        allowed_values=["1", "7", "8"],
+        location_hint="Box 22 - left",
+    ),
+    FieldDefinition(
+        name="original_reference_number",
+        display_name="Original Reference Number",
+        field_type=FieldType.STRING,
+        description="Original claim reference number for resubmissions",
+        required=False,
+        location_hint="Box 22 - right",
+    ),
+    FieldDefinition(
+        name="prior_authorization_number",
+        display_name="Prior Authorization Number",
+        field_type=FieldType.STRING,
+        description="Prior authorization or referral number from payer",
+        required=False,
+        location_hint="Box 23",
+        examples=["AUTH123456", "REF789012"],
+    ),
 ]
 
 # Section 6: Diagnosis Codes
 DIAGNOSIS_FIELDS = [
+    FieldDefinition(
+        name="icd_indicator",
+        display_name="ICD Indicator",
+        field_type=FieldType.STRING,
+        description="ICD version indicator: 9 for ICD-9, 0 for ICD-10",
+        required=False,
+        allowed_values=["9", "0"],
+        location_hint="Box 21 - top right indicator",
+    ),
     FieldDefinition(
         name="diagnosis_code_a",
         display_name="Diagnosis Code A",

@@ -12,7 +12,7 @@ import type { UploadFile } from '@/components/documents';
 import { Card, CardHeader, CardContent, Button, StepProgress } from '@/components/ui';
 import { documentsApi, schemaApi } from '@/lib/api';
 import { generateId } from '@/lib/utils';
-import type { ExportFormat, ProcessingPriority } from '@/types/api';
+import type { ExportFormat, ExtractionMode, ProcessingPriority } from '@/types/api';
 
 const UPLOAD_STEPS = [
   { label: 'Select Files', description: 'Choose PDF documents' },
@@ -29,6 +29,7 @@ export default function DocumentUploadPage() {
     schemaName: '',
     exportFormat: 'json' as ExportFormat,
     priority: 'normal' as ProcessingPriority,
+    extractionMode: 'multi' as ExtractionMode,
     maskPhi: false,
     outputDir: './output',
   });
@@ -47,6 +48,7 @@ export default function DocumentUploadPage() {
         export_format: options.exportFormat,
         priority: options.priority,
         mask_phi: options.maskPhi,
+        extraction_mode: options.extractionMode,
       });
     },
     onSuccess: (response, variables) => {

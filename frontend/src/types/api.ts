@@ -16,6 +16,8 @@ export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
 export type ExportFormat = 'json' | 'excel' | 'markdown' | 'both' | 'all';
 
+export type ExtractionMode = 'single' | 'multi' | 'auto';
+
 export type ProcessingPriority = 'low' | 'normal' | 'high';
 
 export type PreviewStyle = 'simple' | 'detailed' | 'summary' | 'technical';
@@ -58,6 +60,7 @@ export interface ProcessRequest {
   output_dir?: string;
   mask_phi?: boolean;
   priority?: ProcessingPriority;
+  extraction_mode?: ExtractionMode;
   async_processing?: boolean;
   callback_url?: string;
 }
@@ -259,4 +262,44 @@ export interface RecentActivity {
   timestamp: string;
   status: TaskStatus;
   document_name?: string;
+}
+
+// ─── Multi-Record Types ───
+
+export interface MultiRecordItem {
+  record_id: number;
+  page_number: number;
+  primary_identifier: string;
+  entity_type: string;
+  fields: Record<string, unknown>;
+  confidence: number;
+  extraction_time_ms: number;
+}
+
+export interface MultiRecordDuplicate {
+  primary_identifier: string;
+  occurrences: number;
+  pages: number[];
+  record_ids: number[];
+}
+
+export interface MultiRecordResponse {
+  pdf_path: string;
+  document_type: string;
+  entity_type: string;
+  total_pages: number;
+  total_records: number;
+  unique_records: number;
+  schema_fields: Array<{
+    field_name: string;
+    display_name: string;
+    field_type: string;
+    description: string;
+    required: boolean;
+  }>;
+  records: MultiRecordItem[];
+  duplicates: MultiRecordDuplicate[];
+  total_vlm_calls: number;
+  processing_time_ms: number;
+  output_paths: Record<string, string>;
 }

@@ -356,6 +356,7 @@ def build_grounded_system_prompt(
 def build_enhanced_system_prompt(
     document_type: str,
     is_verification_pass: bool = False,
+    structure_context: dict | None = None,
 ) -> str:
     """
     Build an enhanced system prompt with all anti-hallucination features.
@@ -366,20 +367,62 @@ def build_enhanced_system_prompt(
     - Few-shot examples
     - Self-verification checkpoints
     - Constitutional critique
+    - Document structure awareness (tables, handwriting, layout)
 
     Args:
         document_type: Type of document being processed.
         is_verification_pass: Whether this is a verification (second) pass.
+        structure_context: Optional structure analysis results from the analyzer
+            agent, containing detected tables, handwriting, layout type, etc.
 
     Returns:
         Complete enhanced system prompt.
     """
+    # Build structure-aware context if available
+    context_parts = [build_hallucination_warning(document_type)]
+
+    if structure_context:
+        structure_hints = []
+        if structure_context.get("has_tables"):
+            table_count = structure_context.get("table_count", 1)
+            structure_hints.append(
+                f"This document contains {table_count} table(s). "
+                "Pay close attention to row/column alignment when extracting table data."
+            )
+        if structure_context.get("has_handwriting"):
+            structure_hints.append(
+                "This document contains handwritten text. "
+                "Be extra cautious with handwritten fields — return null if illegible."
+            )
+        if structure_context.get("has_signatures"):
+            structure_hints.append(
+                "This document contains signature areas. "
+                "Do NOT attempt to extract text from signature regions."
+            )
+        layout_type = structure_context.get("layout_type", "")
+        if layout_type:
+            structure_hints.append(f"Document layout type: {layout_type}.")
+        text_density = structure_context.get("text_density", "")
+        if text_density:
+            structure_hints.append(f"Text density: {text_density}.")
+
+        if structure_hints:
+            context_parts.append(
+                "\n\n## DOCUMENT STRUCTURE CONTEXT\n" + "\n".join(f"- {h}" for h in structure_hints)
+            )
+
+    additional_context = "\n".join(context_parts)
+
+    # Token-optimized: GROUNDING_RULES already contains a confidence scale (Rule 5)
+    # and the user prompt includes EXTRACTION_REASONING_TEMPLATE with reasoning steps.
+    # Skipping redundant CONFIDENCE_SCALE and CHAIN_OF_THOUGHT_TEMPLATE saves ~1000 tokens
+    # which is critical for the 8B model's effective attention budget.
     return build_grounded_system_prompt(
-        additional_context=build_hallucination_warning(document_type),
+        additional_context=additional_context,
         include_forbidden=True,
-        include_confidence_scale=True,
-        include_chain_of_thought=True,
-        include_few_shot_examples=not is_verification_pass,  # Skip examples on verification
+        include_confidence_scale=False,  # Already in GROUNDING_RULES Rule 5
+        include_chain_of_thought=False,  # Already in user prompt EXTRACTION_REASONING_TEMPLATE
+        include_few_shot_examples=False,  # Zero-shot mode: no examples, rely on grounding rules
         include_self_verification=True,
         include_constitutional_critique=is_verification_pass,  # Add critique on verification
     )

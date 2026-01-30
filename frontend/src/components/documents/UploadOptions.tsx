@@ -1,15 +1,16 @@
 'use client';
 
 import React from 'react';
-import { Shield, FileOutput, Zap } from 'lucide-react';
+import { Shield, FileOutput, Zap, Users, User } from 'lucide-react';
 import { Card, CardHeader, CardContent, Select, Input } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
-import type { ExportFormat, ProcessingPriority } from '@/types/api';
+import type { ExportFormat, ExtractionMode, ProcessingPriority } from '@/types/api';
 
 interface UploadOptions {
   schemaName: string;
   exportFormat: ExportFormat;
   priority: ProcessingPriority;
+  extractionMode: ExtractionMode;
   maskPhi: boolean;
   outputDir: string;
 }
@@ -48,6 +49,12 @@ const UploadOptionsComponent: React.FC<UploadOptionsProps> = ({
     { value: 'high', label: 'High Priority', icon: <Zap className="w-4 h-4 text-warning-500" /> },
   ];
 
+  const extractionModeOptions: SelectOption[] = [
+    { value: 'multi', label: 'Multi-Record', icon: <Users className="w-4 h-4 text-primary-600" /> },
+    { value: 'single', label: 'Single-Record', icon: <User className="w-4 h-4 text-surface-500" /> },
+    { value: 'auto', label: 'Auto-Detect', icon: <Users className="w-4 h-4 text-success-500" /> },
+  ];
+
   const updateOption = <K extends keyof UploadOptions>(
     key: K,
     value: UploadOptions[K]
@@ -62,6 +69,15 @@ const UploadOptionsComponent: React.FC<UploadOptionsProps> = ({
         description="Configure how your documents will be processed"
       />
       <CardContent className="mt-4 space-y-4">
+        {/* Extraction Mode */}
+        <Select
+          label="Extraction Mode"
+          options={extractionModeOptions}
+          value={options.extractionMode}
+          onChange={(value) => updateOption('extractionMode', value as ExtractionMode)}
+          hint="Multi-Record separates distinct entities (patients, invoices) per row"
+        />
+
         {/* Schema Selection */}
         <Select
           label="Document Schema"

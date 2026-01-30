@@ -12,6 +12,14 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+class ExtractionModeEnum(str, Enum):
+    """Extraction mode options."""
+
+    SINGLE = "single"  # One record per page (legacy pipeline)
+    MULTI = "multi"  # Multiple records per page (boundary detection)
+    AUTO = "auto"  # Auto-detect (defaults to multi)
+
+
 class ExportFormatEnum(str, Enum):
     """Export format options."""
 
@@ -91,6 +99,10 @@ class ProcessRequest(BaseModel):
     priority: ProcessingPriority = Field(
         ProcessingPriority.NORMAL,
         description="Processing priority level",
+    )
+    extraction_mode: ExtractionModeEnum = Field(
+        ExtractionModeEnum.MULTI,
+        description="Extraction mode: 'multi' for multi-record (per patient), 'single' for legacy pipeline",
     )
     async_processing: bool = Field(
         False,
@@ -515,3 +527,52 @@ class PreviewResponse(BaseModel):
     format: str = Field("markdown", description="Preview format")
     content: str = Field(..., description="Markdown preview content")
     generated_at: str = Field(..., description="Generation timestamp")
+
+
+# ─── Multi-Record Models ───
+
+
+class MultiRecordItem(BaseModel):
+    """Single extracted record from multi-record extraction."""
+
+    record_id: int = Field(..., description="Record ID")
+    page_number: int = Field(..., ge=1, description="Source page number")
+    primary_identifier: str = Field(..., description="Primary identifier (e.g. patient ID)")
+    entity_type: str = Field("", description="Entity type (e.g. patient)")
+    fields: dict[str, Any] = Field(default_factory=dict, description="Extracted field values")
+    confidence: float = Field(0.0, ge=0.0, le=1.0, description="Extraction confidence")
+    extraction_time_ms: int = Field(0, ge=0, description="Extraction time in ms")
+
+
+class MultiRecordDuplicate(BaseModel):
+    """Duplicate record detection result."""
+
+    primary_identifier: str = Field(..., description="Identifier with duplicates")
+    occurrences: int = Field(0, ge=0, description="Number of occurrences")
+    pages: list[int] = Field(default_factory=list, description="Pages where found")
+    record_ids: list[int] = Field(default_factory=list, description="Record IDs")
+
+
+class MultiRecordResponse(BaseModel):
+    """Response model for multi-record extraction."""
+
+    pdf_path: str = Field("", description="Source PDF path")
+    document_type: str = Field("", description="Detected document type")
+    entity_type: str = Field("", description="Entity type (e.g. patient)")
+    total_pages: int = Field(0, ge=0, description="Total pages processed")
+    total_records: int = Field(0, ge=0, description="Total records extracted")
+    unique_records: int = Field(0, ge=0, description="Unique records (after dedup)")
+    schema_fields: list[dict[str, Any]] = Field(
+        default_factory=list, description="Extraction schema fields"
+    )
+    records: list[MultiRecordItem] = Field(
+        default_factory=list, description="All extracted records"
+    )
+    duplicates: list[MultiRecordDuplicate] = Field(
+        default_factory=list, description="Detected duplicate records"
+    )
+    total_vlm_calls: int = Field(0, ge=0, description="Total VLM API calls")
+    processing_time_ms: int = Field(0, ge=0, description="Total processing time in ms")
+    output_paths: dict[str, str] = Field(
+        default_factory=dict, description="Export file paths by format"
+    )

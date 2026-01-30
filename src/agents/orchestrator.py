@@ -765,7 +765,11 @@ class OrchestratorAgent(BaseAgent):
         state: ExtractionState,
     ) -> Literal["complete", "retry", "human_review"]:
         """
-        Determine the routing path based on state.
+        Determine the routing path based on state — single source of truth.
+
+        Uses confidence_level, overall_confidence, and validator recommendation
+        flags to make the final routing decision. The validator annotates the
+        state with recommendations but does NOT set the final status.
 
         This is the conditional edge function for LangGraph.
 
@@ -784,26 +788,45 @@ class OrchestratorAgent(BaseAgent):
                 return ROUTE_RETRY
             return ROUTE_HUMAN_REVIEW
 
-        # Check confidence levels
+        # Gather routing inputs
         confidence_level = state.get("confidence_level", ConfidenceLevel.LOW.value)
         overall_confidence = state.get("overall_confidence", 0.0)
         retry_count = state.get("retry_count", 0)
+        validation_is_valid = state.get("validation_is_valid", True)
+        validator_wants_retry = state.get("validation_requires_retry", False)
+        validator_wants_review = state.get("validation_requires_human_review", False)
 
         self._logger.debug(
             "determining_route",
             confidence_level=confidence_level,
             overall_confidence=overall_confidence,
             retry_count=retry_count,
+            validation_is_valid=validation_is_valid,
+            validator_wants_retry=validator_wants_retry,
+            validator_wants_review=validator_wants_review,
         )
 
-        if confidence_level == ConfidenceLevel.HIGH.value:
+        # HIGH confidence + valid: auto-complete
+        if confidence_level == ConfidenceLevel.HIGH.value and validation_is_valid:
             return ROUTE_COMPLETE
 
+        # Validator explicitly recommends retry and retries remain
+        if validator_wants_retry and retry_count < self._max_retries:
+            return ROUTE_RETRY
+
+        # Validator explicitly recommends human review
+        if validator_wants_review:
+            if retry_count < self._max_retries:
+                return ROUTE_RETRY  # Try once more before human review
+            return ROUTE_HUMAN_REVIEW
+
+        # MEDIUM confidence: retry if possible, else accept
         if confidence_level == ConfidenceLevel.MEDIUM.value:
             if retry_count < self._max_retries:
                 return ROUTE_RETRY
             return ROUTE_COMPLETE
 
+        # LOW confidence: retry once, then human review
         if retry_count < 1:
             return ROUTE_RETRY
         return ROUTE_HUMAN_REVIEW
@@ -834,9 +857,10 @@ class OrchestratorAgent(BaseAgent):
 
     def _retry_node(self, state: ExtractionState) -> ExtractionState:
         """
-        Retry node - prepares state for re-extraction.
+        Retry node - clears stale extraction data and prepares for re-extraction.
 
-        Increments retry counter and updates status.
+        Clears previous extraction results to prevent stale data contamination,
+        increments retry counter, and resets status for fresh extraction.
         """
         retry_count = state.get("retry_count", 0) + 1
 
@@ -844,6 +868,7 @@ class OrchestratorAgent(BaseAgent):
             "retry_extraction",
             retry_count=retry_count,
             max_retries=self._max_retries,
+            clearing_previous="merged_extraction,field_metadata,validation",
         )
 
         return update_state(
@@ -852,6 +877,18 @@ class OrchestratorAgent(BaseAgent):
                 "retry_count": retry_count,
                 "status": ExtractionStatus.EXTRACTING.value,
                 "current_step": f"retry_{retry_count}",
+                # Clear stale extraction data to prevent contamination
+                "merged_extraction": {},
+                "field_metadata": {},
+                "page_extractions": [],
+                "validation": None,
+                "overall_confidence": 0.0,
+                "confidence_level": "",
+                # Clear validator recommendation flags
+                "validation_is_valid": True,
+                "validation_requires_retry": False,
+                "validation_requires_human_review": False,
+                "validation_reasons": "",
             },
         )
 

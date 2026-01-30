@@ -41,7 +41,10 @@
       "Bash(pip show:*)",
       "Bash(yamllint:*)",
       "Bash(python -c:*)",
-      "Bash(python -m json.tool:*)"
+      "Bash(python -m json.tool:*)",
+      "Bash(ls:*)",
+      "Read(//d/Repo/PDF/**)",
+      "Bash(if not exist \"d:\\\\Repo\\\\PDF\\\\src\\\\extraction\" mkdir \"d:\\\\Repo\\\\PDF\\\\src\\\\extraction\")"
     ],
     "deny": [],
     "ask": []

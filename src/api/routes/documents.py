@@ -22,7 +22,11 @@ from src.api.models import (
     BatchProcessResponse,
     ConfidenceLevelEnum,
     ExportFormatEnum,
+    ExtractionModeEnum,
     FieldResult,
+    MultiRecordDuplicate,
+    MultiRecordItem,
+    MultiRecordResponse,
     PreviewRequest,
     PreviewResponse,
     PreviewStyleEnum,
@@ -168,14 +172,14 @@ def _build_process_response(
 
 @router.post(
     "/documents/process",
-    response_model=ProcessResponse | AsyncProcessResponse,
+    response_model=ProcessResponse | AsyncProcessResponse | MultiRecordResponse,
     summary="Process a document",
-    description="Process a PDF document and extract structured data.",
+    description="Process a PDF document and extract structured data. Supports single-record (legacy) and multi-record (per-entity) extraction modes.",
 )
 async def process_document(
     request: ProcessRequest,
     http_request: Request,
-) -> ProcessResponse | AsyncProcessResponse:
+) -> ProcessResponse | AsyncProcessResponse | MultiRecordResponse:
     """
     Process a PDF document.
 
@@ -267,64 +271,17 @@ async def process_document(
 
     # Sync processing
     try:
-        from src.pipeline.graph import run_extraction_pipeline
-
-        result = run_extraction_pipeline(
-            pdf_path=request.pdf_path,
-            schema_name=request.schema_name,
+        use_multi_record = request.extraction_mode in (
+            ExtractionModeEnum.MULTI,
+            ExtractionModeEnum.AUTO,
         )
 
-        output_path = ""
-        if request.output_dir:
-            output_base = Path(request.output_dir) / result.get("processing_id", "output")
-
-            output_paths = []
-
-            if request.export_format in (
-                ExportFormatEnum.JSON,
-                ExportFormatEnum.BOTH,
-                ExportFormatEnum.ALL,
-            ):
-                from src.export import ExportFormat, export_to_json
-
-                json_path = output_base.with_suffix(".json")
-                export_to_json(
-                    result,
-                    output_path=json_path,
-                    format=ExportFormat.DETAILED,
-                )
-                output_paths.append(str(json_path))
-
-            if request.export_format in (
-                ExportFormatEnum.EXCEL,
-                ExportFormatEnum.BOTH,
-                ExportFormatEnum.ALL,
-            ):
-                from src.export import export_to_excel
-
-                excel_path = output_base.with_suffix(".xlsx")
-                export_to_excel(
-                    result,
-                    output_path=excel_path,
-                    mask_phi=request.mask_phi,
-                )
-                output_paths.append(str(excel_path))
-
-            if request.export_format in (ExportFormatEnum.MARKDOWN, ExportFormatEnum.ALL):
-                from src.export import MarkdownStyle, export_to_markdown
-
-                md_path = output_base.with_suffix(".md")
-                export_to_markdown(
-                    result,
-                    output_path=md_path,
-                    style=MarkdownStyle.DETAILED,
-                    mask_phi=request.mask_phi,
-                )
-                output_paths.append(str(md_path))
-
-            output_path = "; ".join(output_paths) if output_paths else ""
-
-        return _build_process_response(result, output_path)
+        if use_multi_record:
+            # Multi-record extraction: returns per-record results
+            return _run_multi_record_sync(request, request_id)
+        else:
+            # Legacy single-record extraction
+            return _run_single_record_sync(request, request_id)
 
     except Exception as e:
         logger.error(
@@ -336,6 +293,153 @@ async def process_document(
             status_code=500,
             detail=f"Processing failed: {e!s}",
         )
+
+
+def _run_single_record_sync(
+    request: ProcessRequest,
+    request_id: str,
+) -> ProcessResponse:
+    """Run single-record extraction (legacy pipeline)."""
+    from src.pipeline.graph import run_extraction_pipeline
+
+    result = run_extraction_pipeline(
+        pdf_path=request.pdf_path,
+        schema_name=request.schema_name,
+    )
+
+    output_path = ""
+    if request.output_dir:
+        output_base = Path(request.output_dir) / result.get("processing_id", "output")
+        output_paths = []
+
+        if request.export_format in (
+            ExportFormatEnum.JSON,
+            ExportFormatEnum.BOTH,
+            ExportFormatEnum.ALL,
+        ):
+            from src.export import ExportFormat, export_to_json
+
+            json_path = output_base.with_suffix(".json")
+            export_to_json(result, output_path=json_path, format=ExportFormat.DETAILED)
+            output_paths.append(str(json_path))
+
+        if request.export_format in (
+            ExportFormatEnum.EXCEL,
+            ExportFormatEnum.BOTH,
+            ExportFormatEnum.ALL,
+        ):
+            from src.export import export_to_excel
+
+            excel_path = output_base.with_suffix(".xlsx")
+            export_to_excel(result, output_path=excel_path, mask_phi=request.mask_phi)
+            output_paths.append(str(excel_path))
+
+        if request.export_format in (ExportFormatEnum.MARKDOWN, ExportFormatEnum.ALL):
+            from src.export import MarkdownStyle, export_to_markdown
+
+            md_path = output_base.with_suffix(".md")
+            export_to_markdown(
+                result, output_path=md_path, style=MarkdownStyle.DETAILED, mask_phi=request.mask_phi
+            )
+            output_paths.append(str(md_path))
+
+        output_path = "; ".join(output_paths) if output_paths else ""
+
+    return _build_process_response(result, output_path)
+
+
+def _run_multi_record_sync(
+    request: ProcessRequest,
+    request_id: str,
+) -> MultiRecordResponse:
+    """Run multi-record extraction (per-entity boundary detection)."""
+    from src.export.consolidated_export import (
+        detect_duplicates,
+        export_excel,
+        export_json,
+        export_markdown,
+    )
+    from src.pipeline.runner import PipelineRunner
+
+    runner = PipelineRunner(enable_checkpointing=False)
+    result = runner.extract_multi_record(pdf_path=request.pdf_path)
+
+    # Build response records
+    records = [
+        MultiRecordItem(
+            record_id=r.record_id,
+            page_number=r.page_number,
+            primary_identifier=r.primary_identifier,
+            entity_type=r.entity_type,
+            fields=r.fields,
+            confidence=r.confidence,
+            extraction_time_ms=r.extraction_time_ms,
+        )
+        for r in result.records
+    ]
+
+    # Detect duplicates
+    dups = detect_duplicates(result.records)
+    duplicates = [
+        MultiRecordDuplicate(
+            primary_identifier=ident.title(),
+            occurrences=len(indices),
+            pages=[result.records[i].page_number for i in indices],
+            record_ids=[result.records[i].record_id for i in indices],
+        )
+        for ident, indices in dups.items()
+    ]
+
+    # Export if output_dir specified
+    output_paths: dict[str, str] = {}
+    if request.output_dir:
+        out_dir = Path(request.output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stem = Path(request.pdf_path).stem
+
+        if request.export_format in (
+            ExportFormatEnum.JSON,
+            ExportFormatEnum.BOTH,
+            ExportFormatEnum.ALL,
+        ):
+            p = out_dir / f"{stem}_multi_record.json"
+            export_json(result, p)
+            output_paths["json"] = str(p)
+
+        if request.export_format in (
+            ExportFormatEnum.EXCEL,
+            ExportFormatEnum.BOTH,
+            ExportFormatEnum.ALL,
+        ):
+            p = out_dir / f"{stem}_multi_record.xlsx"
+            export_excel(result, p)
+            output_paths["excel"] = str(p)
+
+        if request.export_format in (ExportFormatEnum.MARKDOWN, ExportFormatEnum.ALL):
+            p = out_dir / f"{stem}_multi_record.md"
+            export_markdown(result, p)
+            output_paths["markdown"] = str(p)
+
+    # Count unique
+    dup_indices: set[int] = set()
+    for indices in dups.values():
+        dup_indices.update(indices)
+    unique_count = result.total_records - len(dup_indices) + len(dups)
+
+    return MultiRecordResponse(
+        pdf_path=request.pdf_path,
+        document_type=result.document_type,
+        entity_type=result.entity_type,
+        total_pages=result.total_pages,
+        total_records=result.total_records,
+        unique_records=unique_count,
+        schema_fields=result.schema.get("fields", []),
+        records=records,
+        duplicates=duplicates,
+        total_vlm_calls=result.total_vlm_calls,
+        processing_time_ms=result.total_processing_time_ms,
+        output_paths=output_paths,
+    )
 
 
 @router.post(
@@ -351,6 +455,7 @@ async def upload_document(
     export_format: ExportFormatEnum = Form(ExportFormatEnum.JSON),
     mask_phi: bool = Form(False),
     priority: str = Form("normal"),
+    extraction_mode: ExtractionModeEnum = Form(ExtractionModeEnum.MULTI),
 ) -> AsyncProcessResponse:
     """
     Upload and process a PDF document.
@@ -439,6 +544,7 @@ async def upload_document(
             export_format=export_format.value,
             mask_phi=mask_phi,
             priority=priority,
+            extraction_mode=extraction_mode.value,
         )
 
         logger.info(

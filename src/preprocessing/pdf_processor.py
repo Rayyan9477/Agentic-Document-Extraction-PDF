@@ -160,6 +160,7 @@ class PageImage:
     has_text: bool
     has_images: bool
     rotation: int
+    text_content: str = ""
 
     @property
     def base64_encoded(self) -> str:
@@ -194,6 +195,7 @@ class PageImage:
             "has_images": self.has_images,
             "rotation": self.rotation,
             "size_kb": self.size_kb,
+            "has_text_content": bool(self.text_content),
         }
 
 
@@ -502,8 +504,9 @@ class PDFProcessor:
             else:
                 orientation = DocumentOrientation.SQUARE
 
-            # Check for text and images
-            has_text = bool(page.get_text("text").strip())
+            # Extract text layer (OCR text for digital-native PDFs)
+            raw_text = page.get_text("text").strip()
+            has_text = bool(raw_text)
             has_images = len(page.get_images()) > 0
 
             page_image = PageImage(
@@ -518,6 +521,7 @@ class PDFProcessor:
                 has_text=has_text,
                 has_images=has_images,
                 rotation=int(page.rotation),
+                text_content=raw_text,
             )
 
             logger.debug(

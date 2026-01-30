@@ -62,7 +62,7 @@ PLACEHOLDER_PATTERNS = [
     re.compile(r"^N/?A$", re.IGNORECASE),
     re.compile(r"^TBD$", re.IGNORECASE),
     re.compile(r"^XXX+$", re.IGNORECASE),
-    re.compile(r"^12345*$"),
+    re.compile(r"^12345\d*$"),  # Sequential test numbers: 12345, 123456, etc.
     re.compile(r"^00000+$"),
     re.compile(r"^\*+$"),
     re.compile(r"^TEST$", re.IGNORECASE),
@@ -72,8 +72,9 @@ PLACEHOLDER_PATTERNS = [
     re.compile(r"^JANE\s*DOE$", re.IGNORECASE),
 ]
 
-# Suspiciously round amounts (potential hallucinations)
-ROUND_AMOUNT_PATTERN = re.compile(r"^\$?\d+\.00$")
+# Suspiciously generic round amounts — only flag amounts that are commonly
+# hallucinated by VLMs (large round numbers), NOT legitimate small charges
+ROUND_AMOUNT_PATTERN = re.compile(r"^\$?(?:100|500|1000|2000|2500|5000|10000)\.00$")
 
 # Common hallucinated dates
 SUSPICIOUS_DATES = [
@@ -741,55 +742,46 @@ class ValidatorAgent(BaseAgent):
         validation: ValidationResult,
     ) -> ExtractionState:
         """
-        Route extraction based on confidence level.
+        Annotate state with validation recommendations for the orchestrator.
+
+        IMPORTANT: This method sets recommendation flags and confidence data
+        but does NOT set the final status (completed/retry/human_review).
+        The orchestrator's _determine_route() is the single source of truth
+        for routing decisions, using the confidence_level and flags set here.
 
         Args:
             state: Current state.
             validation: Validation results.
 
         Returns:
-            Updated state with routing decision.
+            Updated state with validation recommendations (not final status).
         """
-        # High confidence: auto-accept
-        if validation.confidence_level == ConfidenceLevel.HIGH and validation.is_valid:
-            return complete_extraction(
-                state,
-                final_output=state.get("merged_extraction", {}),
-                overall_confidence=validation.overall_confidence,
+        # Build recommendation reasons for logging/debugging
+        recommendation_reasons: list[str] = []
+
+        if validation.confidence_level == ConfidenceLevel.LOW:
+            recommendation_reasons.append(
+                f"Low confidence: {validation.overall_confidence:.2f}"
+            )
+        if validation.hallucination_flags:
+            recommendation_reasons.append(
+                f"Hallucination flags: {', '.join(validation.hallucination_flags[:3])}"
+            )
+        if validation.errors:
+            recommendation_reasons.append(
+                f"Validation errors: {len(validation.errors)}"
             )
 
-        # Medium confidence with issues: retry
-        if validation.requires_retry:
-            retry_count = state.get("retry_count", 0)
-            max_retries = state.get("max_retries", 2)
-
-            if retry_count < max_retries:
-                return request_retry(state)
-            return request_human_review(
-                state,
-                f"Maximum retries ({max_retries}) exceeded with confidence "
-                f"{validation.overall_confidence:.2f}",
-            )
-
-        # Low confidence or hallucinations: human review
-        if validation.requires_human_review:
-            reasons = []
-            if validation.confidence_level == ConfidenceLevel.LOW:
-                reasons.append(f"Low confidence: {validation.overall_confidence:.2f}")
-            if validation.hallucination_flags:
-                reasons.append(
-                    f"Hallucination flags: {', '.join(validation.hallucination_flags[:3])}"
-                )
-            if validation.errors:
-                reasons.append(f"Validation errors: {len(validation.errors)}")
-
-            return request_human_review(state, "; ".join(reasons))
-
-        # Default: complete with medium confidence
-        return complete_extraction(
+        # Annotate state with validation results — let orchestrator decide routing
+        return update_state(
             state,
-            final_output=state.get("merged_extraction", {}),
-            overall_confidence=validation.overall_confidence,
+            {
+                "validation_is_valid": validation.is_valid,
+                "validation_requires_retry": validation.requires_retry,
+                "validation_requires_human_review": validation.requires_human_review,
+                "validation_reasons": "; ".join(recommendation_reasons) if recommendation_reasons else "",
+                "current_step": "validation_complete",
+            },
         )
 
     def validate_field_standalone(

@@ -139,10 +139,38 @@ class AnalyzerAgent(BaseAgent):
                     recoverable=False,
                 )
 
-            # Perform classification
+            # Perform classification with multi-page fallback
             classification_result = self._classify_document(image_data)
 
-            # Perform structure analysis
+            # If first-page confidence is below threshold and we have more pages,
+            # try the next pages — page 1 may be a fax cover sheet or header
+            if (
+                classification_result.get("confidence", 0.0) < self._confidence_threshold
+                and len(page_images) > 1
+            ):
+                self._logger.info(
+                    "low_confidence_first_page_trying_additional_pages",
+                    first_page_confidence=classification_result.get("confidence", 0.0),
+                    threshold=self._confidence_threshold,
+                )
+                for fallback_page in page_images[1:3]:  # Try up to 2 more pages
+                    fallback_image = fallback_page.get("data_uri") or fallback_page.get("base64_encoded", "")
+                    if not fallback_image:
+                        continue
+                    alt_result = self._classify_document(fallback_image)
+                    if alt_result.get("confidence", 0.0) > classification_result.get("confidence", 0.0):
+                        self._logger.info(
+                            "better_classification_from_later_page",
+                            page=fallback_page.get("page_number"),
+                            new_confidence=alt_result.get("confidence", 0.0),
+                            new_type=alt_result.get("document_type"),
+                        )
+                        classification_result = alt_result
+                        image_data = fallback_image  # Use this page for structure analysis too
+                    if classification_result.get("confidence", 0.0) >= self._confidence_threshold:
+                        break
+
+            # Perform structure analysis on the best-classified page
             structure_result = self._analyze_structure(image_data)
 
             # Analyze page relationships if multi-page
@@ -436,7 +464,7 @@ class AnalyzerAgent(BaseAgent):
         relationship_prompt = build_page_relationship_prompt(total_pages)
 
         for i, page in enumerate(page_images, start=1):
-            image_data = page.get("image", "")
+            image_data = page.get("data_uri") or page.get("base64_encoded", "")
 
             if not image_data:
                 # Fallback to basic role assignment if no image
@@ -449,8 +477,7 @@ class AnalyzerAgent(BaseAgent):
                 continue
 
             try:
-                # Increment VLM call counter
-                self._vlm_calls += 1
+                # VLM call counter is auto-incremented by send_vision_request_with_json()
 
                 # Add page context to prompt
                 page_prompt = f"This is page {i} of {total_pages}.\n\n" f"{relationship_prompt}"

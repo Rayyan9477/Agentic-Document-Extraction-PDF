@@ -56,6 +56,7 @@ class PipelineRunner:
         max_retries: int = 2,
         dpi: int = 200,
         max_image_dimension: int = 2048,
+        enable_image_enhancement: bool | None = None,
     ) -> None:
         """
         Initialize the pipeline runner.
@@ -66,6 +67,9 @@ class PipelineRunner:
             max_retries: Maximum retry attempts for extraction.
             dpi: DPI for PDF to image conversion.
             max_image_dimension: Maximum image dimension for VLM.
+            enable_image_enhancement: Whether to apply image enhancement
+                (deskew, denoise, CLAHE) before VLM extraction. Defaults to
+                settings value. Improves quality for scanned/faxed documents.
         """
         self._client = client or LMStudioClient()
         self._enable_checkpointing = enable_checkpointing
@@ -74,6 +78,14 @@ class PipelineRunner:
         self._max_image_dimension = max_image_dimension
         self._settings = get_settings()
         self._logger = get_logger("pipeline.runner")
+
+        # Image enhancement (optional, improves scanned/faxed doc quality)
+        self._enable_enhancement = (
+            enable_image_enhancement
+            if enable_image_enhancement is not None
+            else getattr(self._settings, "image", None) is not None
+        )
+        self._enhancer = None  # Lazy initialized
 
         # Workflow components (lazy initialized)
         self._orchestrator: OrchestratorAgent | None = None
@@ -84,6 +96,7 @@ class PipelineRunner:
             checkpointing=enable_checkpointing,
             max_retries=max_retries,
             dpi=dpi,
+            image_enhancement=self._enable_enhancement,
         )
 
     def _ensure_workflow_initialized(self) -> None:
@@ -390,6 +403,9 @@ class PipelineRunner:
                     pix_width = pixmap.width
                     pix_height = pixmap.height
 
+                    # Apply image enhancement for scanned/faxed documents
+                    png_bytes = self._enhance_image_bytes(png_bytes, page_num)
+
                     # Check if resizing needed
                     if (
                         pix_width > self._max_image_dimension
@@ -404,6 +420,9 @@ class PipelineRunner:
                     base64_data = base64.b64encode(png_bytes).decode("utf-8")
                     data_uri = f"data:image/png;base64,{base64_data}"
 
+                    # Extract OCR text layer for hybrid vision+text approach
+                    text_content = page.get_text("text").strip()
+
                     page_images.append(
                         {
                             "page_number": page_num,
@@ -411,6 +430,7 @@ class PipelineRunner:
                             "height": pix_height,
                             "data_uri": data_uri,
                             "base64_encoded": base64_data,
+                            "text_content": text_content,
                         }
                     )
                 finally:
@@ -459,6 +479,9 @@ class PipelineRunner:
                     pix_width = pixmap.width
                     pix_height = pixmap.height
 
+                    # Apply image enhancement for scanned/faxed documents
+                    png_bytes = self._enhance_image_bytes(png_bytes, page_num)
+
                     # Check if resizing needed
                     if (
                         pix_width > self._max_image_dimension
@@ -473,6 +496,9 @@ class PipelineRunner:
                     base64_data = base64.b64encode(png_bytes).decode("utf-8")
                     data_uri = f"data:image/png;base64,{base64_data}"
 
+                    # Extract OCR text layer for hybrid vision+text approach
+                    text_content = page.get_text("text").strip()
+
                     page_images.append(
                         {
                             "page_number": page_num,
@@ -480,6 +506,7 @@ class PipelineRunner:
                             "height": pix_height,
                             "data_uri": data_uri,
                             "base64_encoded": base64_data,
+                            "text_content": text_content,
                         }
                     )
                 finally:
@@ -530,6 +557,88 @@ class PipelineRunner:
             if img_resized is not None:
                 img_resized.close()
             img.close()
+
+    def _enhance_image_bytes(self, png_bytes: bytes, page_number: int) -> bytes:
+        """
+        Apply image enhancement (deskew, denoise, CLAHE) to raw PNG bytes.
+
+        Falls back gracefully to original bytes on any error to avoid
+        blocking the extraction pipeline.
+
+        Args:
+            png_bytes: Raw PNG image bytes.
+            page_number: Page number for logging.
+
+        Returns:
+            Enhanced PNG bytes, or original bytes on failure.
+        """
+        if not self._enable_enhancement:
+            return png_bytes
+
+        try:
+            import cv2
+            import numpy as np
+
+            # Decode PNG bytes to OpenCV image
+            nparr = np.frombuffer(png_bytes, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if img is None:
+                return png_bytes
+
+            # Lazy-initialize enhancer
+            if self._enhancer is None:
+                from src.preprocessing.image_enhancer import ImageEnhancer
+                self._enhancer = ImageEnhancer()
+
+            # Convert to grayscale for analysis
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Calculate Laplacian variance (sharpness) to decide if enhancement needed
+            variance = cv2.Laplacian(gray, cv2.CV_64F).var()
+
+            # Only enhance if image quality is below threshold (likely scanned/faxed)
+            if variance > 500:  # High-quality renders don't need enhancement
+                self._logger.debug(
+                    "skipping_enhancement_high_quality",
+                    page=page_number,
+                    sharpness_variance=round(variance, 1),
+                )
+                return png_bytes
+
+            self._logger.info(
+                "enhancing_page_image",
+                page=page_number,
+                sharpness_variance=round(variance, 1),
+            )
+
+            # Apply CLAHE (adaptive contrast) on the luminance channel
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            l_channel, a_channel, b_channel = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            enhanced_l = clahe.apply(l_channel)
+            enhanced_lab = cv2.merge([enhanced_l, a_channel, b_channel])
+            img = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
+
+            # Apply light denoising (preserves text edges)
+            img = cv2.fastNlMeansDenoisingColored(img, None, 6, 6, 7, 21)
+
+            # Encode back to PNG
+            success, encoded = cv2.imencode(".png", img)
+            if success:
+                return encoded.tobytes()
+            return png_bytes
+
+        except ImportError:
+            self._logger.debug("opencv_not_available_skipping_enhancement")
+            self._enable_enhancement = False  # Don't try again
+            return png_bytes
+        except Exception as e:
+            self._logger.warning(
+                "image_enhancement_failed_using_original",
+                page=page_number,
+                error=str(e),
+            )
+            return png_bytes
 
     def _calculate_file_hash(self, file_path: str) -> str:
         """
@@ -596,6 +705,72 @@ class PipelineRunner:
         )
 
         return state
+
+    def extract_multi_record(
+        self,
+        pdf_path: str | Path,
+        start_page: int | None = None,
+        end_page: int | None = None,
+    ) -> "DocumentExtractionResult":
+        """
+        Extract multiple records per page from a PDF document.
+
+        Uses a streamlined pipeline that:
+        1. Detects document type + entity type (1 VLM call)
+        2. Generates adaptive schema (1 VLM call)
+        3. Per page: detects record boundaries (1 VLM call)
+        4. Per record: extracts fields (1 VLM call)
+
+        This is ideal for documents with multiple entities per page
+        (patient lists, invoice batches, employee rosters, etc.).
+
+        Args:
+            pdf_path: Path to the PDF file.
+            start_page: Optional first page to process (1-indexed).
+            end_page: Optional last page to process (1-indexed).
+
+        Returns:
+            DocumentExtractionResult with per-record data.
+
+        Raises:
+            FileNotFoundError: If PDF file not found.
+        """
+        from src.extraction.multi_record import (
+            DocumentExtractionResult,
+            MultiRecordExtractor,
+        )
+
+        pdf_path = Path(pdf_path)
+        if not pdf_path.exists():
+            raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+        self._logger.info(
+            "starting_multi_record_extraction",
+            pdf_path=str(pdf_path),
+            start_page=start_page,
+            end_page=end_page,
+        )
+
+        # Load and convert PDF pages using existing infrastructure
+        page_images = self._load_and_convert_pdf(str(pdf_path))
+
+        # Run multi-record extraction
+        extractor = MultiRecordExtractor(client=self._client)
+        result = extractor.extract_document(
+            page_images=page_images,
+            pdf_path=str(pdf_path),
+            start_page=start_page,
+            end_page=end_page,
+        )
+
+        self._logger.info(
+            "multi_record_extraction_complete",
+            total_records=result.total_records,
+            total_pages=result.total_pages,
+            vlm_calls=result.total_vlm_calls,
+        )
+
+        return result
 
 
 def extract_document(

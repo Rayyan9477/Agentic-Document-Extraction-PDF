@@ -38,7 +38,7 @@ from src.prompts.grounding_rules import (
     build_grounded_system_prompt,
 )
 from src.schemas import DocumentSchema, FieldDefinition, SchemaRegistry
-from src.validation import ComparisonResult, DualPassComparator
+from src.validation import ComparisonResult, DualPassComparator, MergeStrategy
 
 
 logger = get_logger(__name__)
@@ -76,7 +76,49 @@ class ExtractorAgent(BaseAgent):
         self._schema_registry = SchemaRegistry()
         self._agreement_boost = agreement_confidence_boost
         self._disagreement_penalty = disagreement_confidence_penalty
-        self._dual_pass_comparator = DualPassComparator()
+        # Domain-specific merge strategies for medical document fields
+        # Diagnosis codes and financial amounts: require agreement (wrong is worse than missing)
+        # Names and addresses: prefer longer value (truncation is common VLM failure)
+        _medical_field_strategies = {
+            # Diagnosis codes — wrong code is dangerous
+            "diagnosis_code_a": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_b": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_c": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_d": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_e": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_f": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_g": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_h": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_i": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_j": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_k": MergeStrategy.REQUIRE_AGREEMENT,
+            "diagnosis_code_l": MergeStrategy.REQUIRE_AGREEMENT,
+            "cpt_code": MergeStrategy.REQUIRE_AGREEMENT,
+            # Financial amounts — discrepancies are high-risk
+            "total_charges": MergeStrategy.REQUIRE_AGREEMENT,
+            "amount_paid": MergeStrategy.REQUIRE_AGREEMENT,
+            "amount_due": MergeStrategy.REQUIRE_AGREEMENT,
+            "balance_due": MergeStrategy.REQUIRE_AGREEMENT,
+            "outside_lab_charges": MergeStrategy.REQUIRE_AGREEMENT,
+            # Identifiers — must be exact
+            "npi": MergeStrategy.REQUIRE_AGREEMENT,
+            "federal_tax_id": MergeStrategy.REQUIRE_AGREEMENT,
+            "insurance_id": MergeStrategy.REQUIRE_AGREEMENT,
+            # Names and addresses — prefer longer (truncation is common)
+            "patient_name": MergeStrategy.PREFER_LONGER,
+            "insured_name": MergeStrategy.PREFER_LONGER,
+            "other_insured_name": MergeStrategy.PREFER_LONGER,
+            "referring_provider_name": MergeStrategy.PREFER_LONGER,
+            "facility_name": MergeStrategy.PREFER_LONGER,
+            "billing_provider_name": MergeStrategy.PREFER_LONGER,
+            "patient_address": MergeStrategy.PREFER_LONGER,
+            "insured_address": MergeStrategy.PREFER_LONGER,
+            "facility_address": MergeStrategy.PREFER_LONGER,
+            "billing_provider_address": MergeStrategy.PREFER_LONGER,
+        }
+        self._dual_pass_comparator = DualPassComparator(
+            field_strategies=_medical_field_strategies,
+        )
 
     def process(self, state: ExtractionState) -> ExtractionState:
         """
@@ -150,6 +192,19 @@ class ExtractorAgent(BaseAgent):
                     recoverable=False,
                 )
 
+            # Extract structure context from analyzer results for prompt enrichment
+            analysis = state.get("analysis", {})
+            structure_context = {
+                "has_tables": analysis.get("has_tables", False),
+                "table_count": analysis.get("table_count", 0),
+                "has_handwriting": analysis.get("has_handwriting", False),
+                "has_signatures": analysis.get("has_signatures", False),
+                "layout_type": analysis.get("layout_type", ""),
+                "text_density": analysis.get("text_density", ""),
+                "detected_structures": analysis.get("detected_structures", []),
+                "regions_of_interest": analysis.get("regions_of_interest", []),
+            } if analysis else None
+
             # Extract from each page
             page_extractions: list[dict[str, Any]] = []
             total_vlm_calls = 0
@@ -160,6 +215,7 @@ class ExtractorAgent(BaseAgent):
                     schema=schema,
                     document_type=state.get("document_type", "OTHER"),
                     total_pages=len(page_images),
+                    structure_context=structure_context,
                 )
                 page_extractions.append(serialize_page_extraction(page_result))
                 total_vlm_calls += page_result.vlm_calls
@@ -253,34 +309,39 @@ class ExtractorAgent(BaseAgent):
                     recoverable=False,
                 )
             
+            # Retry-aware extraction: vary temperature on retries to get different
+            # VLM outputs instead of repeating the exact same extraction.
+            retry_count = state.get("retry_count", 0)
+
             self._logger.info(
                 "adaptive_extraction_started",
                 pages=len(page_images),
                 fields=adaptive_schema.get("total_field_count", 0),
                 strategy=adaptive_schema.get("overall_strategy", "unknown"),
+                retry_count=retry_count,
             )
-            
+
             # Extract from each page using adaptive strategy
             page_extractions: list[dict[str, Any]] = []
             total_vlm_calls = 0
-            
+
             for idx, page_data in enumerate(page_images):
                 page_number = page_data.get("page_number", idx + 1)
-                
+
                 # Get corresponding layout and components for this page
                 layout = None
                 components = None
-                
+
                 for la in layout_analyses:
                     if la.get("page_number") == page_number:
                         layout = la
                         break
-                
+
                 for cm in component_maps:
                     if cm.get("page_number") == page_number:
                         components = cm
                         break
-                
+
                 # Extract page with full context
                 page_result = self._extract_page_adaptive(
                     page_data=page_data,
@@ -289,6 +350,7 @@ class ExtractorAgent(BaseAgent):
                     components=components,
                     page_number=page_number,
                     total_pages=len(page_images),
+                    retry_count=retry_count,
                 )
                 
                 page_extractions.append(serialize_page_extraction(page_result))
@@ -363,12 +425,14 @@ class ExtractorAgent(BaseAgent):
         components: dict[str, Any] | None,
         page_number: int,
         total_pages: int,
+        retry_count: int = 0,
     ) -> PageExtraction:
         """
         Extract data from a single page using adaptive schema and context.
-        
+
         Performs dual-pass extraction with full layout and component context.
-        
+        On retries, temperature is increased to get varied VLM outputs.
+
         Args:
             page_data: Page image data.
             adaptive_schema: VLM-generated adaptive schema.
@@ -376,7 +440,8 @@ class ExtractorAgent(BaseAgent):
             components: Component map for this page.
             page_number: Current page number.
             total_pages: Total page count.
-        
+            retry_count: Current pipeline retry attempt (0 = first try).
+
         Returns:
             PageExtraction with merged dual-pass results.
         """
@@ -403,9 +468,10 @@ class ExtractorAgent(BaseAgent):
             page_number=page_number,
             total_pages=total_pages,
             is_first_pass=True,
+            retry_count=retry_count,
         )
         pass1_time = int((time.time() - pass1_start) * 1000)
-        
+
         # Pass 2: Verification pass (accuracy focus)
         pass2_start = time.time()
         pass2_result = self._extract_page_pass_adaptive(
@@ -417,6 +483,7 @@ class ExtractorAgent(BaseAgent):
             page_number=page_number,
             total_pages=total_pages,
             is_first_pass=False,
+            retry_count=retry_count,
         )
         pass2_time = int((time.time() - pass2_start) * 1000)
         
@@ -449,10 +516,11 @@ class ExtractorAgent(BaseAgent):
         page_number: int,
         total_pages: int,
         is_first_pass: bool,
+        retry_count: int = 0,
     ) -> dict[str, Any]:
         """
         Perform single extraction pass with full VLM context.
-        
+
         Args:
             image_data: Base64-encoded image.
             field_defs: Adaptive field definitions.
@@ -462,7 +530,8 @@ class ExtractorAgent(BaseAgent):
             page_number: Current page number.
             total_pages: Total pages.
             is_first_pass: Whether this is pass 1 or 2.
-        
+            retry_count: Pipeline retry attempt (0 = first try).
+
         Returns:
             Extraction result dictionary.
         """
@@ -471,7 +540,7 @@ class ExtractorAgent(BaseAgent):
             document_desc=document_desc,
             is_verification=not is_first_pass,
         )
-        
+
         # Build structure-aware extraction prompt
         user_prompt = self._build_adaptive_extraction_prompt(
             field_defs=field_defs,
@@ -482,7 +551,22 @@ class ExtractorAgent(BaseAgent):
             total_pages=total_pages,
             is_first_pass=is_first_pass,
         )
-        
+
+        # On retries, add differentiation so the VLM produces varied outputs
+        # instead of repeating the exact same extraction.
+        temperature = 0.1
+        if retry_count > 0:
+            # Increase temperature: 0.1 → 0.2 → 0.3 (capped at 0.4)
+            temperature = min(0.1 + retry_count * 0.1, 0.4)
+            user_prompt += (
+                f"\n\n**RETRY ATTEMPT {retry_count}**: Previous extraction "
+                f"scored below threshold. Pay extra attention to:\n"
+                f"- Fields you may have missed\n"
+                f"- Values that were partially visible or ambiguous\n"
+                f"- Table rows that may span multiple lines\n"
+                f"- Small text or annotations you may have overlooked\n"
+            )
+
         # Retry with backoff
         settings = get_settings()
         retry_config = RetryConfig(
@@ -490,14 +574,14 @@ class ExtractorAgent(BaseAgent):
             base_delay_ms=500,
             max_delay_ms=settings.agent.max_retry_delay_ms,
         )
-        
+
         def make_vlm_call() -> dict[str, Any]:
             return self.send_vision_request_with_json(
                 image_data=image_data,
                 prompt=user_prompt,
                 system_prompt=system_prompt,
-                temperature=0.1,
-                max_tokens=6000,  # Adaptive extraction may need more tokens
+                temperature=temperature,
+                max_tokens=6000,
             )
         
         try:
@@ -707,25 +791,32 @@ Begin adaptive extraction now."""
     ) -> dict[str, Any]:
         """
         Merge extractions from multiple pages for adaptive schema.
-        
+
+        Two-phase merge:
+        1. Match extracted fields against schema-defined field names.
+        2. Pass through ALL remaining extracted fields not in the schema
+           (the VLM often returns fields the schema generator didn't predict).
+
         Args:
             page_extractions: List of per-page extraction results.
             adaptive_schema: Adaptive schema definition.
-        
+
         Returns:
-            Merged extraction dictionary.
+            Merged extraction dictionary with all extracted data preserved.
         """
-        # For now, use simple page-by-page aggregation
-        # Could be enhanced to handle multi-page fields intelligently
-        
-        merged = {}
-        fields = adaptive_schema.get("fields", [])
-        
-        for field in fields:
+        merged: dict[str, Any] = {}
+        schema_fields = adaptive_schema.get("fields", [])
+        schema_field_names = {f.get("field_name") for f in schema_fields}
+        schema_field_types = {f.get("field_name"): f.get("field_type", "text") for f in schema_fields}
+
+        # Track which extracted fields were consumed by schema matching
+        consumed_fields: set[str] = set()
+
+        # --- Phase 1: Schema-matched fields ---
+        for field in schema_fields:
             field_name = field.get("field_name")
             values = []
-            
-            # Collect values from all pages
+
             for page_ext in page_extractions:
                 merged_fields = page_ext.get("merged_fields", {})
                 if field_name in merged_fields:
@@ -737,17 +828,71 @@ Begin adaptive extraction now."""
                             "confidence": field_data.get("confidence", 0.5),
                             "page": page_ext.get("page_number", 0),
                         })
-            
-            # For single-value fields, take highest confidence
-            # For list fields, aggregate all values
+                        consumed_fields.add(field_name)
+
             if values:
                 if field.get("field_type") in ["list", "table"]:
-                    merged[field_name] = [v["value"] for v in values]
+                    all_confidences = [v["confidence"] for v in values]
+                    avg_conf = sum(all_confidences) / len(all_confidences) if all_confidences else 0.5
+                    source_pages = sorted({v["page"] for v in values})
+                    merged[field_name] = {
+                        "value": [v["value"] for v in values],
+                        "confidence": avg_conf,
+                        "source_pages": source_pages,
+                    }
                 else:
-                    # Take value with highest confidence
                     best = max(values, key=lambda v: v["confidence"])
-                    merged[field_name] = best["value"]
-        
+                    merged[field_name] = {
+                        "value": best["value"],
+                        "confidence": best["confidence"],
+                        "source_page": best["page"],
+                    }
+
+        # --- Phase 2: Pass-through for all remaining extracted fields ---
+        # The VLM often extracts fields not predicted by the schema generator
+        # (e.g. individual patient rows, table data, extra metadata).
+        # We preserve ALL extracted data so nothing is silently dropped.
+        for page_ext in page_extractions:
+            page_num = page_ext.get("page_number", 0)
+            merged_fields = page_ext.get("merged_fields", {})
+
+            for field_name, field_data in merged_fields.items():
+                if field_name in consumed_fields or field_name in merged:
+                    continue  # Already handled by schema match
+
+                value = field_data.get("value") if isinstance(field_data, dict) else field_data
+                confidence = field_data.get("confidence", 0.5) if isinstance(field_data, dict) else 0.5
+
+                if value is None:
+                    continue
+
+                if field_name in merged:
+                    # Multi-page: aggregate as list
+                    existing = merged[field_name]
+                    if isinstance(existing.get("value"), list):
+                        existing["value"].append(value)
+                        existing.setdefault("source_pages", []).append(page_num)
+                    else:
+                        merged[field_name] = {
+                            "value": [existing.get("value"), value],
+                            "confidence": (existing.get("confidence", 0.5) + confidence) / 2,
+                            "source_pages": [existing.get("source_page", 0), page_num],
+                        }
+                else:
+                    merged[field_name] = {
+                        "value": value,
+                        "confidence": confidence,
+                        "source_page": page_num,
+                    }
+                consumed_fields.add(field_name)
+
+        self._logger.info(
+            "adaptive_merge_complete",
+            schema_fields=len(schema_field_names),
+            total_merged=len(merged),
+            pass_through_fields=len(merged) - len([f for f in merged if f in schema_field_names]),
+        )
+
         return merged
 
     def _get_schema(self, state: ExtractionState) -> DocumentSchema | None:
@@ -855,6 +1000,7 @@ Begin adaptive extraction now."""
         schema: DocumentSchema,
         document_type: str,
         total_pages: int,
+        structure_context: dict[str, Any] | None = None,
     ) -> PageExtraction:
         """
         Extract data from a single page using dual-pass strategy.
@@ -864,6 +1010,7 @@ Begin adaptive extraction now."""
             schema: Extraction schema.
             document_type: Type of document.
             total_pages: Total number of pages.
+            structure_context: Optional structure analysis from analyzer.
 
         Returns:
             PageExtraction with merged results.
@@ -876,6 +1023,9 @@ Begin adaptive extraction now."""
                 page_number=page_number,
                 errors=["No image data available for page"],
             )
+
+        # Extract OCR text layer for hybrid vision+text approach
+        ocr_text = page_data.get("text_content", "")
 
         start_time = time.perf_counter()
         vlm_calls = 0
@@ -892,6 +1042,8 @@ Begin adaptive extraction now."""
                 page_number=page_number,
                 total_pages=total_pages,
                 is_first_pass=True,
+                structure_context=structure_context,
+                ocr_text=ocr_text,
             )
             vlm_calls += 1
 
@@ -903,6 +1055,8 @@ Begin adaptive extraction now."""
                 page_number=page_number,
                 total_pages=total_pages,
                 is_first_pass=False,
+                structure_context=structure_context,
+                ocr_text=ocr_text,
             )
             vlm_calls += 1
 
@@ -945,6 +1099,8 @@ Begin adaptive extraction now."""
         page_number: int,
         total_pages: int,
         is_first_pass: bool,
+        structure_context: dict[str, Any] | None = None,
+        ocr_text: str = "",
     ) -> dict[str, Any]:
         """
         Perform a single extraction pass with enhanced prompts and retry logic.
@@ -956,6 +1112,9 @@ Begin adaptive extraction now."""
             page_number: Current page number.
             total_pages: Total pages.
             is_first_pass: Whether this is pass 1 or 2.
+            structure_context: Optional structure analysis from analyzer (tables,
+                handwriting, layout info) to enhance prompt accuracy.
+            ocr_text: Optional OCR text layer from the PDF for hybrid extraction.
 
         Returns:
             Extraction result dictionary.
@@ -964,6 +1123,7 @@ Begin adaptive extraction now."""
         system_prompt = build_enhanced_system_prompt(
             document_type=document_type,
             is_verification_pass=not is_first_pass,
+            structure_context=structure_context,
         )
 
         # Build extraction prompt with enhanced features
@@ -983,6 +1143,19 @@ Begin adaptive extraction now."""
                 document_type=document_type,
                 page_number=page_number,
                 first_pass_results={},  # Don't show first pass to ensure independence
+            )
+
+        # Inject OCR text layer as supplementary context for hybrid extraction
+        # This helps the VLM cross-validate its visual reading against embedded text
+        if ocr_text:
+            ocr_snippet = ocr_text[:2000]  # Cap to avoid token overflow
+            prompt += (
+                "\n\n--- OCR TEXT LAYER (for cross-reference only) ---\n"
+                "The following text was extracted from the PDF's embedded text layer. "
+                "Use it to cross-check your visual reading. If the image and text "
+                "disagree, prefer what you see in the image but lower your confidence.\n\n"
+                f"{ocr_snippet}\n"
+                "--- END OCR TEXT ---"
             )
 
         # Use retry with exponential backoff for VLM calls
@@ -1179,9 +1352,11 @@ Begin adaptive extraction now."""
                         else:
                             existing_value.append(current_value)
 
-                    # Average confidence for merged values
-                    existing_confidence = merged[field_name].get("confidence", 0.0)
-                    avg_confidence = (existing_confidence + current_confidence) / 2
+                    # True average confidence across all contributing pages
+                    confidence_sum = merged[field_name].get("_confidence_sum", merged[field_name].get("confidence", 0.0))
+                    confidence_count = merged[field_name].get("_confidence_count", 1)
+                    confidence_sum += current_confidence
+                    confidence_count += 1
 
                     source_pages = merged[field_name].get("source_pages", [])
                     if page_number not in source_pages:
@@ -1189,8 +1364,10 @@ Begin adaptive extraction now."""
 
                     merged[field_name] = {
                         "value": existing_value,
-                        "confidence": avg_confidence,
+                        "confidence": confidence_sum / confidence_count,
                         "source_pages": source_pages,
+                        "_confidence_sum": confidence_sum,
+                        "_confidence_count": confidence_count,
                     }
                 else:
                     # For scalar types, keep value with higher confidence
@@ -1201,6 +1378,12 @@ Begin adaptive extraction now."""
                             "confidence": current_confidence,
                             "source_page": page_number,
                         }
+
+        # Strip internal tracking keys before returning
+        for field_name, field_data in merged.items():
+            if isinstance(field_data, dict):
+                field_data.pop("_confidence_sum", None)
+                field_data.pop("_confidence_count", None)
 
         return merged
 
@@ -1230,11 +1413,12 @@ Begin adaptive extraction now."""
                     source_page=field_data.get("source_page", 1),
                 )
             else:
-                # New format: Direct value (string, list, etc.)
+                # Direct value without structured metadata — flag with low default
+                # confidence to ensure the validator treats it cautiously
                 metadata[field_name] = FieldMetadata(
                     field_name=field_name,
                     value=field_data,
-                    confidence=0.85,  # Default confidence for adaptive extraction
+                    confidence=0.5,  # Conservative default for unstructured data
                     source_page=1,
                 )
 

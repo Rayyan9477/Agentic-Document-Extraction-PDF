@@ -22,8 +22,8 @@ import httpx
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, OpenAI, RateLimitError
 from tenacity import (
     RetryError,
+    Retrying,
     before_sleep_log,
-    retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -312,6 +312,21 @@ class LMStudioClient:
         # Track if closed
         self._closed = False
 
+        # Build retry policy using configurable max_retries (not hardcoded in decorator)
+        self._retryer = Retrying(
+            stop=stop_after_attempt(self._max_retries),
+            wait=wait_exponential(
+                multiplier=1,
+                min=self._retry_min_wait,
+                max=self._retry_max_wait,
+            ),
+            retry=retry_if_exception_type(
+                (APIConnectionError, APITimeoutError, RateLimitError)
+            ),
+            before_sleep=before_sleep_log(logger, "WARNING"),
+            reraise=True,
+        )
+
         # JSON extraction patterns
         self._json_patterns = [
             re.compile(r"```json\s*([\s\S]*?)\s*```", re.MULTILINE),
@@ -453,18 +468,17 @@ class LMStudioClient:
                 f"Request failed after {self._max_retries} retries: {last_exception}"
             ) from e
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        retry=retry_if_exception_type((APIConnectionError, APITimeoutError, RateLimitError)),
-        before_sleep=before_sleep_log(logger, "WARNING"),
-    )
     def _send_with_retry(self, request: VisionRequest) -> Any:
         """
         Send request with tenacity retry logic.
 
-        Uses exponential backoff for transient failures.
+        Uses configurable exponential backoff for transient failures.
+        The retry count is read from settings at runtime, not hardcoded.
         """
+        return self._retryer(self._send_single_request, request)
+
+    def _send_single_request(self, request: VisionRequest) -> Any:
+        """Execute a single VLM request (called by the retryer)."""
         # Build messages
         messages: list[dict[str, Any]] = []
 
@@ -501,12 +515,22 @@ class LMStudioClient:
 
         # Send request using thread-local client for thread safety
         client = self._get_client()
-        response = client.chat.completions.create(
-            model=self._model,
-            messages=messages,
-            max_tokens=request.max_tokens,
-            temperature=request.temperature,
-        )
+
+        # Build API kwargs
+        api_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
+        }
+
+        # NOTE: LM Studio does not support response_format={"type":"json_object"}.
+        # It only accepts "json_schema" or "text". Since we already have robust
+        # JSON extraction via _extract_json() (handles markdown blocks, embedded
+        # JSON, etc.), we rely on prompt-level "respond in JSON" instructions
+        # instead of API-level enforcement.
+
+        response = client.chat.completions.create(**api_kwargs)
 
         return response
 

@@ -16,7 +16,8 @@ from enum import Enum
 from typing import Any
 
 from src.config import get_logger
-from src.utils import fuzzy_match, normalize_whitespace
+from src.utils import normalize_whitespace
+from src.utils.string_utils import similarity_ratio
 
 
 logger = get_logger(__name__)
@@ -384,8 +385,8 @@ class DualPassComparator:
         except (ValueError, TypeError):
             pass
 
-        # Fuzzy string matching
-        return fuzzy_match(str1, str2)
+        # String similarity (returns float 0.0-1.0, not bool)
+        return similarity_ratio(str1, str2)
 
     def _normalize_value(self, value: Any) -> str:
         """Normalize a value to string for comparison."""

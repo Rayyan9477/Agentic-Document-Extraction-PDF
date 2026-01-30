@@ -157,6 +157,7 @@ class SchemaGeneratorAgent(BaseAgent):
             ),
             include_forbidden=True,
             include_confidence_scale=True,
+            include_few_shot_examples=False,  # Zero-shot mode
         )
         
         user_prompt = self._build_schema_generation_prompt(

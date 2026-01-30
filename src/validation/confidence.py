@@ -222,7 +222,7 @@ class ConfidenceScorer:
             field_conf = self._calculate_field_confidence(
                 field_name=field_name,
                 extraction_conf=extraction_confidences.get(field_name, 0.5),
-                agreement_score=agreement_scores.get(field_name, 1.0),
+                agreement_score=agreement_scores.get(field_name, 0.5),
                 validation_passed=validation_results.get(field_name, True),
                 has_pattern_flag=field_name in pattern_flags,
             )
@@ -298,6 +298,11 @@ class ConfidenceScorer:
 
         # Ensure bounds
         combined = max(0.0, min(1.0, combined))
+
+        # Hard gate: validation failure caps confidence below HIGH threshold
+        # A field cannot be HIGH confidence if it failed validation
+        if not validation_passed:
+            combined = min(combined, self.HIGH_THRESHOLD - 0.01)
 
         # Determine level
         if combined >= self.HIGH_THRESHOLD:
