@@ -56,9 +56,7 @@ logs/
 uploads/
 extracted_data/
 temp_images/
-*.pdf
-*.xlsx
-*.xls
+
 
 # SEC-MED-004: User data with password hashes should not be in repository
 data/users.json

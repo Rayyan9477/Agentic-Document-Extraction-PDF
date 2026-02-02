@@ -44,7 +44,8 @@
       "Bash(python -m json.tool:*)",
       "Bash(ls:*)",
       "Read(//d/Repo/PDF/**)",
-      "Bash(if not exist \"d:\\\\Repo\\\\PDF\\\\src\\\\extraction\" mkdir \"d:\\\\Repo\\\\PDF\\\\src\\\\extraction\")"
+      "Bash(if not exist \"d:\\\\Repo\\\\PDF\\\\src\\\\extraction\" mkdir \"d:\\\\Repo\\\\PDF\\\\src\\\\extraction\")",
+      "Bash(del \"d:\\\\Repo\\\\PDF\\\\main_enterprise.py\")"
     ],
     "deny": [],
     "ask": []

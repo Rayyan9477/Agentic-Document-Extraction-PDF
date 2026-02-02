@@ -1,38 +1,60 @@
 #!/usr/bin/env python3
 """
-PDF Document Extraction System - Main Entry Point
+PDF Document Extraction System - Unified Entry Point
 
-Runs both the FastAPI backend and Next.js frontend servers together.
-Provides unified logging, graceful shutdown, and health monitoring.
+Runs the web application (FastAPI + Next.js), CLI extraction,
+batch processing, and configuration management from a single file.
 
 Usage:
-    python main.py              # Run both backend and frontend
-    python main.py --backend    # Run backend only
-    python main.py --frontend   # Run frontend only
-    python main.py --check      # Check dependencies and configuration
+    # Web Application (default)
+    python main.py                              Run both backend and frontend
+    python main.py --backend                    Run backend only
+    python main.py --frontend                   Run frontend only
+    python main.py --check                      Check dependencies
+
+    # CLI Extraction
+    python main.py extract <pdf_file>                    Extract with defaults
+    python main.py extract <pdf_file> --output results/  Custom output dir
+    python main.py extract <pdf_file> --pages 1-5        Specific pages
+    python main.py extract <pdf_file> --no-excel         Skip Excel export
+
+    # Batch Processing
+    python main.py batch <directory>             Process all PDFs in directory
+    python main.py batch <directory> --parallel 4    Use 4 parallel workers
+
+    # Configuration
+    python main.py config --show                 Show current configuration
+    python main.py config --set-dpi 200          Set DPI for extraction
+    python main.py config --set-model <model>    Set VLM model
 """
 
 import argparse
 import asyncio
+import json
+import logging
 import os
 import signal
 import subprocess
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 
 # Project root directory
 PROJECT_ROOT = Path(__file__).parent.absolute()
 BACKEND_DIR = PROJECT_ROOT / "src"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+CONFIG_FILE = PROJECT_ROOT / "config.json"
 
+
+# ==================== Terminal Colors ====================
 
 class Color:
     """ANSI color codes for terminal output."""
-
     RESET = "\033[0m"
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -43,28 +65,7 @@ class Color:
     BOLD = "\033[1m"
 
 
-class ServerStatus(Enum):
-    """Server status enumeration."""
-
-    STOPPED = "stopped"
-    STARTING = "starting"
-    RUNNING = "running"
-    STOPPING = "stopping"
-    ERROR = "error"
-
-
-@dataclass
-class ServerConfig:
-    """Server configuration."""
-
-    name: str
-    color: str
-    command: list[str]
-    cwd: Path
-    port: int
-    health_url: str
-    env: dict | None = None
-
+# ==================== Logging Helpers ====================
 
 def log(message: str, color: str = "", prefix: str = "MAIN") -> None:
     """Print a formatted log message."""
@@ -74,29 +75,102 @@ def log(message: str, color: str = "", prefix: str = "MAIN") -> None:
 
 
 def log_backend(message: str) -> None:
-    """Log backend server message."""
     log(message, Color.CYAN, "BACKEND")
 
 
 def log_frontend(message: str) -> None:
-    """Log frontend server message."""
     log(message, Color.MAGENTA, "FRONTEND")
 
 
 def log_success(message: str) -> None:
-    """Log success message."""
     log(message, Color.GREEN)
 
 
 def log_error(message: str) -> None:
-    """Log error message."""
     log(message, Color.RED)
 
 
 def log_warning(message: str) -> None:
-    """Log warning message."""
     log(message, Color.YELLOW)
 
+
+# ==================== Configuration ====================
+
+class ExtractionMode(Enum):
+    """Extraction mode enumeration."""
+    SINGLE_RECORD = "single"
+    MULTI_RECORD = "multi"
+    UNIVERSAL = "universal"
+
+
+@dataclass
+class ExtractionConfig:
+    """Configuration for extraction."""
+    dpi: int = 300
+    max_retries: int = 3
+    retry_delay: int = 5
+    vlm_model: str = "qwen/qwen3-vl-8b"
+    vlm_endpoint: str = "http://localhost:1234/v1"
+    enable_multi_record: bool = True
+    enable_duplicate_detection: bool = True
+    enable_validation: bool = True
+    export_excel: bool = True
+    export_markdown: bool = True
+    export_json: bool = True
+    batch_size: int = 10
+    parallel_workers: int = 1
+    log_level: str = "INFO"
+
+
+def load_config() -> ExtractionConfig:
+    """Load configuration from file."""
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE, "r") as f:
+            data = json.load(f)
+            return ExtractionConfig(**data)
+    return ExtractionConfig()
+
+
+def save_config(config: ExtractionConfig) -> None:
+    """Save configuration to file."""
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(config.__dict__, f, indent=2)
+
+
+def setup_logging(log_level: str = "INFO") -> logging.Logger:
+    """Setup enterprise-grade logging."""
+    logger = logging.getLogger("pdf_extraction")
+    logger.setLevel(getattr(logging, log_level.upper()))
+
+    # Console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter(
+        f"{Color.CYAN}%(asctime)s{Color.RESET} - "
+        f"{Color.BOLD}%(name)s{Color.RESET} - "
+        f"%(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    console_handler.setFormatter(console_formatter)
+
+    # File handler
+    log_dir = PROJECT_ROOT / "logs"
+    log_dir.mkdir(exist_ok=True)
+    file_handler = logging.FileHandler(log_dir / f"extraction_{time.strftime('%Y%m%d')}.log")
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_handler.setFormatter(file_formatter)
+
+    logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
+
+    return logger
+
+
+# ==================== Dependency Checks ====================
 
 def check_python_version() -> bool:
     """Check Python version is 3.11+."""
@@ -111,7 +185,9 @@ def check_python_version() -> bool:
 def check_node_version() -> bool:
     """Check Node.js is installed."""
     try:
-        result = subprocess.run(["node", "--version"], check=False, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["node", "--version"], check=False, capture_output=True, text=True, timeout=10
+        )
         if result.returncode == 0:
             version = result.stdout.strip()
             log_success(f"Node.js version: {version}")
@@ -127,7 +203,8 @@ def check_npm() -> bool:
     try:
         result = subprocess.run(
             ["npm", "--version"],
-            check=False, capture_output=True,
+            check=False,
+            capture_output=True,
             text=True,
             timeout=10,
             shell=True,  # Required for Windows
@@ -148,9 +225,9 @@ def check_backend_dependencies() -> bool:
         "fastapi",
         "uvicorn",
         "pydantic",
-        "celery",
-        "redis",
-        "langgraph",
+        "openai",
+        "openpyxl",
+        "Pillow",
     ]
 
     missing = []
@@ -258,6 +335,29 @@ def run_checks() -> bool:
     return all_passed
 
 
+# ==================== Web Server (ProcessManager) ====================
+
+class ServerStatus(Enum):
+    """Server status enumeration."""
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    ERROR = "error"
+
+
+@dataclass
+class ServerConfig:
+    """Server configuration."""
+    name: str
+    color: str
+    command: list[str]
+    cwd: Path
+    port: int
+    health_url: str
+    env: dict | None = None
+
+
 class ProcessManager:
     """Manages backend and frontend server processes."""
 
@@ -269,7 +369,6 @@ class ProcessManager:
 
     def _get_backend_config(self) -> ServerConfig:
         """Get backend server configuration."""
-        # Get LM Studio model from environment or use default
         lm_model = os.getenv("LM_STUDIO_MODEL", "qwen/qwen3-vl-8b")
 
         return ServerConfig(
@@ -300,7 +399,6 @@ class ProcessManager:
 
     def _get_frontend_config(self) -> ServerConfig:
         """Get frontend server configuration."""
-        # Use npm.cmd on Windows, npm on Unix
         npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
 
         return ServerConfig(
@@ -312,7 +410,7 @@ class ProcessManager:
             health_url="http://localhost:3000",
             env={
                 "NEXT_PUBLIC_API_URL": "http://localhost:8000",
-                "PORT": "3000",  # Explicitly set port
+                "PORT": "3000",
             },
         )
 
@@ -352,12 +450,10 @@ class ProcessManager:
         try:
             log(f"Starting {config.name} server on port {config.port}...", config.color)
 
-            # Merge environment variables
             env = os.environ.copy()
             if config.env:
                 env.update(config.env)
 
-            # Start process
             process = subprocess.Popen(
                 config.command,
                 cwd=config.cwd,
@@ -365,15 +461,13 @@ class ProcessManager:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=1,  # Line buffered
-                # On Windows, don't create a new console window
+                bufsize=1,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
             )
 
             self.processes[config.name] = process
             self.configs[config.name] = config
 
-            # Stream output in background threads
             self._stream_output(process, config)
 
             log(f"{config.name.capitalize()} server started (PID: {process.pid})", config.color)
@@ -393,13 +487,10 @@ class ProcessManager:
 
         try:
             if sys.platform == "win32":
-                # Windows: send CTRL+BREAK signal
                 process.send_signal(signal.CTRL_BREAK_EVENT)
             else:
-                # Unix: send SIGTERM
                 process.terminate()
 
-            # Wait for graceful shutdown
             try:
                 process.wait(timeout=5)
                 log(f"{name.capitalize()} server stopped", Color.YELLOW)
@@ -442,7 +533,6 @@ class ProcessManager:
             if not self.is_running(config.name):
                 return False
 
-            # For frontend, try multiple possible ports since Next.js might switch
             urls_to_try = [config.health_url]
             if config.name == "frontend":
                 urls_to_try.extend(
@@ -457,7 +547,6 @@ class ProcessManager:
                     with urllib.request.urlopen(url, timeout=2) as response:  # nosec B310
                         if response.status == 200:
                             log_success(f"{config.name.capitalize()} server is healthy on {url}")
-                            # Update the config with the actual working URL
                             config.health_url = url
                             config.port = int(url.split(":")[-1])
                             return True
@@ -475,7 +564,6 @@ class ProcessManager:
         """Run the servers."""
         self.running = True
 
-        # Setup signal handlers
         def signal_handler(signum, frame):
             log("\nReceived shutdown signal...", Color.YELLOW)
             self.running = False
@@ -496,7 +584,7 @@ class ProcessManager:
                     return
 
                 if wait_for_health:
-                    await asyncio.sleep(2)  # Give server time to start
+                    await asyncio.sleep(2)
                     await self.wait_for_health(backend_config)
 
             # Start frontend
@@ -507,10 +595,8 @@ class ProcessManager:
                     return
 
                 if wait_for_health:
-                    await asyncio.sleep(5)  # Next.js takes longer to compile
-                    await self.wait_for_health(
-                        frontend_config, timeout=120
-                    )  # Longer timeout for frontend
+                    await asyncio.sleep(5)
+                    await self.wait_for_health(frontend_config, timeout=120)
 
             # Print access information
             log(f"{Color.BOLD}{'='*50}{Color.RESET}")
@@ -529,7 +615,6 @@ class ProcessManager:
 
             # Monitor processes
             while self.running:
-                # Check if processes are still running
                 if run_backend and not self.is_running("backend"):
                     log_error("Backend server crashed!")
                     break
@@ -552,8 +637,297 @@ class ProcessManager:
             self.stop_all()
 
 
-async def main_async(args: argparse.Namespace) -> int:
-    """Async main entry point."""
+# ==================== CLI Extraction ====================
+
+def extract_pdf_cli(
+    pdf_path: str,
+    output_dir: Optional[str] = None,
+    pages: Optional[str] = None,
+    config: Optional[ExtractionConfig] = None,
+) -> Dict[str, Any]:
+    """
+    Extract data from PDF using CLI mode.
+
+    Args:
+        pdf_path: Path to PDF file
+        output_dir: Output directory for results
+        pages: Page range (e.g., "1-5", "1,3,5", "all")
+        config: Extraction configuration
+
+    Returns:
+        Extraction results dictionary
+    """
+    if config is None:
+        config = load_config()
+
+    logger = setup_logging(config.log_level)
+    logger.info(f"Starting extraction: {pdf_path}")
+
+    # Import extraction modules
+    from src.client.lm_client import LMStudioClient
+    from src.export.consolidated_export import export_excel, export_json, export_markdown
+    from src.pipeline.runner import PipelineRunner
+
+    pdf_file = Path(pdf_path)
+    if not pdf_file.exists():
+        log_error(f"PDF file not found: {pdf_path}")
+        return {"status": "error", "message": "PDF file not found"}
+
+    # Determine output directory
+    if output_dir is None:
+        out = PROJECT_ROOT / "output" / pdf_file.stem
+    else:
+        out = Path(output_dir)
+
+    out.mkdir(parents=True, exist_ok=True)
+
+    # Parse page range
+    start_page = 1
+    end_page = None
+
+    if pages:
+        if pages.lower() == "all":
+            pass
+        elif "-" in pages:
+            parts = pages.split("-")
+            start_page = int(parts[0])
+            end_page = int(parts[1]) if parts[1] else None
+        elif "," in pages:
+            log_warning("Non-contiguous pages not yet supported, processing all")
+
+    try:
+        log(f"Processing: {pdf_file.name}", Color.CYAN)
+        log(f"Output: {out}", Color.CYAN)
+        log(f"Mode: {'Multi-record' if config.enable_multi_record else 'Single-record'}", Color.CYAN)
+
+        # Create pipeline runner
+        client = LMStudioClient(
+            base_url=config.vlm_endpoint,
+            model=config.vlm_model,
+        )
+        runner = PipelineRunner(
+            client=client,
+            enable_checkpointing=False,
+            dpi=config.dpi,
+        )
+
+        if config.enable_multi_record:
+            # Multi-record extraction
+            result = runner.extract_multi_record(
+                pdf_path=str(pdf_file),
+                start_page=start_page if start_page > 1 else None,
+                end_page=end_page,
+            )
+
+            # Export
+            if config.export_json:
+                json_file = out / f"{pdf_file.stem}_results.json"
+                export_json(result, json_file)
+                logger.info(f"JSON export: {json_file}")
+
+            if config.export_excel:
+                excel_file = out / f"{pdf_file.stem}_consolidated.xlsx"
+                export_excel(result, excel_file)
+                logger.info(f"Excel export: {excel_file}")
+
+            if config.export_markdown:
+                md_file = out / f"{pdf_file.stem}_report.md"
+                export_markdown(result, md_file)
+                logger.info(f"Markdown export: {md_file}")
+
+            # Print summary
+            log_success("Extraction Complete!")
+            log(f"Pages: {result.total_pages}", Color.GREEN)
+            log(f"Records: {result.total_records}", Color.GREEN)
+            log(f"Document Type: {result.document_type}", Color.GREEN)
+            log(f"Entity Type: {result.entity_type}", Color.GREEN)
+            log(f"Time: {result.total_processing_time_ms / 1000:.2f}s", Color.GREEN)
+            log(f"VLM Calls: {result.total_vlm_calls}", Color.GREEN)
+
+            return {
+                "status": "success",
+                "total_records": result.total_records,
+                "output_dir": str(out),
+            }
+        else:
+            # Single-record extraction (legacy pipeline)
+            result = runner.extract_from_pdf(str(pdf_file))
+
+            results_file = out / f"{pdf_file.stem}_results.json"
+            with open(results_file, "w", encoding="utf-8") as f:
+                json.dump(dict(result), f, indent=2, ensure_ascii=False, default=str)
+            logger.info(f"Results saved: {results_file}")
+
+            log_success("Extraction Complete!")
+            log(f"Fields: {len(result.get('merged_extraction', {}))}", Color.GREEN)
+            log(f"Confidence: {result.get('overall_confidence', 0):.0%}", Color.GREEN)
+
+            return {
+                "status": "success",
+                "output_dir": str(out),
+            }
+
+    except Exception as e:
+        log_error(f"Extraction failed: {str(e)}")
+        logger.exception("Extraction error")
+        return {"status": "error", "message": str(e)}
+
+
+# ==================== Batch Processing ====================
+
+def batch_process_cli(
+    directory: str,
+    output_dir: Optional[str] = None,
+    config: Optional[ExtractionConfig] = None,
+) -> Dict[str, Any]:
+    """
+    Batch process all PDFs in a directory.
+
+    Args:
+        directory: Directory containing PDF files
+        output_dir: Output directory for all results
+        config: Extraction configuration
+
+    Returns:
+        Batch processing results
+    """
+    if config is None:
+        config = load_config()
+
+    logger = setup_logging(config.log_level)
+
+    input_dir = Path(directory)
+    if not input_dir.exists():
+        log_error(f"Directory not found: {directory}")
+        return {"status": "error", "message": "Directory not found"}
+
+    pdf_files = list(input_dir.glob("*.pdf"))
+    if not pdf_files:
+        log_warning("No PDF files found in directory")
+        return {"status": "success", "processed": 0, "failed": 0}
+
+    log(f"Found {len(pdf_files)} PDF files", Color.CYAN)
+
+    if output_dir is None:
+        out = PROJECT_ROOT / "output" / "batch" / input_dir.name
+    else:
+        out = Path(output_dir)
+
+    out.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    failed = []
+
+    if config.parallel_workers > 1:
+        log(f"Processing with {config.parallel_workers} parallel workers", Color.CYAN)
+
+        with ProcessPoolExecutor(max_workers=config.parallel_workers) as executor:
+            futures = {
+                executor.submit(
+                    extract_pdf_cli,
+                    str(pdf_file),
+                    str(out / pdf_file.stem),
+                    "all",
+                    config,
+                ): pdf_file
+                for pdf_file in pdf_files
+            }
+
+            for future in as_completed(futures):
+                pdf_file = futures[future]
+                try:
+                    result = future.result()
+                    if result["status"] == "success":
+                        results.append(pdf_file.name)
+                        log_success(f"Completed: {pdf_file.name}")
+                    else:
+                        failed.append(pdf_file.name)
+                        log_error(f"Failed: {pdf_file.name}")
+                except Exception as e:
+                    failed.append(pdf_file.name)
+                    log_error(f"Error processing {pdf_file.name}: {e}")
+    else:
+        for pdf_file in pdf_files:
+            log(f"Processing: {pdf_file.name}", Color.CYAN)
+            result = extract_pdf_cli(
+                str(pdf_file),
+                str(out / pdf_file.stem),
+                "all",
+                config,
+            )
+
+            if result["status"] == "success":
+                results.append(pdf_file.name)
+            else:
+                failed.append(pdf_file.name)
+
+    log_success("Batch processing complete!")
+    log(f"Processed: {len(results)}/{len(pdf_files)}", Color.GREEN)
+    if failed:
+        log(f"Failed: {len(failed)}", Color.RED)
+        for name in failed:
+            log(f"  - {name}", Color.RED)
+
+    return {
+        "status": "success",
+        "total": len(pdf_files),
+        "processed": len(results),
+        "failed": len(failed),
+        "failed_files": failed,
+    }
+
+
+# ==================== Config CLI ====================
+
+def config_cli(args: argparse.Namespace) -> int:
+    """Handle config command."""
+    config = load_config()
+
+    if args.show:
+        print(f"\n{Color.BOLD}Current Configuration:{Color.RESET}")
+        for key, value in config.__dict__.items():
+            print(f"  {key}: {Color.CYAN}{value}{Color.RESET}")
+        print()
+        return 0
+
+    changed = False
+
+    if args.set_dpi:
+        config.dpi = args.set_dpi
+        changed = True
+        log_success(f"DPI set to {args.set_dpi}")
+
+    if args.set_model:
+        config.vlm_model = args.set_model
+        changed = True
+        log_success(f"VLM model set to {args.set_model}")
+
+    if args.set_endpoint:
+        config.vlm_endpoint = args.set_endpoint
+        changed = True
+        log_success(f"VLM endpoint set to {args.set_endpoint}")
+
+    if args.enable_multi_record is not None:
+        config.enable_multi_record = args.enable_multi_record
+        changed = True
+        log_success(f"Multi-record mode: {args.enable_multi_record}")
+
+    if args.parallel_workers:
+        config.parallel_workers = args.parallel_workers
+        changed = True
+        log_success(f"Parallel workers set to {args.parallel_workers}")
+
+    if changed:
+        save_config(config)
+        log_success("Configuration saved")
+
+    return 0
+
+
+# ==================== Web Server Entry ====================
+
+async def run_web_server(args: argparse.Namespace) -> int:
+    """Run the web application (FastAPI backend + Next.js frontend)."""
     # Check only mode
     if args.check:
         return 0 if run_checks() else 1
@@ -563,7 +937,6 @@ async def main_async(args: argparse.Namespace) -> int:
         if not run_checks():
             log_error("Pre-flight checks failed. Use --skip-checks to bypass.")
             return 1
-
 
     # Determine what to run
     if args.both:
@@ -580,30 +953,76 @@ async def main_async(args: argparse.Namespace) -> int:
         run_backend = True
         run_frontend = True
 
-    # Create and run process manager
     manager = ProcessManager()
     await manager.run(
-        run_backend=run_backend, run_frontend=run_frontend, wait_for_health=not args.no_health_check
+        run_backend=run_backend,
+        run_frontend=run_frontend,
+        wait_for_health=not args.no_health_check,
     )
 
     return 0
 
 
+# ==================== Main Entry Point ====================
+
 def main() -> int:
-    """Main entry point."""
+    """Unified main entry point with CLI and web server support."""
     parser = argparse.ArgumentParser(
-        description="PDF Document Extraction System - Main Entry Point",
+        description="PDF Document Extraction System",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py              Run both backend and frontend
-  python main.py --both       Run both backend and frontend (explicit)
-  python main.py --backend    Run backend only
-  python main.py --frontend   Run frontend only
-  python main.py --check      Run dependency checks only
+  Web Application:
+    python main.py                              Run both backend and frontend
+    python main.py --backend                    Backend only
+    python main.py --frontend                   Frontend only
+    python main.py --check                      Run dependency checks only
+
+  CLI Extraction:
+    python main.py extract invoice.pdf                  Extract with defaults
+    python main.py extract invoice.pdf --pages 1-5      Extract pages 1-5
+    python main.py extract invoice.pdf --output out/    Custom output directory
+
+  Batch Processing:
+    python main.py batch documents/                     Process all PDFs
+    python main.py batch documents/ --parallel 4        Use 4 parallel workers
+
+  Configuration:
+    python main.py config --show                        Show current config
+    python main.py config --set-dpi 200                 Set DPI to 200
+    python main.py config --set-model qwen3-vl-8b       Set VLM model
         """,
     )
 
+    subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+
+    # Extract command
+    extract_parser = subparsers.add_parser("extract", help="Extract data from a PDF")
+    extract_parser.add_argument("pdf_file", help="Path to PDF file")
+    extract_parser.add_argument("-o", "--output", help="Output directory")
+    extract_parser.add_argument("-p", "--pages", help="Page range (e.g., '1-5', 'all')")
+    extract_parser.add_argument("--dpi", type=int, help="DPI for image conversion")
+    extract_parser.add_argument("--no-excel", action="store_true", help="Skip Excel export")
+    extract_parser.add_argument("--no-markdown", action="store_true", help="Skip Markdown export")
+
+    # Batch command
+    batch_parser = subparsers.add_parser("batch", help="Batch process PDFs in directory")
+    batch_parser.add_argument("directory", help="Directory containing PDF files")
+    batch_parser.add_argument("-o", "--output", help="Output directory")
+    batch_parser.add_argument("--parallel", type=int, help="Number of parallel workers")
+
+    # Config command
+    config_parser = subparsers.add_parser("config", help="Manage configuration")
+    config_parser.add_argument("--show", action="store_true", help="Show current config")
+    config_parser.add_argument("--set-dpi", type=int, help="Set DPI")
+    config_parser.add_argument("--set-model", help="Set VLM model name")
+    config_parser.add_argument("--set-endpoint", help="Set VLM endpoint URL")
+    config_parser.add_argument(
+        "--enable-multi-record", type=bool, help="Enable multi-record detection"
+    )
+    config_parser.add_argument("--parallel-workers", type=int, help="Set parallel workers")
+
+    # Web server flags (top-level, for default web server mode)
     parser.add_argument("--backend", action="store_true", help="Run backend server only")
     parser.add_argument("--frontend", action="store_true", help="Run frontend server only")
     parser.add_argument(
@@ -618,16 +1037,45 @@ Examples:
     args = parser.parse_args()
 
     # Print banner
-    print(f"\n{Color.BOLD}{Color.BLUE}{'='*50}{Color.RESET}")
+    print(f"\n{Color.BOLD}{Color.BLUE}{'='*60}{Color.RESET}")
     print(f"{Color.BOLD}{Color.BLUE}  PDF Document Extraction System{Color.RESET}")
-    print(f"{Color.BOLD}{Color.BLUE}  4-Agent Architecture with Anti-Hallucination{Color.RESET}")
-    print(f"{Color.BOLD}{Color.BLUE}{'='*50}{Color.RESET}\n")
+    print(f"{Color.BOLD}{Color.BLUE}  Universal Multi-Record Extraction with VLM{Color.RESET}")
+    print(f"{Color.BOLD}{Color.BLUE}{'='*60}{Color.RESET}\n")
 
     try:
-        return asyncio.run(main_async(args))
+        if args.command == "extract":
+            config = load_config()
+            if args.dpi:
+                config.dpi = args.dpi
+            if args.no_excel:
+                config.export_excel = False
+            if args.no_markdown:
+                config.export_markdown = False
+
+            result = extract_pdf_cli(args.pdf_file, args.output, args.pages, config)
+            return 0 if result["status"] == "success" else 1
+
+        elif args.command == "batch":
+            config = load_config()
+            if args.parallel:
+                config.parallel_workers = args.parallel
+
+            result = batch_process_cli(args.directory, args.output, config)
+            return 0 if result["status"] == "success" else 1
+
+        elif args.command == "config":
+            return config_cli(args)
+
+        else:
+            # Default: run web server
+            return asyncio.run(run_web_server(args))
+
     except KeyboardInterrupt:
-        log("Interrupted by user", Color.YELLOW)
+        log("\nInterrupted by user", Color.YELLOW)
         return 130
+    except Exception as e:
+        log_error(f"Fatal error: {e}")
+        return 1
 
 
 if __name__ == "__main__":

@@ -25,9 +25,12 @@ def reset_rbac():
 
 
 @pytest.fixture
-def rbac_manager():
-    """Create RBAC manager for testing."""
-    return RBACManager.get_instance(secret_key="integration-test-secret-key-12345")
+def rbac_manager(tmp_path):
+    """Create RBAC manager for testing with isolated storage."""
+    return RBACManager.get_instance(
+        secret_key="integration-test-secret-key-12345",
+        user_storage_path=str(tmp_path / "test_users.json"),
+    )
 
 
 @pytest.fixture

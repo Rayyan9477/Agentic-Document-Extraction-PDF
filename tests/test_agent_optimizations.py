@@ -114,15 +114,15 @@ class TestGroundingRulesEnhancements:
         assert "SELF-CRITIQUE PROTOCOL" in enhanced
 
     def test_build_enhanced_system_prompt_for_first_pass(self):
-        """Test enhanced prompt for first extraction pass."""
+        """Test enhanced prompt for first extraction pass (zero-shot mode)."""
         prompt = build_enhanced_system_prompt(
             document_type="CMS-1500",
             is_verification_pass=False,
         )
         assert "GROUNDING RULES" in prompt
         assert "CMS-1500" in prompt
-        # First pass should have examples but not constitutional critique
-        assert "EXTRACTION EXAMPLES" in prompt
+        # Zero-shot mode: no few-shot examples, rely on grounding rules
+        assert "EXTRACTION EXAMPLES" not in prompt
 
     def test_build_enhanced_system_prompt_for_verification_pass(self):
         """Test enhanced prompt for verification pass."""
