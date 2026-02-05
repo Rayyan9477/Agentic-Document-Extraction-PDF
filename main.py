@@ -121,6 +121,33 @@ class ExtractionConfig:
     parallel_workers: int = 1
     log_level: str = "INFO"
 
+    # ─── Phase 1: Foundation & Quick Wins (Zero-Shot Accuracy) ───
+    enable_chain_of_thought: bool = True
+    enable_visual_grounding: bool = True
+    enable_adaptive_temperature: bool = True
+    enable_field_metadata_tracking: bool = True
+
+    # ─── Phase 2: Multi-Stage Validation (default False for safety) ───
+    enable_validation_stage: bool = False
+    enable_self_correction: bool = False
+
+    # ─── Phase 3: Consensus & Ensemble Mechanisms ───
+    enable_consensus_for_critical_fields: bool = False
+    critical_field_keywords: list[str] | None = None
+
+    # ─── Thresholds & Parameters ───
+    validation_confidence_threshold: float = 0.85
+    retry_temperature_increment: float = 0.05
+    max_temperature: float = 0.3
+
+    def __post_init__(self):
+        """Initialize default values for mutable fields."""
+        if self.critical_field_keywords is None:
+            self.critical_field_keywords = [
+                "id", "number", "code", "mrn", "ssn",
+                "date", "dob", "amount", "charge", "total", "balance"
+            ]
+
 
 def load_config() -> ExtractionConfig:
     """Load configuration from file."""
@@ -717,6 +744,11 @@ def extract_pdf_cli(
                 pdf_path=str(pdf_file),
                 start_page=start_page if start_page > 1 else None,
                 end_page=end_page,
+                enable_validation=config.enable_validation_stage,
+                enable_self_correction=config.enable_self_correction,
+                confidence_threshold=config.validation_confidence_threshold,
+                enable_consensus=config.enable_consensus_for_critical_fields,
+                critical_field_keywords=config.critical_field_keywords,
             )
 
             # Export

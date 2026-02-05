@@ -9,10 +9,11 @@ const REFRESH_TOKEN_KEY = 'refresh_token';
 // DEV MODE: Auto-login as rayyan (skip login/signup for development)
 const DEV_AUTO_LOGIN = true;
 const DEV_USER: User = {
-  id: 'dev-user-rayyan',
+  user_id: 'dev-user-rayyan',
   username: 'rayyan',
   email: 'rayyan.a@nobilityrcm.com',
-  role: 'admin',
+  roles: ['admin'],
+  permissions: ['read', 'write', 'admin'],
 };
 
 // Set dev tokens on load (for API calls to work)

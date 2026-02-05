@@ -711,6 +711,11 @@ class PipelineRunner:
         pdf_path: str | Path,
         start_page: int | None = None,
         end_page: int | None = None,
+        enable_validation: bool = False,
+        enable_self_correction: bool = False,
+        confidence_threshold: float = 0.85,
+        enable_consensus: bool = False,
+        critical_field_keywords: list[str] | None = None,
     ) -> "DocumentExtractionResult":
         """
         Extract multiple records per page from a PDF document.
@@ -720,6 +725,9 @@ class PipelineRunner:
         2. Generates adaptive schema (1 VLM call)
         3. Per page: detects record boundaries (1 VLM call)
         4. Per record: extracts fields (1 VLM call)
+        5. [Optional] Per record: validates extraction (1 VLM call)
+        6. [Optional] Per record: corrects low-confidence fields (0-1 VLM call)
+        7. [Optional] Per record: consensus for critical fields (2+ VLM calls)
 
         This is ideal for documents with multiple entities per page
         (patient lists, invoice batches, employee rosters, etc.).
@@ -728,6 +736,11 @@ class PipelineRunner:
             pdf_path: Path to the PDF file.
             start_page: Optional first page to process (1-indexed).
             end_page: Optional last page to process (1-indexed).
+            enable_validation: Run validation pass after extraction.
+            enable_self_correction: Re-extract low-confidence fields.
+            confidence_threshold: Minimum confidence for fields (0.0-1.0).
+            enable_consensus: Run dual-pass consensus on critical fields.
+            critical_field_keywords: Keywords to identify critical fields.
 
         Returns:
             DocumentExtractionResult with per-record data.
@@ -749,13 +762,23 @@ class PipelineRunner:
             pdf_path=str(pdf_path),
             start_page=start_page,
             end_page=end_page,
+            enable_validation=enable_validation,
+            enable_self_correction=enable_self_correction,
+            enable_consensus=enable_consensus,
         )
 
         # Load and convert PDF pages using existing infrastructure
         page_images = self._load_and_convert_pdf(str(pdf_path))
 
-        # Run multi-record extraction
-        extractor = MultiRecordExtractor(client=self._client)
+        # Run multi-record extraction with Phase 2 + Phase 3 options
+        extractor = MultiRecordExtractor(
+            client=self._client,
+            enable_validation=enable_validation,
+            enable_self_correction=enable_self_correction,
+            confidence_threshold=confidence_threshold,
+            enable_consensus=enable_consensus,
+            critical_field_keywords=critical_field_keywords,
+        )
         result = extractor.extract_document(
             page_images=page_images,
             pdf_path=str(pdf_path),

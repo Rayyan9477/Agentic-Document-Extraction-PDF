@@ -361,8 +361,29 @@ def _run_multi_record_sync(
     )
     from src.pipeline.runner import PipelineRunner
 
+    # Load config for Phase 2 feature flags
+    try:
+        import json as _json
+        from pathlib import Path as _Path
+
+        _config_file = _Path(__file__).resolve().parents[3] / "config.json"
+        if _config_file.exists():
+            with open(_config_file) as _f:
+                _cfg = _json.load(_f)
+        else:
+            _cfg = {}
+    except Exception:
+        _cfg = {}
+
     runner = PipelineRunner(enable_checkpointing=False)
-    result = runner.extract_multi_record(pdf_path=request.pdf_path)
+    result = runner.extract_multi_record(
+        pdf_path=request.pdf_path,
+        enable_validation=_cfg.get("enable_validation_stage", False),
+        enable_self_correction=_cfg.get("enable_self_correction", False),
+        confidence_threshold=_cfg.get("validation_confidence_threshold", 0.85),
+        enable_consensus=_cfg.get("enable_consensus_for_critical_fields", False),
+        critical_field_keywords=_cfg.get("critical_field_keywords", None),
+    )
 
     # Build response records
     records = [
