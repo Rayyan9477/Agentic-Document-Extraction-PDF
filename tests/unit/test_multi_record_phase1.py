@@ -2,13 +2,11 @@
 Unit tests for Phase 1 zero-shot accuracy improvements to multi_record.py.
 
 Tests cover:
-- FieldMetadata dataclass
-- ExtractedRecord with field_metadata
+- ExtractedRecord dataclass
 - System prompt generation
 - Adaptive temperature calculation
 - Chain-of-thought prompt integration
 - Exponential backoff retry logic
-- Backward compatibility
 """
 
 import json
@@ -19,51 +17,16 @@ import pytest
 
 from src.extraction.multi_record import (
     ExtractedRecord,
-    FieldMetadata,
     MultiRecordExtractor,
     RecordBoundary,
 )
 
 
-class TestFieldMetadata:
-    """Test FieldMetadata dataclass."""
-
-    def test_field_metadata_creation(self):
-        """Test creating FieldMetadata with all fields."""
-        metadata = FieldMetadata(
-            field_name="patient_name",
-            value="Smith, John",
-            confidence=0.95,
-            extraction_time_ms=150,
-            temperature_used=0.0,
-            retry_count=0,
-        )
-
-        assert metadata.field_name == "patient_name"
-        assert metadata.value == "Smith, John"
-        assert metadata.confidence == 0.95
-        assert metadata.extraction_time_ms == 150
-        assert metadata.temperature_used == 0.0
-        assert metadata.retry_count == 0
-
-    def test_field_metadata_defaults(self):
-        """Test FieldMetadata default values."""
-        metadata = FieldMetadata(
-            field_name="test",
-            value="value",
-            confidence=0.8,
-            extraction_time_ms=100,
-            temperature_used=0.1,
-        )
-
-        assert metadata.retry_count == 0  # Default value
-
-
 class TestExtractedRecord:
-    """Test ExtractedRecord with field_metadata."""
+    """Test ExtractedRecord dataclass."""
 
     def test_extracted_record_basic(self):
-        """Test creating ExtractedRecord without field_metadata."""
+        """Test creating ExtractedRecord with all fields."""
         record = ExtractedRecord(
             record_id=1,
             page_number=1,
@@ -81,46 +44,9 @@ class TestExtractedRecord:
         assert record.fields == {"name": "John Smith", "age": 45}
         assert record.confidence == 0.92
         assert record.extraction_time_ms == 500
-        assert record.field_metadata == {}  # Default empty dict
 
-    def test_extracted_record_with_field_metadata(self):
-        """Test ExtractedRecord with field-level metadata."""
-        field_meta = {
-            "name": FieldMetadata(
-                field_name="name",
-                value="John Smith",
-                confidence=0.98,
-                extraction_time_ms=100,
-                temperature_used=0.0,
-                retry_count=0,
-            ),
-            "age": FieldMetadata(
-                field_name="age",
-                value=45,
-                confidence=0.85,
-                extraction_time_ms=80,
-                temperature_used=0.05,
-                retry_count=1,
-            ),
-        }
-
-        record = ExtractedRecord(
-            record_id=1,
-            page_number=1,
-            primary_identifier="John Smith",
-            entity_type="patient",
-            fields={"name": "John Smith", "age": 45},
-            confidence=0.92,
-            extraction_time_ms=500,
-            field_metadata=field_meta,
-        )
-
-        assert len(record.field_metadata) == 2
-        assert record.field_metadata["name"].confidence == 0.98
-        assert record.field_metadata["age"].retry_count == 1
-
-    def test_backward_compatibility(self):
-        """Test that old code using only fields dict still works."""
+    def test_fields_dict_access(self):
+        """Test that fields dict is directly accessible."""
         record = ExtractedRecord(
             record_id=1,
             page_number=1,
@@ -131,11 +57,8 @@ class TestExtractedRecord:
             extraction_time_ms=100,
         )
 
-        # Old code would access fields directly
         assert record.fields["field1"] == "value1"
-        # field_metadata is optional and defaults to empty
-        assert isinstance(record.field_metadata, dict)
-        assert len(record.field_metadata) == 0
+        assert isinstance(record.fields, dict)
 
 
 class TestGroundingSystemPrompt:
@@ -375,24 +298,18 @@ class TestExponentialBackoff:
 
 
 class TestChainOfThoughtPrompts:
-    """Test that CoT prompts are properly structured."""
+    """Test that CoT prompts include step-by-step reasoning instructions."""
 
     def test_detect_document_type_cot(self):
-        """Test detect_document_type uses CoT prompting."""
-        # Create mock client
+        """Test detect_document_type uses step-by-step prompting."""
         mock_client = MagicMock()
 
         mock_response = MagicMock()
         mock_response.has_json = True
         mock_response.parsed_json = {
-            "step_1_observations": {},
-            "step_2_text_analysis": {},
-            "step_3_patterns": {},
-            "step_4_classification": {
-                "document_type": "medical_superbill",
-                "entity_type": "patient",
-                "primary_identifier_field": "patient_name",
-            },
+            "document_type": "medical_superbill",
+            "entity_type": "patient",
+            "primary_identifier_field": "patient_name",
             "confidence": 0.95,
         }
         mock_client.send_vision_request.return_value = mock_response
@@ -400,41 +317,31 @@ class TestChainOfThoughtPrompts:
         extractor = MultiRecordExtractor(client=mock_client)
         result = extractor.detect_document_type("data:image/png;base64,fake")
 
-        # Verify CoT structure is present in request
+        # Verify step-by-step reasoning is in the prompt
         call_args = mock_client.send_vision_request.call_args
         request = call_args[0][0]
-
-        assert "STEP 1" in request.prompt.upper()
-        assert "STEP 2" in request.prompt.upper()
-        assert "STEP 3" in request.prompt.upper()
-        assert "STEP 4" in request.prompt.upper()
+        assert "step by step" in request.prompt.lower()
 
         # Verify system prompt is used
         assert request.system_prompt is not None
         assert len(request.system_prompt) > 0
 
-        # Verify result is backward compatible
+        # Verify result fields
         assert "document_type" in result
         assert "entity_type" in result
         assert result["document_type"] == "medical_superbill"
 
     def test_generate_schema_cot(self):
-        """Test generate_schema uses CoT prompting."""
-        # Create mock client
+        """Test generate_schema uses step-by-step prompting."""
         mock_client = MagicMock()
 
         mock_response = MagicMock()
         mock_response.has_json = True
         mock_response.parsed_json = {
-            "step_1_structure": {},
-            "step_2_identified_fields": [],
-            "step_3_type_analysis": [],
-            "step_4_final_schema": {
-                "schema_id": "test",
-                "entity_type": "patient",
-                "fields": [],
-                "total_field_count": 0,
-            },
+            "schema_id": "test",
+            "entity_type": "patient",
+            "fields": [],
+            "total_field_count": 0,
             "confidence": 0.9,
         }
         mock_client.send_vision_request.return_value = mock_response
@@ -446,37 +353,29 @@ class TestChainOfThoughtPrompts:
             "patient",
         )
 
-        # Verify CoT prompting
+        # Verify step-by-step reasoning is in the prompt
         call_args = mock_client.send_vision_request.call_args
         request = call_args[0][0]
+        assert "step by step" in request.prompt.lower()
 
-        assert "STEP 1" in request.prompt.upper()
-        assert "STEP 2" in request.prompt.upper()
-        assert "STEP 3" in request.prompt.upper()
-        assert "STEP 4" in request.prompt.upper()
-
-        # Verify backward compatibility
         assert "schema_id" in result
         assert "fields" in result
 
 
-class TestBackwardCompatibility:
-    """Test that Phase 1 changes maintain backward compatibility."""
+class TestOutputFormat:
+    """Test that extraction methods return correct output structure."""
 
-    def test_extract_single_record_backward_compatible(self):
-        """Test extract_single_record maintains backward compatible output."""
-        # Create mock client
+    def test_extract_single_record_output(self):
+        """Test extract_single_record returns correct ExtractedRecord."""
         mock_client = MagicMock()
 
         mock_response = MagicMock()
         mock_response.has_json = True
         mock_response.parsed_json = {
-            "step_4_final_extraction": {
-                "record_id": 1,
-                "primary_identifier": "Smith, John",
-                "fields": {"name": "Smith, John", "age": 45},
-                "confidence": 0.92,
-            }
+            "record_id": 1,
+            "primary_identifier": "Smith, John",
+            "fields": {"name": "Smith, John", "age": 45},
+            "confidence": 0.92,
         }
         mock_client.send_vision_request.return_value = mock_response
 

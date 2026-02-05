@@ -24,7 +24,7 @@ Total VLM calls (Phase 3): Phase 2 + pages * records_per_page * (2 + disagreemen
 
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from src.client.lm_client import LMStudioClient, VisionRequest
@@ -45,18 +45,6 @@ class RecordBoundary:
 
 
 @dataclass
-class FieldMetadata:
-    """Per-field extraction metadata."""
-
-    field_name: str
-    value: Any
-    confidence: float
-    extraction_time_ms: int
-    temperature_used: float
-    retry_count: int = 0
-
-
-@dataclass
 class ExtractedRecord:
     """Single extracted record with all fields."""
 
@@ -64,11 +52,9 @@ class ExtractedRecord:
     page_number: int
     primary_identifier: str
     entity_type: str
-    fields: dict[str, Any]  # Keep for backward compatibility
+    fields: dict[str, Any]
     confidence: float
     extraction_time_ms: int
-    # NEW: Per-field metadata (opt-in, doesn't break existing code)
-    field_metadata: dict[str, FieldMetadata] = field(default_factory=dict)
 
 
 @dataclass
@@ -276,54 +262,22 @@ REASONING PROCESS:
         """
         logger.info("detecting_document_type")
 
-        prompt = """Analyze this document using step-by-step reasoning:
-
-STEP 1: VISUAL OBSERVATION
-- Overall layout: [describe: table, form, list, or mixed]
-- Visual elements present: [list: headers, lines, logos, stamps, etc.]
-- Repeating patterns: [describe any patterns you notice]
-
-STEP 2: TEXT ANALYSIS
-- Main headers/titles: [list what you see]
-- Field labels identified: [list visible labels]
-- Column headers (if table): [list column headers]
-
-STEP 3: PATTERN RECOGNITION
-- Distinct record/entry count: [number]
-- What makes each unique?: [identifier type]
-- How are entries separated?: [lines, spacing, borders, etc.]
-
-STEP 4: CLASSIFICATION
-Based on the evidence from steps 1-3:
+        prompt = """Analyze this document. Think step by step:
+1. Observe the overall layout, visual elements, and repeating patterns
+2. Identify main headers, field labels, and column headers
+3. Count distinct records and determine how they are separated
+4. Classify the document based on your observations
 
 Return JSON:
 {
-  "step_1_observations": {
-    "layout": "description",
-    "visual_elements": ["element1", "element2"],
-    "repeating_patterns": "description"
-  },
-  "step_2_text_analysis": {
-    "headers": ["header1"],
-    "field_labels": ["label1"],
-    "column_headers": ["col1"]
-  },
-  "step_3_patterns": {
-    "entry_count": 5,
-    "unique_identifier": "what makes each unique",
-    "separator_type": "how separated"
-  },
-  "step_4_classification": {
-    "document_type": "medical_superbill",
-    "document_description": "Brief description",
-    "entity_type": "patient",
-    "entity_description": "What each record represents",
-    "primary_identifier_field": "patient_name",
-    "record_structure": "table",
-    "estimated_records_per_page": 5
-  },
-  "confidence": 0.95,
-  "confidence_reasoning": "Why you are confident in this classification"
+  "document_type": "medical_superbill",
+  "document_description": "Brief description",
+  "entity_type": "patient",
+  "entity_description": "What each record represents",
+  "primary_identifier_field": "patient_name",
+  "record_structure": "table",
+  "estimated_records_per_page": 5,
+  "confidence": 0.95
 }
 
 IMPORTANT: Only report what you DIRECTLY SEE. Do not infer or assume."""
@@ -332,29 +286,18 @@ IMPORTANT: Only report what you DIRECTLY SEE. Do not infer or assume."""
             image_data=page_data_uri,
             prompt=prompt,
             system_prompt=self._build_grounding_system_prompt(),
-            max_tokens=1500,
+            max_tokens=800,
         )
-
-        # Extract classification from CoT response (backward compatible)
-        classification = result.get("step_4_classification", result)
 
         logger.info(
             "document_type_detected",
-            document_type=classification.get("document_type"),
-            entity_type=classification.get("entity_type"),
-            primary_id=classification.get("primary_identifier_field"),
+            document_type=result.get("document_type"),
+            entity_type=result.get("entity_type"),
+            primary_id=result.get("primary_identifier_field"),
             confidence=result.get("confidence"),
         )
 
-        # Return flattened result for backward compatibility
-        return {
-            **classification,
-            "confidence": result.get("confidence", 0.0),
-            "confidence_reasoning": result.get("confidence_reasoning", ""),
-            "cot_observations": result.get("step_1_observations", {}),
-            "cot_text_analysis": result.get("step_2_text_analysis", {}),
-            "cot_patterns": result.get("step_3_patterns", {}),
-        }
+        return result
 
     def generate_schema(
         self,
@@ -375,88 +318,46 @@ IMPORTANT: Only report what you DIRECTLY SEE. Do not infer or assume."""
         """
         logger.info("generating_schema", document_type=document_type)
 
-        prompt = f"""Generate a schema for {document_type} using step-by-step analysis:
+        prompt = f"""Generate an extraction schema for this document. Think step by step:
+1. Inspect how {entity_type} records are organized (table, form, list)
+2. Identify every visible field label and its data type
+3. Determine formatting patterns (dates, currency, codes)
+4. Produce the schema
 
 Document Type: {document_type}
 Entity Type: {entity_type}
 
-STEP 1: DOCUMENT STRUCTURE INSPECTION
-- Record layout: [How are {entity_type} records organized?]
-- Data presentation: [table, form fields, list items, mixed]
-- Visible field labels: [List ALL labels you can see]
-
-STEP 2: FIELD IDENTIFICATION
-For each distinct field in the {entity_type} records:
-- What text labels/headers identify this field?
-- What data appears under this field across different records?
-- Is this field present in ALL records or only some?
-
-STEP 3: DATA TYPE DETERMINATION
-For each identified field:
-- Does it contain: numbers, dates, text, yes/no, or lists?
-- Are there formatting patterns (e.g., MM/DD/YYYY, $XX.XX)?
-- What validation rules apply?
-
-STEP 4: SCHEMA FORMULATION
-Based on steps 1-3, generate the complete schema:
-
 Return JSON:
 {{
-  "step_1_structure": {{
-    "record_layout": "description",
-    "data_presentation": "table|form|list|mixed",
-    "visible_labels": ["label1", "label2"]
-  }},
-  "step_2_identified_fields": [
+  "schema_id": "adaptive_{document_type}",
+  "entity_type": "{entity_type}",
+  "fields": [
     {{
-      "label": "visible label",
-      "data_pattern": "what appears here",
-      "consistency": "all|most|some records"
+      "field_name": "field_name",
+      "display_name": "Field Name",
+      "field_type": "text|number|date|boolean|list",
+      "description": "What this field contains",
+      "required": true
     }}
   ],
-  "step_3_type_analysis": [
-    {{
-      "field": "field_name",
-      "inferred_type": "text|number|date|boolean|list",
-      "format_pattern": "observed pattern",
-      "validation_notes": "constraints"
-    }}
-  ],
-  "step_4_final_schema": {{
-    "schema_id": "adaptive_{document_type}",
-    "entity_type": "{entity_type}",
-    "fields": [
-      {{
-        "field_name": "field_name",
-        "display_name": "Field Name",
-        "field_type": "text|number|date|boolean|list",
-        "description": "What this field contains",
-        "required": true
-      }}
-    ],
-    "total_field_count": 10
-  }},
-  "confidence": 0.92,
-  "schema_reasoning": "Why this schema structure is appropriate"
+  "total_field_count": 10,
+  "confidence": 0.92
 }}
 
 CRITICAL: Include EVERY field visible in the records. Base schema ONLY on what you directly observe."""
 
-        raw_result = self._send_vision_json(
+        result = self._send_vision_json(
             image_data=page_data_uri,
             prompt=prompt,
             system_prompt=self._build_grounding_system_prompt(),
-            max_tokens=4000,
+            max_tokens=3000,
         )
-
-        # Extract final schema (backward compatible)
-        schema = raw_result.get("step_4_final_schema", raw_result)
 
         logger.info(
             "schema_generated",
-            field_count=len(schema.get("fields", [])),
+            field_count=len(result.get("fields", [])),
         )
-        return schema
+        return result
 
     def detect_record_boundaries(
         self,
@@ -483,86 +384,41 @@ CRITICAL: Include EVERY field visible in the records. Base schema ONLY on what y
             entity_type=entity_type,
         )
 
-        prompt = f"""Identify INDIVIDUAL {entity_type.upper()} RECORDS using step-by-step analysis:
+        prompt = f"""Identify every individual {entity_type.upper()} record on this page. Think step by step:
+1. Scan the page for all visible {entity_type} records
+2. Identify what visually separates each record (lines, spacing, borders)
+3. Locate the {primary_id_field} value for each record
+4. Estimate bounding boxes as page percentages (0.0-1.0)
 
 Entity Type: {entity_type}
 Primary Identifier: {primary_id_field}
 
-STEP 1: OVERALL PAGE SCAN
-- Total visible {entity_type} records: [count]
-- Layout pattern: [horizontal, vertical, grid, irregular]
-- Page sections: [header, body, footer areas]
-
-STEP 2: SEPARATOR IDENTIFICATION
-- What visually separates each {entity_type}?
-  [lines, whitespace, borders, alternating colors, etc.]
-- Are separators consistent or varied?
-- Separator locations: [describe where they appear]
-
-STEP 3: PRIMARY IDENTIFIER EXTRACTION
-For each distinct {entity_type} record:
-- Locate the {primary_id_field} value
-- Verify it's unique per record
-- Note its position in the record
-
-STEP 4: BOUNDING BOX CALCULATION
-For each record, determine:
-- Top edge: [percentage from top of page, 0.0-1.0]
-- Left edge: [percentage from left, 0.0-1.0]
-- Bottom edge: [percentage from top of page, 0.0-1.0]
-- Right edge: [percentage from left, 0.0-1.0]
-
 Return JSON:
 {{
-  "step_1_page_scan": {{
-    "total_records_visible": 5,
-    "layout_pattern": "vertical list with horizontal lines",
-    "page_sections": "header at top 10%, body with records"
-  }},
-  "step_2_separators": {{
-    "separator_type": "thin horizontal lines",
-    "consistency": "uniform between all records",
-    "separator_locations": ["after each record row"]
-  }},
-  "step_3_identifiers": [
+  "total_records": 5,
+  "records": [
     {{
-      "record_number": 1,
-      "primary_id_value": "extracted {primary_id_field}",
-      "id_position": "leftmost column"
+      "record_id": 1,
+      "primary_identifier": "extracted {primary_id_field} value",
+      "bounding_box": {{
+        "top": 0.15,
+        "left": 0.0,
+        "bottom": 0.30,
+        "right": 1.0
+      }},
+      "visual_separator": "horizontal line below"
     }}
-  ],
-  "step_4_boundaries": {{
-    "total_records": 5,
-    "records": [
-      {{
-        "record_id": 1,
-        "primary_identifier": "extracted {primary_id_field} value",
-        "bounding_box": {{
-          "top": 0.15,
-          "left": 0.0,
-          "bottom": 0.30,
-          "right": 1.0
-        }},
-        "visual_separator": "horizontal line below"
-      }}
-    ],
-    "layout_notes": "How records are organized"
-  }},
-  "confidence": 0.93,
-  "boundary_reasoning": "Why these boundaries are accurate"
+  ]
 }}
 
 CRITICAL: Each unique {primary_id_field} = one record. Report ALL records visible on this page."""
 
-        raw_result = self._send_vision_json(
+        result = self._send_vision_json(
             image_data=page_data_uri,
             prompt=prompt,
             system_prompt=self._build_grounding_system_prompt(),
-            max_tokens=3000,
+            max_tokens=2000,
         )
-
-        # Extract boundaries from CoT response (backward compatible)
-        result = raw_result.get("step_4_boundaries", raw_result)
 
         boundaries = []
         for rec in result.get("records", []):
@@ -626,75 +482,32 @@ CRITICAL: Each unique {primary_id_field} = one record. Report ALL records visibl
         field_list = "\n".join(field_lines)
 
         bbox = boundary.bounding_box
-        prompt = f"""Extract data for ONE SPECIFIC {entity_type.upper()} using step-by-step verification:
+        prompt = f"""Extract data for ONE SPECIFIC {entity_type.upper()}. Think step by step:
+1. Locate "{primary_id}" in the bounding box and confirm isolation
+2. Read each field value exactly as shown in the image
+3. Verify each value matches the expected data type
+4. Reject any value that might belong to a different record
 
 TARGET RECORD: {primary_id}
 BOUNDING BOX: Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}
 
-STEP 1: LOCATE TARGET RECORD
-- Confirm you can see "{primary_id}" in the specified bounding box
-- Verify this is the ONLY {entity_type} you will extract
-- Note any visual boundaries around this record
-
-STEP 2: FIELD-BY-FIELD EXTRACTION
-For each field below, extract ONLY from the "{primary_id}" record:
-
+Fields to extract:
 {field_list}
-
-For each field:
-- Locate the field in the target record
-- Read the exact text/value
-- If unclear or not visible, note as null
-- Record confidence for this field (0.0-1.0)
-
-STEP 3: VALUE VALIDATION
-For each extracted value:
-- Does it match the expected data type?
-- Is the text clearly legible?
-- Could this value belong to a different record? (if yes, reject it)
-
-STEP 4: FINAL EXTRACTION
-Based on steps 1-3, compile the verified extraction:
 
 Return JSON:
 {{
-  "step_1_location": {{
-    "target_confirmed": true,
-    "primary_id_visible": "{primary_id}",
-    "record_isolated": true
+  "record_id": {boundary.record_id},
+  "primary_identifier": "{primary_id}",
+  "fields": {{
+    "field_name": "extracted_value_or_null"
   }},
-  "step_2_field_extraction": [
-    {{
-      "field_name": "field_name",
-      "extracted_value": "value or null",
-      "visibility": "clear|blurry|obscured|missing",
-      "field_confidence": 0.95
-    }}
-  ],
-  "step_3_validation": [
-    {{
-      "field_name": "field_name",
-      "type_matches": true,
-      "legibility": "high|medium|low",
-      "cross_contamination_risk": "none|low|high"
-    }}
-  ],
-  "step_4_final_extraction": {{
-    "record_id": {boundary.record_id},
-    "primary_identifier": "{primary_id}",
-    "fields": {{
-      "field_name": "final_verified_value"
-    }},
-    "confidence": 0.92
-  }},
-  "extraction_reasoning": "Why you are confident in these values"
+  "confidence": 0.92
 }}
 
 CRITICAL RULES:
 - Extract ONLY from "{primary_id}" within the bounding box
 - Return null for any field you cannot clearly read
-- NEVER guess or infer values not explicitly visible
-- If any doubt exists, lower confidence accordingly"""
+- NEVER guess or infer values not explicitly visible"""
 
         start_ms = time.time()
 
@@ -705,16 +518,13 @@ CRITICAL RULES:
             retry_count=0,
         )
 
-        raw_result = self._send_vision_json(
+        result = self._send_vision_json(
             image_data=page_data_uri,
             prompt=prompt,
             system_prompt=self._build_grounding_system_prompt(),
-            max_tokens=4000,
+            max_tokens=2000,
             temperature=temperature,
         )
-
-        # Extract final result (backward compatible)
-        result = raw_result.get("step_4_final_extraction", raw_result)
 
         elapsed_ms = int((time.time() - start_ms) * 1000)
 
@@ -1334,6 +1144,7 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
                 record.record_id = global_record_id
 
                 # Phase 2: Validate + Correct pipeline
+                corrected_fields: list[str] = []
                 if self._enable_validation:
                     validation_result = self._validate_extraction(
                         page_data_uri=page_uri,
@@ -1355,10 +1166,17 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
                             validation_result=validation_result,
                             schema=schema,
                         )
+                        corrected_fields = fields_to_fix
 
                 # Phase 3: Consensus for critical fields (final quality gate)
+                # Skip fields already corrected by Phase 2 to avoid redundant VLM calls
                 if self._enable_consensus:
                     critical_fields = self._identify_critical_fields(schema)
+                    if corrected_fields:
+                        critical_fields = [
+                            f for f in critical_fields
+                            if f not in corrected_fields
+                        ]
                     if critical_fields:
                         record = self._consensus_extract_critical_fields(
                             page_data_uri=page_uri,

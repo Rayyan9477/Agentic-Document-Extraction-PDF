@@ -113,19 +113,12 @@ class ExtractionConfig:
     vlm_endpoint: str = "http://localhost:1234/v1"
     enable_multi_record: bool = True
     enable_duplicate_detection: bool = True
-    enable_validation: bool = True
     export_excel: bool = True
     export_markdown: bool = True
     export_json: bool = True
     batch_size: int = 10
     parallel_workers: int = 1
     log_level: str = "INFO"
-
-    # ─── Phase 1: Foundation & Quick Wins (Zero-Shot Accuracy) ───
-    enable_chain_of_thought: bool = True
-    enable_visual_grounding: bool = True
-    enable_adaptive_temperature: bool = True
-    enable_field_metadata_tracking: bool = True
 
     # ─── Phase 2: Multi-Stage Validation (default False for safety) ───
     enable_validation_stage: bool = False
@@ -137,8 +130,6 @@ class ExtractionConfig:
 
     # ─── Thresholds & Parameters ───
     validation_confidence_threshold: float = 0.85
-    retry_temperature_increment: float = 0.05
-    max_temperature: float = 0.3
 
     def __post_init__(self):
         """Initialize default values for mutable fields."""
