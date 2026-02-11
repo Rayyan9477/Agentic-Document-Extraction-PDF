@@ -258,7 +258,7 @@ class TestConsensusExtractCriticalFields:
         )
         record = _make_record()
 
-        result = extractor._consensus_extract_critical_fields(
+        result, agreed, total = extractor._consensus_extract_critical_fields(
             page_data_uri="data:image/png;base64,fake",
             record=record,
             boundary=_make_boundary(),
@@ -269,6 +269,8 @@ class TestConsensusExtractCriticalFields:
         assert result.fields["patient_id"] == "MRN12345"
         # Exactly 2 VLM calls (pass 1 + pass 2, no tie-breaker)
         assert mock_client.send_vision_request.call_count == 2
+        assert agreed == 1
+        assert total == 1
 
     def test_disagreement_triggers_tiebreaker(self):
         """When passes disagree, a tie-breaker VLM call resolves the conflict."""
@@ -297,7 +299,7 @@ class TestConsensusExtractCriticalFields:
         )
         record = _make_record()
 
-        result = extractor._consensus_extract_critical_fields(
+        result, agreed, total = extractor._consensus_extract_critical_fields(
             page_data_uri="data:image/png;base64,fake",
             record=record,
             boundary=_make_boundary(),
@@ -308,6 +310,8 @@ class TestConsensusExtractCriticalFields:
         assert result.fields["patient_id"] == "MRN12345"
         # 2 passes + 1 tie-breaker = 3
         assert mock_client.send_vision_request.call_count == 3
+        assert agreed == 0
+        assert total == 1
 
     def test_empty_critical_fields_no_vlm_calls(self):
         """When no critical fields, return record unchanged with zero VLM calls."""
@@ -319,7 +323,7 @@ class TestConsensusExtractCriticalFields:
         record = _make_record()
         original_fields = dict(record.fields)
 
-        result = extractor._consensus_extract_critical_fields(
+        result, agreed, total = extractor._consensus_extract_critical_fields(
             page_data_uri="data:image/png;base64,fake",
             record=record,
             boundary=_make_boundary(),
@@ -329,6 +333,8 @@ class TestConsensusExtractCriticalFields:
 
         mock_client.send_vision_request.assert_not_called()
         assert result.fields == original_fields
+        assert agreed == 0
+        assert total == 0
 
     def test_mixed_agreement_and_disagreement(self):
         """Only disagreeing fields trigger a tie-breaker."""
@@ -360,7 +366,7 @@ class TestConsensusExtractCriticalFields:
         )
         record = _make_record()
 
-        result = extractor._consensus_extract_critical_fields(
+        result, agreed, total = extractor._consensus_extract_critical_fields(
             page_data_uri="data:image/png;base64,fake",
             record=record,
             boundary=_make_boundary(),
@@ -372,6 +378,8 @@ class TestConsensusExtractCriticalFields:
         assert result.fields["patient_dob"] == "01/15/1980"
         # 2 passes + 1 tie-breaker (only for patient_dob) = 3
         assert mock_client.send_vision_request.call_count == 3
+        assert agreed == 1
+        assert total == 2
 
 
 # ──────────────────────────────────────────────────────────────

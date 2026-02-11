@@ -39,6 +39,9 @@ def get_extraction_config() -> dict[str, Any]:
         "validation_confidence_threshold": raw.get("validation_confidence_threshold", 0.85),
         "enable_consensus_for_critical_fields": raw.get("enable_consensus_for_critical_fields", False),
         "critical_field_keywords": raw.get("critical_field_keywords", None),
+        "max_fields_per_extraction_call": raw.get("max_fields_per_extraction_call", 10),
+        "enable_schema_decomposition": raw.get("enable_schema_decomposition", True),
+        "enable_synthetic_few_shot_examples": raw.get("enable_synthetic_few_shot_examples", False),
     }
 
 

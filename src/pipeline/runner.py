@@ -716,6 +716,9 @@ class PipelineRunner:
         confidence_threshold: float = 0.85,
         enable_consensus: bool = False,
         critical_field_keywords: list[str] | None = None,
+        max_fields_per_call: int = 10,
+        enable_schema_decomposition: bool = True,
+        enable_synthetic_examples: bool = False,
     ) -> "DocumentExtractionResult":
         """
         Extract multiple records per page from a PDF document.
@@ -724,7 +727,7 @@ class PipelineRunner:
         1. Detects document type + entity type (1 VLM call)
         2. Generates adaptive schema (1 VLM call)
         3. Per page: detects record boundaries (1 VLM call)
-        4. Per record: extracts fields (1 VLM call)
+        4. Per record: extracts fields (1+ VLM calls, chunked for large schemas)
         5. [Optional] Per record: validates extraction (1 VLM call)
         6. [Optional] Per record: corrects low-confidence fields (0-1 VLM call)
         7. [Optional] Per record: consensus for critical fields (2+ VLM calls)
@@ -741,6 +744,9 @@ class PipelineRunner:
             confidence_threshold: Minimum confidence for fields (0.0-1.0).
             enable_consensus: Run dual-pass consensus on critical fields.
             critical_field_keywords: Keywords to identify critical fields.
+            max_fields_per_call: Max schema fields per VLM extraction call.
+            enable_schema_decomposition: Split large schemas into chunks.
+            enable_synthetic_examples: Inject document-type format examples.
 
         Returns:
             DocumentExtractionResult with per-record data.
@@ -778,6 +784,9 @@ class PipelineRunner:
             confidence_threshold=confidence_threshold,
             enable_consensus=enable_consensus,
             critical_field_keywords=critical_field_keywords,
+            max_fields_per_call=max_fields_per_call,
+            enable_schema_decomposition=enable_schema_decomposition,
+            enable_synthetic_examples=enable_synthetic_examples,
         )
         result = extractor.extract_document(
             page_images=page_images,

@@ -372,6 +372,9 @@ def _run_multi_record_sync(
         confidence_threshold=cfg["validation_confidence_threshold"],
         enable_consensus=cfg["enable_consensus_for_critical_fields"],
         critical_field_keywords=cfg["critical_field_keywords"],
+        max_fields_per_call=cfg["max_fields_per_extraction_call"],
+        enable_schema_decomposition=cfg["enable_schema_decomposition"],
+        enable_synthetic_examples=cfg["enable_synthetic_few_shot_examples"],
     )
 
     # Build response records

@@ -28,5 +28,8 @@
     "total",
     "balance"
   ],
-  "validation_confidence_threshold": 0.85
+  "validation_confidence_threshold": 0.85,
+  "max_fields_per_extraction_call": 10,
+  "enable_schema_decomposition": true,
+  "enable_synthetic_few_shot_examples": false
 }

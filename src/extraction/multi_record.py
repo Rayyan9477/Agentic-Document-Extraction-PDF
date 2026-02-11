@@ -30,6 +30,7 @@ from typing import Any
 from src.client.lm_client import LMStudioClient, VisionRequest
 from src.config import get_logger
 from src.prompts.grounding_rules import build_grounded_system_prompt
+from src.prompts.synthetic_examples import get_synthetic_example
 from src.utils.date_utils import parse_date
 from src.utils.string_utils import clean_currency
 
@@ -107,6 +108,9 @@ class MultiRecordExtractor:
         confidence_threshold: float = 0.85,
         enable_consensus: bool = False,
         critical_field_keywords: list[str] | None = None,
+        max_fields_per_call: int = 10,
+        enable_schema_decomposition: bool = True,
+        enable_synthetic_examples: bool = False,
     ) -> None:
         self._client = client or LMStudioClient()
         self._vlm_calls = 0
@@ -118,6 +122,9 @@ class MultiRecordExtractor:
             "id", "number", "code", "mrn", "ssn",
             "date", "dob", "amount", "charge", "total", "balance",
         ]
+        self._max_fields_per_call = max_fields_per_call
+        self._enable_schema_decomposition = enable_schema_decomposition
+        self._enable_synthetic_examples = enable_synthetic_examples
 
     def _build_grounding_system_prompt(self) -> str:
         """System-level grounding rules for all VLM calls.
@@ -192,6 +199,78 @@ class MultiRecordExtractor:
                 critical.append(field_def["field_name"])
         return critical
 
+    # ── Schema Decomposition ────────────────────────────────────
+
+    def _split_schema_for_extraction(
+        self,
+        schema: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Split a large schema into chunks for multiple VLM calls.
+
+        If the schema has more fields than ``_max_fields_per_call``, critical
+        fields (identifiers, dates, amounts) go in the first chunk and the
+        rest are distributed evenly across subsequent chunks.
+
+        When decomposition is disabled or the schema is small enough, returns
+        ``[schema]`` unchanged (single-call path).
+
+        Returns:
+            List of schema dicts, each containing a subset of ``fields``.
+        """
+        fields = schema.get("fields", [])
+
+        if (
+            not self._enable_schema_decomposition
+            or len(fields) <= self._max_fields_per_call
+        ):
+            return [schema]
+
+        # Separate critical vs non-critical fields
+        critical_names = set(self._identify_critical_fields(schema))
+        critical_fields = [f for f in fields if f["field_name"] in critical_names]
+        other_fields = [f for f in fields if f["field_name"] not in critical_names]
+
+        # Build chunks: critical fields go in first chunk
+        chunks: list[list[dict[str, Any]]] = []
+
+        if critical_fields:
+            # If critical fields alone exceed limit, they still go in first chunk
+            chunks.append(critical_fields)
+        else:
+            chunks.append([])
+
+        # Distribute remaining fields across chunks evenly
+        # Fill first chunk up to max, then create new chunks as needed
+        first_remaining = self._max_fields_per_call - len(chunks[0])
+        if first_remaining > 0 and other_fields:
+            chunks[0].extend(other_fields[:first_remaining])
+            other_fields = other_fields[first_remaining:]
+
+        # Split remaining into balanced chunks
+        while other_fields:
+            chunk_size = min(self._max_fields_per_call, len(other_fields))
+            chunks.append(other_fields[:chunk_size])
+            other_fields = other_fields[chunk_size:]
+
+        # Build schema dicts for each chunk (preserve schema metadata)
+        schema_chunks = []
+        for chunk_fields in chunks:
+            if not chunk_fields:
+                continue
+            chunk_schema = {
+                k: v for k, v in schema.items() if k != "fields"
+            }
+            chunk_schema["fields"] = chunk_fields
+            schema_chunks.append(chunk_schema)
+
+        logger.info(
+            "schema_decomposed",
+            total_fields=len(fields),
+            chunks=len(schema_chunks),
+            fields_per_chunk=[len(c["fields"]) for c in schema_chunks],
+        )
+        return schema_chunks
+
     # ── Field Type Validation & Coercion ─────────────────────────
 
     @staticmethod
@@ -261,6 +340,54 @@ class MultiRecordExtractor:
             elif ftype == "boolean":
                 record.fields[name] = self._coerce_boolean(value)
         return record
+
+    def _calibrate_confidence(
+        self,
+        record: ExtractedRecord,
+        schema: dict[str, Any],
+        validation_result: dict[str, Any] | None = None,
+        consensus_agreed: int = 0,
+        consensus_total: int = 0,
+    ) -> float:
+        """Calibrate record confidence using multiple signals.
+
+        Combines VLM self-reported confidence with objective quality factors:
+        - Field completeness (% of schema fields with non-null values)
+        - Validation pass rate (if Phase 2 ran)
+        - Consensus agreement rate (if Phase 3 ran)
+
+        Returns:
+            Calibrated confidence score in [0.0, 1.0].
+        """
+        raw = record.confidence
+
+        # Factor 1: Field completeness
+        total_fields = len(schema.get("fields", []))
+        filled = sum(1 for v in record.fields.values() if v is not None)
+        completeness = filled / max(total_fields, 1)
+
+        # Factor 2: Validation pass rate
+        val_score = 1.0
+        if validation_result:
+            validations = validation_result.get("field_validations", [])
+            if validations:
+                correct = sum(
+                    1 for fv in validations if fv.get("is_correct", True)
+                )
+                val_score = correct / len(validations)
+
+        # Factor 3: Consensus agreement rate
+        consensus_score = 1.0
+        if consensus_total > 0:
+            consensus_score = max(0.7, consensus_agreed / consensus_total)
+
+        calibrated = (
+            0.40 * raw
+            + 0.25 * val_score
+            + 0.20 * completeness
+            + 0.15 * consensus_score
+        )
+        return round(min(calibrated, 1.0), 3)
 
     def _send_vision_json(
         self,
@@ -527,6 +654,133 @@ CRITICAL: Each unique {primary_id_field} = one record. Report ALL records visibl
         )
         return boundaries
 
+    # ── Extraction Prompt Building (C3: Separated Prompts) ─────
+
+    def _build_extraction_system_prompt(
+        self,
+        schema: dict[str, Any],
+    ) -> str:
+        """Build system prompt with grounding rules + structural output schema.
+
+        Separates structural JSON constraints (system prompt) from semantic
+        extraction guidance (user prompt) per Runpulse research findings.
+        """
+        # Build field type declarations
+        field_schema_lines = []
+        for f in schema.get("fields", []):
+            ftype = f.get("field_type", "text")
+            freq = "required" if f.get("required", False) else "optional"
+            field_schema_lines.append(f'    "{f["field_name"]}": {ftype} ({freq})')
+        field_schema = ",\n".join(field_schema_lines)
+
+        structural_schema = f"""
+
+## OUTPUT SCHEMA
+
+Return a JSON object with this EXACT structure:
+
+{{
+  "record_id": integer,
+  "primary_identifier": string,
+  "fields": {{
+{field_schema}
+  }},
+  "confidence": float 0.0-1.0
+}}
+
+STRUCTURAL RULES:
+- All keys above must be present in your response
+- Use null for missing or unreadable values (not the string "null", not "")
+- Confidence must be a number between 0.0 and 1.0
+- Number fields: use numeric values (not currency strings)
+- Date fields: use ISO format YYYY-MM-DD where possible"""
+
+        return self._build_grounding_system_prompt() + structural_schema
+
+    def _extract_single_chunk(
+        self,
+        page_data_uri: str,
+        boundary: RecordBoundary,
+        chunk_schema: dict[str, Any],
+        page_number: int,
+        chunk_index: int = 0,
+        total_chunks: int = 1,
+    ) -> dict[str, Any]:
+        """Extract fields for one schema chunk via a single VLM call.
+
+        This is the inner extraction loop used by ``extract_single_record``.
+        When schema decomposition splits a large schema, this is called once
+        per chunk.
+
+        Returns:
+            Raw VLM result dict with ``fields``, ``confidence``, etc.
+        """
+        primary_id = boundary.primary_identifier
+        entity_type = boundary.entity_type
+
+        # Build semantic field descriptions (WHAT to look for)
+        field_lines = []
+        for f in chunk_schema.get("fields", []):
+            field_lines.append(
+                f"  - {f['field_name']}: {f.get('description', f['field_name'])}"
+            )
+        field_list = "\n".join(field_lines)
+
+        # C2: Inject synthetic few-shot example if enabled (first chunk only)
+        example_block = ""
+        if self._enable_synthetic_examples and chunk_index == 0:
+            doc_type = chunk_schema.get(
+                "schema_id", "unknown"
+            ).replace("adaptive_", "")
+            example_block = get_synthetic_example(doc_type, entity_type)
+            if example_block:
+                example_block = f"\n{example_block}\n"
+
+        # Batch indicator for multi-chunk extraction
+        batch_note = ""
+        if total_chunks > 1:
+            batch_note = (
+                f"\nBATCH {chunk_index + 1} of {total_chunks}: "
+                f"Extract ONLY the fields listed below. "
+                f"Other fields will be extracted in separate batches.\n"
+            )
+
+        bbox = boundary.bounding_box
+        prompt = f"""EXTRACTION TASK: Read data for ONE SPECIFIC {entity_type.upper()}.
+
+REASONING STEPS:
+1. Locate "{primary_id}" within the bounding box and confirm isolation
+2. Read each field value exactly as shown in the image
+3. Verify each value belongs to THIS record only
+4. Reject any value that might belong to a different record
+
+TARGET RECORD: {primary_id}
+BOUNDING BOX: {self._format_bbox(bbox)}
+{example_block}{batch_note}
+FIELDS TO EXTRACT:
+{field_list}
+
+CRITICAL EXTRACTION RULES:
+- Extract ONLY from "{primary_id}" within the specified bounding box
+- Return null for any field you cannot clearly read
+- NEVER guess or infer values not explicitly visible
+- If uncertain about a character, return null rather than guess"""
+
+        # Use adaptive temperature (base 0.1 for mixed field types)
+        temperature = self._get_adaptive_temperature(
+            field_type="mixed",
+            field_name="multi_field_extraction",
+            retry_count=0,
+        )
+
+        return self._send_vision_json(
+            image_data=page_data_uri,
+            prompt=prompt,
+            system_prompt=self._build_extraction_system_prompt(chunk_schema),
+            max_tokens=2000,
+            temperature=temperature,
+        )
+
     def extract_single_record(
         self,
         page_data_uri: str,
@@ -536,6 +790,9 @@ CRITICAL: Each unique {primary_id_field} = one record. Report ALL records visibl
     ) -> ExtractedRecord:
         """
         Extract all fields for a single record identified by its boundary.
+
+        For schemas with more fields than ``_max_fields_per_call``, the schema
+        is decomposed into chunks and multiple VLM calls are merged.
 
         Args:
             page_data_uri: Data URI of the page image.
@@ -556,69 +813,52 @@ CRITICAL: Each unique {primary_id_field} = one record. Report ALL records visibl
             primary_id=primary_id,
         )
 
-        # Build field instructions from schema
-        field_lines = []
-        for f in schema.get("fields", []):
-            field_lines.append(
-                f"  - {f['field_name']} ({f.get('field_type', 'text')}): "
-                f"{f.get('description', f['field_name'])}"
-            )
-        field_list = "\n".join(field_lines)
-
-        bbox = boundary.bounding_box
-        prompt = f"""Extract data for ONE SPECIFIC {entity_type.upper()}. Think step by step:
-1. Locate "{primary_id}" in the bounding box and confirm isolation
-2. Read each field value exactly as shown in the image
-3. Verify each value matches the expected data type
-4. Reject any value that might belong to a different record
-
-TARGET RECORD: {primary_id}
-BOUNDING BOX: {self._format_bbox(bbox)}
-
-Fields to extract:
-{field_list}
-
-Return JSON:
-{{
-  "record_id": {boundary.record_id},
-  "primary_identifier": "{primary_id}",
-  "fields": {{
-    "field_name": "extracted_value_or_null"
-  }},
-  "confidence": 0.92
-}}
-
-CRITICAL RULES:
-- Extract ONLY from "{primary_id}" within the bounding box
-- Return null for any field you cannot clearly read
-- NEVER guess or infer values not explicitly visible"""
-
         start_ms = time.time()
 
-        # Use adaptive temperature (base 0.1 for mixed field types)
-        temperature = self._get_adaptive_temperature(
-            field_type="mixed",
-            field_name="multi_field_extraction",
-            retry_count=0,
-        )
+        # C1: Split schema into chunks if needed
+        schema_chunks = self._split_schema_for_extraction(schema)
 
-        result = self._send_vision_json(
-            image_data=page_data_uri,
-            prompt=prompt,
-            system_prompt=self._build_grounding_system_prompt(),
-            max_tokens=2000,
-            temperature=temperature,
-        )
+        if len(schema_chunks) == 1:
+            # Single-call path (no decomposition overhead)
+            result = self._extract_single_chunk(
+                page_data_uri, boundary, schema_chunks[0], page_number,
+            )
+            merged_fields = result.get("fields", {})
+            confidence = float(result.get("confidence", 0.0))
+        else:
+            # Multi-chunk path: extract each chunk, merge results
+            merged_fields: dict[str, Any] = {}
+            min_confidence = 1.0
+
+            for i, chunk_schema in enumerate(schema_chunks):
+                result = self._extract_single_chunk(
+                    page_data_uri, boundary, chunk_schema, page_number,
+                    chunk_index=i, total_chunks=len(schema_chunks),
+                )
+                chunk_fields = result.get("fields", {})
+                merged_fields.update(chunk_fields)
+                chunk_conf = float(result.get("confidence", 0.0))
+                min_confidence = min(min_confidence, chunk_conf)
+
+                logger.debug(
+                    "chunk_extracted",
+                    chunk=i + 1,
+                    total_chunks=len(schema_chunks),
+                    fields_extracted=len(chunk_fields),
+                    confidence=chunk_conf,
+                )
+
+            confidence = min_confidence
 
         elapsed_ms = int((time.time() - start_ms) * 1000)
 
         record = ExtractedRecord(
             record_id=boundary.record_id,
             page_number=page_number,
-            primary_identifier=result.get("primary_identifier", primary_id),
+            primary_identifier=primary_id,
             entity_type=entity_type,
-            fields=result.get("fields", {}),
-            confidence=float(result.get("confidence", 0.0)),
+            fields=merged_fields,
+            confidence=confidence,
             extraction_time_ms=elapsed_ms,
         )
 
@@ -629,6 +869,7 @@ CRITICAL RULES:
             primary_id=record.primary_identifier,
             field_count=len(record.fields),
             confidence=record.confidence,
+            chunks=len(schema_chunks),
         )
         return record
 
@@ -929,7 +1170,7 @@ CRITICAL: Read EXTREMELY carefully. This is a second-chance correction pass."""
         boundary: RecordBoundary,
         schema: dict[str, Any],
         critical_fields: list[str],
-    ) -> ExtractedRecord:
+    ) -> tuple[ExtractedRecord, int, int]:
         """
         Re-extract critical fields using dual-pass consensus.
 
@@ -945,10 +1186,10 @@ CRITICAL: Read EXTREMELY carefully. This is a second-chance correction pass."""
             critical_fields: List of field names to verify via consensus.
 
         Returns:
-            Updated ExtractedRecord with consensus-verified critical fields.
+            Tuple of (updated record, agreed count, total critical fields).
         """
         if not critical_fields:
-            return record
+            return record, 0, 0
 
         primary_id = record.primary_identifier
         bbox = boundary.bounding_box
@@ -1078,7 +1319,7 @@ CRITICAL: Read EXTREMELY carefully. This is a verification pass for high-value f
             disagreed_count=len(disagreed),
         )
 
-        return record
+        return record, len(agreed), len(agreed) + len(disagreed)
 
     def _resolve_disagreement(
         self,
@@ -1231,6 +1472,7 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
                 record = self._validate_field_types(record, schema)
 
                 # Phase 2: Validate + Correct pipeline
+                validation_result: dict[str, Any] | None = None
                 corrected_fields: list[str] = []
                 if self._enable_validation:
                     validation_result = self._validate_extraction(
@@ -1257,6 +1499,8 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
 
                 # Phase 3: Consensus for critical fields (final quality gate)
                 # Skip fields already corrected by Phase 2 to avoid redundant VLM calls
+                consensus_agreed = 0
+                consensus_total = 0
                 if self._enable_consensus:
                     critical_fields = self._identify_critical_fields(schema)
                     if corrected_fields:
@@ -1265,13 +1509,24 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
                             if f not in corrected_fields
                         ]
                     if critical_fields:
-                        record = self._consensus_extract_critical_fields(
-                            page_data_uri=page_uri,
-                            record=record,
-                            boundary=boundary,
-                            schema=schema,
-                            critical_fields=critical_fields,
+                        record, consensus_agreed, consensus_total = (
+                            self._consensus_extract_critical_fields(
+                                page_data_uri=page_uri,
+                                record=record,
+                                boundary=boundary,
+                                schema=schema,
+                                critical_fields=critical_fields,
+                            )
                         )
+
+                # Calibrate confidence using all available signals
+                record.confidence = self._calibrate_confidence(
+                    record=record,
+                    schema=schema,
+                    validation_result=validation_result,
+                    consensus_agreed=consensus_agreed,
+                    consensus_total=consensus_total,
+                )
 
                 all_records.append(record)
 

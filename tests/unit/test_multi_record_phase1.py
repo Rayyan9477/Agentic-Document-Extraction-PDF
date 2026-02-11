@@ -508,5 +508,128 @@ class TestOutputFormat:
         assert record.fields["name"] == "Smith, John"
 
 
+class TestCalibratedConfidence:
+    """Test multi-factor confidence calibration."""
+
+    def _make_record(self, confidence=0.9, fields=None):
+        return ExtractedRecord(
+            record_id=1,
+            page_number=1,
+            primary_identifier="Test",
+            entity_type="patient",
+            fields=fields or {"name": "Smith", "age": 45, "id": "MRN123"},
+            confidence=confidence,
+            extraction_time_ms=100,
+        )
+
+    def _make_schema(self):
+        return {
+            "fields": [
+                {"field_name": "name", "field_type": "text"},
+                {"field_name": "age", "field_type": "number"},
+                {"field_name": "id", "field_type": "text"},
+            ]
+        }
+
+    def test_baseline_no_validation_no_consensus(self):
+        """Without Phase 2/3, calibration uses raw confidence + completeness."""
+        extractor = MultiRecordExtractor()
+        record = self._make_record(confidence=0.9)
+        schema = self._make_schema()
+
+        result = extractor._calibrate_confidence(record, schema)
+
+        # 0.40*0.9 + 0.25*1.0 + 0.20*1.0 + 0.15*1.0 = 0.36 + 0.25 + 0.20 + 0.15 = 0.96
+        assert result == 0.96
+
+    def test_low_completeness_reduces_confidence(self):
+        """Missing fields should reduce calibrated confidence."""
+        extractor = MultiRecordExtractor()
+        record = self._make_record(
+            confidence=0.9,
+            fields={"name": "Smith", "age": None, "id": None},
+        )
+        schema = self._make_schema()
+
+        result = extractor._calibrate_confidence(record, schema)
+
+        # completeness = 1/3 = 0.333
+        # 0.40*0.9 + 0.25*1.0 + 0.20*0.333 + 0.15*1.0 = 0.36 + 0.25 + 0.067 + 0.15 = 0.827
+        assert 0.82 <= result <= 0.83
+
+    def test_validation_failures_reduce_confidence(self):
+        """Validation failures should reduce calibrated confidence."""
+        extractor = MultiRecordExtractor()
+        record = self._make_record(confidence=0.9)
+        schema = self._make_schema()
+
+        validation_result = {
+            "field_validations": [
+                {"field": "name", "is_correct": True},
+                {"field": "age", "is_correct": False},
+                {"field": "id", "is_correct": True},
+            ]
+        }
+
+        result = extractor._calibrate_confidence(
+            record, schema, validation_result=validation_result,
+        )
+
+        # val_score = 2/3 = 0.667
+        # 0.40*0.9 + 0.25*0.667 + 0.20*1.0 + 0.15*1.0 = 0.36 + 0.167 + 0.20 + 0.15 = 0.877
+        assert 0.87 <= result <= 0.88
+
+    def test_consensus_disagreement_reduces_confidence(self):
+        """Consensus disagreements should reduce calibrated confidence."""
+        extractor = MultiRecordExtractor()
+        record = self._make_record(confidence=0.9)
+        schema = self._make_schema()
+
+        result = extractor._calibrate_confidence(
+            record, schema, consensus_agreed=1, consensus_total=3,
+        )
+
+        # consensus_score = max(0.7, 1/3) = 0.7
+        # 0.40*0.9 + 0.25*1.0 + 0.20*1.0 + 0.15*0.7 = 0.36 + 0.25 + 0.20 + 0.105 = 0.915
+        assert result == 0.915
+
+    def test_all_factors_combined(self):
+        """Test with all signals contributing."""
+        extractor = MultiRecordExtractor()
+        record = self._make_record(
+            confidence=0.8,
+            fields={"name": "Smith", "age": None, "id": "MRN123"},
+        )
+        schema = self._make_schema()
+
+        validation_result = {
+            "field_validations": [
+                {"field": "name", "is_correct": True},
+                {"field": "id", "is_correct": False},
+            ]
+        }
+
+        result = extractor._calibrate_confidence(
+            record, schema,
+            validation_result=validation_result,
+            consensus_agreed=1,
+            consensus_total=2,
+        )
+
+        # raw=0.8, completeness=2/3=0.667, val_score=1/2=0.5, consensus=max(0.7,0.5)=0.7
+        # 0.40*0.8 + 0.25*0.5 + 0.20*0.667 + 0.15*0.7 = 0.32 + 0.125 + 0.133 + 0.105 = 0.683
+        assert 0.68 <= result <= 0.69
+
+    def test_confidence_capped_at_one(self):
+        """Confidence should never exceed 1.0."""
+        extractor = MultiRecordExtractor()
+        record = self._make_record(confidence=1.0)
+        schema = self._make_schema()
+
+        result = extractor._calibrate_confidence(record, schema)
+
+        assert result <= 1.0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
