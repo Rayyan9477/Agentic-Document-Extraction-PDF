@@ -77,11 +77,12 @@ class TestGroundingSystemPrompt:
         extractor = MultiRecordExtractor()
         prompt = extractor._build_grounding_system_prompt()
 
-        # Check for critical grounding phrases
-        assert "only extract" in prompt.lower() or "only report" in prompt.lower()
-        assert "clearly see" in prompt.lower() or "directly see" in prompt.lower()
+        # Check for critical grounding phrases from shared grounding_rules module
+        assert "only extract" in prompt.lower()
+        assert "clearly visible" in prompt.lower() or "clearly see" in prompt.lower()
         assert "confidence" in prompt.lower()
-        assert "null" in prompt.lower() or "unclear" in prompt.lower()
+        assert "null" in prompt.lower()
+        assert "no guessing" in prompt.lower() or "never guess" in prompt.lower()
 
     def test_grounding_prompt_reasoning_process(self):
         """Test that prompt includes reasoning guidance."""
@@ -93,6 +94,93 @@ class TestGroundingSystemPrompt:
             "describe" in prompt.lower() or "identify" in prompt.lower()
             or "reasoning" in prompt.lower()
         )
+
+
+class TestFieldTypeValidation:
+    """Test post-extraction field type validation and coercion."""
+
+    def test_coerce_number_from_currency(self):
+        """Test that currency strings are coerced to float."""
+        extractor = MultiRecordExtractor()
+        assert extractor._coerce_number("$1,234.56") == 1234.56
+
+    def test_coerce_number_plain(self):
+        """Test that plain numbers pass through."""
+        extractor = MultiRecordExtractor()
+        assert extractor._coerce_number(42) == 42
+        assert extractor._coerce_number(3.14) == 3.14
+
+    def test_coerce_number_invalid_returns_original(self):
+        """Test that non-numeric strings are preserved."""
+        extractor = MultiRecordExtractor()
+        assert extractor._coerce_number("not a number") == "not a number"
+
+    def test_normalize_date_us_format(self):
+        """Test that US date formats are normalized to ISO."""
+        extractor = MultiRecordExtractor()
+        result = extractor._normalize_date("01/15/2024")
+        assert result == "2024-01-15"
+
+    def test_normalize_date_invalid_returns_original(self):
+        """Test that unparseable dates are preserved."""
+        extractor = MultiRecordExtractor()
+        assert extractor._normalize_date("not a date") == "not a date"
+
+    def test_coerce_boolean_strings(self):
+        """Test boolean coercion from various string forms."""
+        extractor = MultiRecordExtractor()
+        assert extractor._coerce_boolean("yes") is True
+        assert extractor._coerce_boolean("no") is False
+        assert extractor._coerce_boolean("true") is True
+        assert extractor._coerce_boolean("false") is False
+        assert extractor._coerce_boolean("checked") is True
+
+    def test_validate_field_types_integration(self):
+        """Test _validate_field_types applies coercion to a record."""
+        extractor = MultiRecordExtractor()
+        record = ExtractedRecord(
+            record_id=1,
+            page_number=1,
+            primary_identifier="Test",
+            entity_type="patient",
+            fields={
+                "name": "Smith",
+                "total_charge": "$150.00",
+                "date_of_birth": "03/15/1985",
+                "is_active": "yes",
+            },
+            confidence=0.9,
+            extraction_time_ms=100,
+        )
+        schema = {
+            "fields": [
+                {"field_name": "name", "field_type": "text"},
+                {"field_name": "total_charge", "field_type": "number"},
+                {"field_name": "date_of_birth", "field_type": "date"},
+                {"field_name": "is_active", "field_type": "boolean"},
+            ]
+        }
+        result = extractor._validate_field_types(record, schema)
+        assert result.fields["name"] == "Smith"  # text unchanged
+        assert result.fields["total_charge"] == 150.0
+        assert result.fields["date_of_birth"] == "1985-03-15"
+        assert result.fields["is_active"] is True
+
+    def test_validate_field_types_null_preserved(self):
+        """Test that null values are not coerced."""
+        extractor = MultiRecordExtractor()
+        record = ExtractedRecord(
+            record_id=1,
+            page_number=1,
+            primary_identifier="Test",
+            entity_type="patient",
+            fields={"amount": None},
+            confidence=0.9,
+            extraction_time_ms=100,
+        )
+        schema = {"fields": [{"field_name": "amount", "field_type": "number"}]}
+        result = extractor._validate_field_types(record, schema)
+        assert result.fields["amount"] is None
 
 
 class TestAdaptiveTemperature:

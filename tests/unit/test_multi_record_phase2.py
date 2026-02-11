@@ -502,42 +502,34 @@ class TestPipelineIntegration:
         mock_responses = [
             # detect_document_type
             MagicMock(has_json=True, parsed_json={
-                "step_4_classification": {
-                    "document_type": "test_doc",
-                    "entity_type": "patient",
-                    "primary_identifier_field": "name",
-                },
+                "document_type": "test_doc",
+                "entity_type": "patient",
+                "primary_identifier_field": "name",
                 "confidence": 0.95,
             }),
             # generate_schema
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_schema": {
-                    "schema_id": "test",
-                    "entity_type": "patient",
-                    "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
-                    "total_field_count": 1,
-                },
+                "schema_id": "test",
+                "entity_type": "patient",
+                "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
+                "total_field_count": 1,
             }),
             # detect_record_boundaries (1 record)
             MagicMock(has_json=True, parsed_json={
-                "step_4_boundaries": {
-                    "total_records": 1,
-                    "records": [{
-                        "record_id": 1,
-                        "primary_identifier": "Smith",
-                        "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
-                        "visual_separator": "line",
-                    }],
-                },
+                "total_records": 1,
+                "records": [{
+                    "record_id": 1,
+                    "primary_identifier": "Smith",
+                    "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
+                    "visual_separator": "line",
+                }],
             }),
             # extract_single_record
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_extraction": {
-                    "record_id": 1,
-                    "primary_identifier": "Smith",
-                    "fields": {"name": "Smith"},
-                    "confidence": 0.90,
-                },
+                "record_id": 1,
+                "primary_identifier": "Smith",
+                "fields": {"name": "Smith"},
+                "confidence": 0.90,
             }),
         ]
         mock_client.send_vision_request.side_effect = mock_responses
@@ -565,42 +557,34 @@ class TestPipelineIntegration:
         mock_responses = [
             # detect_document_type
             MagicMock(has_json=True, parsed_json={
-                "step_4_classification": {
-                    "document_type": "test_doc",
-                    "entity_type": "patient",
-                    "primary_identifier_field": "name",
-                },
+                "document_type": "test_doc",
+                "entity_type": "patient",
+                "primary_identifier_field": "name",
                 "confidence": 0.95,
             }),
             # generate_schema
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_schema": {
-                    "schema_id": "test",
-                    "entity_type": "patient",
-                    "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
-                    "total_field_count": 1,
-                },
+                "schema_id": "test",
+                "entity_type": "patient",
+                "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
+                "total_field_count": 1,
             }),
             # detect_record_boundaries
             MagicMock(has_json=True, parsed_json={
-                "step_4_boundaries": {
-                    "total_records": 1,
-                    "records": [{
-                        "record_id": 1,
-                        "primary_identifier": "Smith",
-                        "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
-                        "visual_separator": "line",
-                    }],
-                },
+                "total_records": 1,
+                "records": [{
+                    "record_id": 1,
+                    "primary_identifier": "Smith",
+                    "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
+                    "visual_separator": "line",
+                }],
             }),
             # extract_single_record
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_extraction": {
-                    "record_id": 1,
-                    "primary_identifier": "Smith",
-                    "fields": {"name": "Smith"},
-                    "confidence": 0.90,
-                },
+                "record_id": 1,
+                "primary_identifier": "Smith",
+                "fields": {"name": "Smith"},
+                "confidence": 0.90,
             }),
             # _validate_extraction (Phase 2)
             MagicMock(has_json=True, parsed_json={
@@ -635,42 +619,34 @@ class TestPipelineIntegration:
         mock_responses = [
             # detect_document_type
             MagicMock(has_json=True, parsed_json={
-                "step_4_classification": {
-                    "document_type": "test_doc",
-                    "entity_type": "patient",
-                    "primary_identifier_field": "name",
-                },
+                "document_type": "test_doc",
+                "entity_type": "patient",
+                "primary_identifier_field": "name",
                 "confidence": 0.95,
             }),
             # generate_schema
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_schema": {
-                    "schema_id": "test",
-                    "entity_type": "patient",
-                    "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
-                    "total_field_count": 1,
-                },
+                "schema_id": "test",
+                "entity_type": "patient",
+                "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
+                "total_field_count": 1,
             }),
             # detect_record_boundaries
             MagicMock(has_json=True, parsed_json={
-                "step_4_boundaries": {
-                    "total_records": 1,
-                    "records": [{
-                        "record_id": 1,
-                        "primary_identifier": "Smlth",
-                        "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
-                        "visual_separator": "line",
-                    }],
-                },
+                "total_records": 1,
+                "records": [{
+                    "record_id": 1,
+                    "primary_identifier": "Smlth",
+                    "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
+                    "visual_separator": "line",
+                }],
             }),
             # extract_single_record (incorrect 'name')
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_extraction": {
-                    "record_id": 1,
-                    "primary_identifier": "Smlth",
-                    "fields": {"name": "Smlth"},  # Wrong
-                    "confidence": 0.75,
-                },
+                "record_id": 1,
+                "primary_identifier": "Smlth",
+                "fields": {"name": "Smlth"},  # Wrong
+                "confidence": 0.75,
             }),
             # _validate_extraction -> flags 'name' as incorrect
             MagicMock(has_json=True, parsed_json={
@@ -730,42 +706,34 @@ class TestPipelineIntegration:
         mock_responses = [
             # detect_document_type
             MagicMock(has_json=True, parsed_json={
-                "step_4_classification": {
-                    "document_type": "test_doc",
-                    "entity_type": "patient",
-                    "primary_identifier_field": "name",
-                },
+                "document_type": "test_doc",
+                "entity_type": "patient",
+                "primary_identifier_field": "name",
                 "confidence": 0.95,
             }),
             # generate_schema
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_schema": {
-                    "schema_id": "test",
-                    "entity_type": "patient",
-                    "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
-                    "total_field_count": 1,
-                },
+                "schema_id": "test",
+                "entity_type": "patient",
+                "fields": [{"field_name": "name", "field_type": "text", "description": "Name"}],
+                "total_field_count": 1,
             }),
             # detect_record_boundaries
             MagicMock(has_json=True, parsed_json={
-                "step_4_boundaries": {
-                    "total_records": 1,
-                    "records": [{
-                        "record_id": 1,
-                        "primary_identifier": "Smith",
-                        "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
-                        "visual_separator": "line",
-                    }],
-                },
+                "total_records": 1,
+                "records": [{
+                    "record_id": 1,
+                    "primary_identifier": "Smith",
+                    "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
+                    "visual_separator": "line",
+                }],
             }),
             # extract_single_record
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_extraction": {
-                    "record_id": 1,
-                    "primary_identifier": "Smith",
-                    "fields": {"name": "Smith"},
-                    "confidence": 0.95,
-                },
+                "record_id": 1,
+                "primary_identifier": "Smith",
+                "fields": {"name": "Smith"},
+                "confidence": 0.95,
             }),
             # _validate_extraction -> all correct
             MagicMock(has_json=True, parsed_json={
@@ -809,19 +777,19 @@ class TestFeatureFlagGating:
 
         mock_responses = [
             MagicMock(has_json=True, parsed_json={
-                "step_4_classification": {"document_type": "t", "entity_type": "p", "primary_identifier_field": "n"},
+                "document_type": "t", "entity_type": "p", "primary_identifier_field": "n",
                 "confidence": 0.9,
             }),
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_schema": {"schema_id": "t", "entity_type": "p", "fields": [], "total_field_count": 0},
+                "schema_id": "t", "entity_type": "p", "fields": [], "total_field_count": 0,
             }),
             MagicMock(has_json=True, parsed_json={
-                "step_4_boundaries": {"total_records": 1, "records": [
+                "total_records": 1, "records": [
                     {"record_id": 1, "primary_identifier": "X", "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1}},
-                ]},
+                ],
             }),
             MagicMock(has_json=True, parsed_json={
-                "step_4_final_extraction": {"record_id": 1, "primary_identifier": "X", "fields": {}, "confidence": 0.9},
+                "record_id": 1, "primary_identifier": "X", "fields": {}, "confidence": 0.9,
             }),
         ]
         mock_client.send_vision_request.side_effect = mock_responses

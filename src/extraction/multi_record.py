@@ -29,6 +29,9 @@ from typing import Any
 
 from src.client.lm_client import LMStudioClient, VisionRequest
 from src.config import get_logger
+from src.prompts.grounding_rules import build_grounded_system_prompt
+from src.utils.date_utils import parse_date
+from src.utils.string_utils import clean_currency
 
 logger = get_logger(__name__)
 
@@ -117,21 +120,32 @@ class MultiRecordExtractor:
         ]
 
     def _build_grounding_system_prompt(self) -> str:
-        """System-level grounding rules for all VLM calls."""
-        return """You are an expert document analyzer with perfect vision capabilities.
+        """System-level grounding rules for all VLM calls.
 
-CRITICAL GROUNDING RULES:
-1. Only extract text you can CLEARLY SEE in the image
-2. If text is blurry, partially obscured, or unclear, mark confidence < 0.8
-3. Never infer or guess information not explicitly visible
-4. For tables, verify column headers before extracting values
-5. For handwritten text, only extract if 100% legible
-6. Return null for any field you cannot read with certainty
+        Delegates to the shared grounding_rules module for consistent
+        anti-hallucination rules across all extraction pipelines.
+        """
+        return build_grounded_system_prompt(
+            additional_context=(
+                "REASONING PROCESS:\n"
+                "- First describe what you see (layout, visual elements)\n"
+                "- Then identify patterns and repeating elements\n"
+                "- Finally classify/extract based on concrete visual evidence"
+            ),
+            include_forbidden=True,
+            include_confidence_scale=False,
+            include_chain_of_thought=False,
+            include_few_shot_examples=False,
+            include_self_verification=False,
+            include_constitutional_critique=False,
+        )
 
-REASONING PROCESS:
-- First describe what you see (layout, visual elements)
-- Then identify patterns and repeating elements
-- Finally classify/extract based on concrete visual evidence"""
+    @staticmethod
+    def _format_bbox(bbox: dict[str, float]) -> str:
+        """Format a bounding box dict as a human-readable string for prompts."""
+        return (
+            f"Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}"
+        )
 
     def _get_adaptive_temperature(
         self,
@@ -177,6 +191,76 @@ REASONING PROCESS:
             if any(kw in name_lower for kw in self._critical_field_keywords):
                 critical.append(field_def["field_name"])
         return critical
+
+    # ── Field Type Validation & Coercion ─────────────────────────
+
+    @staticmethod
+    def _coerce_number(value: Any) -> Any:
+        """Coerce a value to a numeric type using clean_currency.
+
+        Returns the original value if coercion fails (preserves raw extraction).
+        """
+        if isinstance(value, (int, float)):
+            return value
+        result = clean_currency(str(value))
+        if result is not None:
+            return float(result)
+        return value
+
+    @staticmethod
+    def _normalize_date(value: Any) -> Any:
+        """Normalize a date string to ISO format using parse_date.
+
+        Returns the original value if parsing fails (preserves raw extraction).
+        """
+        if not isinstance(value, str):
+            return value
+        parsed = parse_date(value)
+        if parsed is not None:
+            return parsed.isoformat()
+        return value
+
+    @staticmethod
+    def _coerce_boolean(value: Any) -> Any:
+        """Coerce a value to boolean.
+
+        Returns the original value if coercion is ambiguous.
+        """
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            lower = value.strip().lower()
+            if lower in ("true", "yes", "1", "checked", "x"):
+                return True
+            if lower in ("false", "no", "0", "unchecked", ""):
+                return False
+        return value
+
+    def _validate_field_types(
+        self,
+        record: ExtractedRecord,
+        schema: dict[str, Any],
+    ) -> ExtractedRecord:
+        """Validate and coerce extracted field values against schema types.
+
+        Runs post-extraction to normalize values (e.g. "$1,234.56" -> 1234.56,
+        "01/15/2024" -> "2024-01-15"). Preserves original value if coercion fails.
+        """
+        for field_def in schema.get("fields", []):
+            name = field_def["field_name"]
+            ftype = field_def.get("field_type", "text")
+            value = record.fields.get(name)
+            if value is None:
+                continue
+            if ftype == "number":
+                record.fields[name] = self._coerce_number(value)
+            elif ftype == "date":
+                record.fields[name] = self._normalize_date(value)
+            elif ftype == "boolean":
+                record.fields[name] = self._coerce_boolean(value)
+        return record
 
     def _send_vision_json(
         self,
@@ -489,7 +573,7 @@ CRITICAL: Each unique {primary_id_field} = one record. Report ALL records visibl
 4. Reject any value that might belong to a different record
 
 TARGET RECORD: {primary_id}
-BOUNDING BOX: Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}
+BOUNDING BOX: {self._format_bbox(bbox)}
 
 Fields to extract:
 {field_list}
@@ -603,7 +687,7 @@ CRITICAL RULES:
         prompt = f"""VALIDATION TASK: Verify the accuracy of previously extracted data.
 
 TARGET RECORD: {primary_id}
-BOUNDING BOX: Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}
+BOUNDING BOX: {self._format_bbox(bbox)}
 
 The following values were extracted from this record. Your job is to VERIFY
 each value by looking at the ORIGINAL IMAGE and checking if they match.
@@ -746,7 +830,7 @@ CRITICAL RULES:
         prompt = f"""TARGETED RE-EXTRACTION: Carefully re-read specific fields from the image.
 
 TARGET RECORD: {primary_id}
-BOUNDING BOX: Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}
+BOUNDING BOX: {self._format_bbox(bbox)}
 
 The following fields were flagged as potentially incorrect or uncertain.
 Please look VERY CAREFULLY at the original image and re-extract these values.
@@ -889,7 +973,7 @@ CRITICAL: Read EXTREMELY carefully. This is a second-chance correction pass."""
         prompt = f"""CONSENSUS EXTRACTION: Re-read specific critical fields for verification.
 
 TARGET RECORD: {primary_id}
-BOUNDING BOX: Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}
+BOUNDING BOX: {self._format_bbox(bbox)}
 
 Extract ONLY these critical fields from the image, reading each value
 character-by-character with extreme precision:
@@ -1025,7 +1109,7 @@ CRITICAL: Read EXTREMELY carefully. This is a verification pass for high-value f
         prompt = f"""TIE-BREAKER EXTRACTION for field "{field_name}":
 
 TARGET RECORD: {primary_id}
-BOUNDING BOX: Top {bbox.get('top', 0):.0%} to Bottom {bbox.get('bottom', 1):.0%}
+BOUNDING BOX: {self._format_bbox(bbox)}
 
 Two independent extraction passes DISAGREED on this field:
 - Pass 1 extracted: "{value_1}"
@@ -1142,6 +1226,9 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
                     page_number=page_num,
                 )
                 record.record_id = global_record_id
+
+                # Post-extraction: validate and coerce field types
+                record = self._validate_field_types(record, schema)
 
                 # Phase 2: Validate + Correct pipeline
                 corrected_fields: list[str] = []

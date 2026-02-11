@@ -73,52 +73,44 @@ def _base_pipeline_responses():
     return [
         # detect_document_type
         MagicMock(has_json=True, parsed_json={
-            "step_4_classification": {
-                "document_type": "test_doc",
-                "entity_type": "patient",
-                "primary_identifier_field": "name",
-            },
+            "document_type": "test_doc",
+            "entity_type": "patient",
+            "primary_identifier_field": "name",
             "confidence": 0.95,
         }),
         # generate_schema
         MagicMock(has_json=True, parsed_json={
-            "step_4_final_schema": {
-                "schema_id": "test",
-                "entity_type": "patient",
-                "fields": [
-                    {"field_name": "patient_id", "field_type": "text", "description": "ID"},
-                    {"field_name": "patient_name", "field_type": "text", "description": "Name"},
-                    {"field_name": "total_charge", "field_type": "number", "description": "Charge"},
-                    {"field_name": "diagnosis", "field_type": "text", "description": "Diagnosis"},
-                ],
-                "total_field_count": 4,
-            },
+            "schema_id": "test",
+            "entity_type": "patient",
+            "fields": [
+                {"field_name": "patient_id", "field_type": "text", "description": "ID"},
+                {"field_name": "patient_name", "field_type": "text", "description": "Name"},
+                {"field_name": "total_charge", "field_type": "number", "description": "Charge"},
+                {"field_name": "diagnosis", "field_type": "text", "description": "Diagnosis"},
+            ],
+            "total_field_count": 4,
         }),
         # detect_record_boundaries (1 record)
         MagicMock(has_json=True, parsed_json={
-            "step_4_boundaries": {
-                "total_records": 1,
-                "records": [{
-                    "record_id": 1,
-                    "primary_identifier": "Smith",
-                    "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
-                    "visual_separator": "line",
-                }],
-            },
+            "total_records": 1,
+            "records": [{
+                "record_id": 1,
+                "primary_identifier": "Smith",
+                "bounding_box": {"top": 0, "left": 0, "bottom": 1, "right": 1},
+                "visual_separator": "line",
+            }],
         }),
         # extract_single_record
         MagicMock(has_json=True, parsed_json={
-            "step_4_final_extraction": {
-                "record_id": 1,
-                "primary_identifier": "Smith",
-                "fields": {
-                    "patient_id": "MRN12345",
-                    "patient_name": "Smith",
-                    "total_charge": "$150.00",
-                    "diagnosis": "Hypertension",
-                },
-                "confidence": 0.90,
+            "record_id": 1,
+            "primary_identifier": "Smith",
+            "fields": {
+                "patient_id": "MRN12345",
+                "patient_name": "Smith",
+                "total_charge": "$150.00",
+                "diagnosis": "Hypertension",
             },
+            "confidence": 0.90,
         }),
     ]
 
