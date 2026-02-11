@@ -25,6 +25,8 @@ MANIFEST
 node_modules/
 nul
 .next
+.ruff_cache/
+medical/
 
 
 # Virtual environment
