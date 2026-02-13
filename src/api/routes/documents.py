@@ -62,10 +62,17 @@ ALLOWED_OUTPUT_DIRECTORIES: list[str] = [
     "./data/output",
 ]
 
+# Supported document extensions for upload/processing
+SUPPORTED_DOCUMENT_EXTENSIONS = [
+    ".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp",
+    ".docx", ".doc", ".xlsx", ".csv",
+    ".dcm", ".dicom", ".edi", ".x12", ".835", ".837",
+]
+
 # Initialize validators
 _pdf_validator = SecurePathValidator(
     allowed_directories=None,  # Allow any directory but validate for traversal
-    allowed_extensions=[".pdf"],
+    allowed_extensions=SUPPORTED_DOCUMENT_EXTENSIONS,
     allow_absolute_paths=True,
     resolve_symlinks=True,
 )
@@ -496,10 +503,16 @@ async def upload_document(
     )
 
     # Validate file type
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
+    if not file.filename:
         raise HTTPException(
             status_code=400,
-            detail="Only PDF files are supported",
+            detail="Filename is required",
+        )
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file format: '{file_ext}'. Supported: {', '.join(SUPPORTED_DOCUMENT_EXTENSIONS)}",
         )
 
     # Validate file size (50MB limit)
@@ -510,7 +523,7 @@ async def upload_document(
         )
 
     # Create temp directory for uploads
-    upload_dir = Path(tempfile.gettempdir()) / "pdf_uploads"
+    upload_dir = Path(tempfile.gettempdir()) / "doc_uploads"
     upload_dir.mkdir(exist_ok=True)
 
     # SECURITY: Sanitize filename to prevent path traversal attacks
@@ -527,10 +540,10 @@ async def upload_document(
         filename = "".join(c if c in safe_chars else "_" for c in filename)
         # Prevent empty or dangerous filenames
         if not filename or filename.startswith("."):
-            filename = "upload.pdf"
+            filename = f"upload{file_ext}"
         return filename
 
-    safe_name = secure_filename(file.filename or "upload.pdf")
+    safe_name = secure_filename(file.filename or f"upload{file_ext}")
     temp_file_path = upload_dir / f"{request_id}_{safe_name}"
     try:
         with temp_file_path.open("wb") as buffer:

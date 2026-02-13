@@ -315,7 +315,7 @@ class PipelineRunner:
         """
         Preprocess node for the workflow.
 
-        Loads PDF and converts to images.
+        Loads document (PDF or other supported format) and converts to images.
 
         Args:
             state: Initial extraction state.
@@ -326,13 +326,13 @@ class PipelineRunner:
         start_time = datetime.now(UTC)
         pdf_path = state.get("pdf_path", "")
 
-        self._logger.info("preprocessing_pdf", pdf_path=pdf_path)
+        self._logger.info("preprocessing_document", file_path=pdf_path)
 
         try:
-            # Load and convert PDF
-            page_images = self._load_and_convert_pdf(pdf_path)
+            # Load and convert file (supports PDF, images, DOCX, XLSX, etc.)
+            page_images = self._load_and_convert_file(pdf_path)
 
-            # Calculate PDF hash
+            # Calculate file hash
             pdf_hash = self._calculate_file_hash(pdf_path)
 
             # Update state
@@ -439,6 +439,59 @@ class PipelineRunner:
                     pixmap = None
 
         return page_images
+
+    def _load_and_convert_file(self, file_path: str) -> list[dict[str, Any]]:
+        """
+        Load any supported file format and convert to page images.
+
+        Uses FileProcessorFactory to route to the correct processor.
+        Falls back to PDF-specific loading for backward compatibility.
+
+        Args:
+            file_path: Path to the file to process.
+
+        Returns:
+            List of page image dictionaries.
+        """
+        from src.preprocessing.file_factory import FileProcessorFactory
+        from src.preprocessing.base_processor import SUPPORTED_EXTENSIONS
+
+        path = Path(file_path)
+        suffix = path.suffix.lower()
+
+        # Use factory for non-PDF supported formats
+        if suffix != ".pdf" and suffix in SUPPORTED_EXTENSIONS:
+            factory = FileProcessorFactory(dpi=self._dpi)
+            result = factory.process(path)
+
+            page_images: list[dict[str, Any]] = []
+            for page in result.pages:
+                # Apply image enhancement if enabled
+                png_bytes = page.image_bytes
+                png_bytes = self._enhance_image_bytes(png_bytes, page.page_number)
+
+                # Resize if needed
+                if (
+                    page.width > self._max_image_dimension
+                    or page.height > self._max_image_dimension
+                ):
+                    png_bytes = self._resize_image(png_bytes, self._max_image_dimension)
+
+                base64_data = base64.b64encode(png_bytes).decode("utf-8")
+
+                page_images.append({
+                    "page_number": page.page_number,
+                    "width": page.width,
+                    "height": page.height,
+                    "data_uri": f"data:image/png;base64,{base64_data}",
+                    "base64_encoded": base64_data,
+                    "text_content": page.text_content,
+                })
+
+            return page_images
+
+        # PDF: use existing optimized PyMuPDF path
+        return self._load_and_convert_pdf(file_path)
 
     def _convert_pdf_bytes_to_images(
         self,

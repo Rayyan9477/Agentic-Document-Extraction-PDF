@@ -389,6 +389,11 @@ class ExtractionState(TypedDict, total=False):
     requires_human_review: bool
     human_review_reason: str | None
 
+    # === Document Splitting Fields (Phase 2A) ===
+    document_segments: list[dict[str, Any]]  # Detected sub-document boundaries
+    is_multi_document: bool  # Whether PDF contains multiple documents
+    active_segment_index: int  # Current segment being processed (0-indexed)
+
     # === Memory Fields (Mem0 Integration) ===
     session_id: str | None  # Session identifier for memory grouping
     recovery_checkpoint: (
@@ -465,6 +470,10 @@ def create_initial_state(
         final_output=None,
         requires_human_review=False,
         human_review_reason=None,
+        # Document Splitting
+        document_segments=[],
+        is_multi_document=False,
+        active_segment_index=0,
         # Memory
         session_id=secrets.token_hex(8),
         recovery_checkpoint=None,

@@ -55,6 +55,7 @@ logger = get_logger(__name__)
 
 # Node names for the workflow graph
 NODE_PREPROCESS = "preprocess"
+NODE_SPLIT = "split"  # Document boundary detection (Phase 2A)
 NODE_ANALYZE = "analyze"
 NODE_EXTRACT = "extract"
 NODE_VALIDATE = "validate"
@@ -137,12 +138,15 @@ class OrchestratorAgent(BaseAgent):
         # Agent instances - injected via build_workflow()
         # These are NOT lazy loaded. They're passed in when build_workflow() is called
         # and remain None until that point. The workflow graph owns the lifecycle.
-        
+
+        # Document splitting agent (Phase 2A)
+        self._splitter: BaseAgent | None = None
+
         # Legacy pipeline agents
         self._analyzer: BaseAgent | None = None
         self._extractor: BaseAgent | None = None
         self._validator: BaseAgent | None = None
-        
+
         # VLM-first pipeline agents
         self._layout_agent: BaseAgent | None = None
         self._component_agent: BaseAgent | None = None
@@ -360,6 +364,7 @@ class OrchestratorAgent(BaseAgent):
         layout_agent: BaseAgent | None = None,
         component_agent: BaseAgent | None = None,
         schema_agent: BaseAgent | None = None,
+        splitter_agent: BaseAgent | None = None,
     ) -> StateGraph:
         """
         Build the LangGraph workflow with all agent nodes.
@@ -367,6 +372,10 @@ class OrchestratorAgent(BaseAgent):
         Supports both legacy (hardcoded schema) and VLM-first (adaptive) pipelines.
         If VLM-first agents are provided, the workflow will route conditionally
         based on the use_adaptive_extraction flag in state.
+
+        If a splitter_agent is provided, document boundary detection runs between
+        preprocess and pipeline routing. For multi-document PDFs, each segment is
+        processed through the full extract→validate pipeline.
 
         Args:
             preprocess_fn: Function to preprocess PDF and create initial state.
@@ -376,11 +385,13 @@ class OrchestratorAgent(BaseAgent):
             layout_agent: Optional layout analysis agent (VLM-first pipeline).
             component_agent: Optional component detector agent (VLM-first pipeline).
             schema_agent: Optional schema generator agent (VLM-first pipeline).
+            splitter_agent: Optional document splitter agent (Phase 2A).
 
         Returns:
             Configured StateGraph workflow.
         """
         # Store agent references
+        self._splitter = splitter_agent
         self._analyzer = analyzer
         self._extractor = extractor
         self._validator = validator
@@ -390,6 +401,7 @@ class OrchestratorAgent(BaseAgent):
 
         # Determine if VLM-first pipeline is available
         has_vlm_first = all([layout_agent, component_agent, schema_agent])
+        has_splitter = splitter_agent is not None
 
         # Create the state graph
         workflow = StateGraph(ExtractionState)
@@ -401,6 +413,10 @@ class OrchestratorAgent(BaseAgent):
         workflow.add_node(NODE_RETRY, self._retry_node)
         workflow.add_node(NODE_HUMAN_REVIEW, self._human_review_node)
         workflow.add_node(NODE_COMPLETE, self._complete_node)
+
+        # Add splitter node if available
+        if has_splitter:
+            workflow.add_node(NODE_SPLIT, self._run_splitter)
 
         # Add legacy pipeline nodes
         workflow.add_node(NODE_ANALYZE, self._run_analyzer)
@@ -415,25 +431,43 @@ class OrchestratorAgent(BaseAgent):
         # Set entry point
         workflow.set_entry_point(NODE_PREPROCESS)
 
-        # Add conditional routing after preprocess
-        if has_vlm_first:
-            # Route to either VLM-first or legacy pipeline
-            workflow.add_conditional_edges(
-                NODE_PREPROCESS,
-                self._determine_pipeline,
-                {
-                    ROUTE_ADAPTIVE: NODE_LAYOUT,
-                    ROUTE_LEGACY: NODE_ANALYZE,
-                },
-            )
+        # Determine the node after preprocess (splitter or pipeline routing)
+        post_preprocess_node = NODE_SPLIT if has_splitter else None
 
-            # VLM-first pipeline flow
+        if has_splitter:
+            # Preprocess → Split → Pipeline routing
+            workflow.add_edge(NODE_PREPROCESS, NODE_SPLIT)
+
+            if has_vlm_first:
+                workflow.add_conditional_edges(
+                    NODE_SPLIT,
+                    self._determine_pipeline,
+                    {
+                        ROUTE_ADAPTIVE: NODE_LAYOUT,
+                        ROUTE_LEGACY: NODE_ANALYZE,
+                    },
+                )
+            else:
+                workflow.add_edge(NODE_SPLIT, NODE_ANALYZE)
+        else:
+            # No splitter: Preprocess → Pipeline routing (original behavior)
+            if has_vlm_first:
+                workflow.add_conditional_edges(
+                    NODE_PREPROCESS,
+                    self._determine_pipeline,
+                    {
+                        ROUTE_ADAPTIVE: NODE_LAYOUT,
+                        ROUTE_LEGACY: NODE_ANALYZE,
+                    },
+                )
+            else:
+                workflow.add_edge(NODE_PREPROCESS, NODE_ANALYZE)
+
+        # VLM-first pipeline flow
+        if has_vlm_first:
             workflow.add_edge(NODE_LAYOUT, NODE_COMPONENTS)
             workflow.add_edge(NODE_COMPONENTS, NODE_SCHEMA)
             workflow.add_edge(NODE_SCHEMA, NODE_EXTRACT)
-        else:
-            # Only legacy pipeline available
-            workflow.add_edge(NODE_PREPROCESS, NODE_ANALYZE)
 
         # Legacy pipeline flow (after analyze)
         workflow.add_edge(NODE_ANALYZE, NODE_EXTRACT)
@@ -461,12 +495,18 @@ class OrchestratorAgent(BaseAgent):
         workflow.add_edge(NODE_HUMAN_REVIEW, END)
 
         self._workflow = workflow
-        
+
         if has_vlm_first:
-            self._logger.info("workflow_built_with_vlm_first_support")
+            self._logger.info(
+                "workflow_built_with_vlm_first_support",
+                splitter_enabled=has_splitter,
+            )
         else:
-            self._logger.info("workflow_built_legacy_only")
-        
+            self._logger.info(
+                "workflow_built_legacy_only",
+                splitter_enabled=has_splitter,
+            )
+
         return workflow
 
     def compile_workflow(self) -> Any:
@@ -624,6 +664,42 @@ class OrchestratorAgent(BaseAgent):
             return None
 
     # Node implementations
+
+    def _run_splitter(self, state: ExtractionState) -> ExtractionState:
+        """Run the document splitter agent node."""
+        if self._splitter is None:
+            raise OrchestrationError(
+                "Splitter agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+
+        try:
+            return self._splitter.process(state)
+        except AgentError as e:
+            # Splitter failure is non-fatal — treat as single document
+            self._logger.warning(
+                "splitter_failed_treating_as_single_document",
+                error=str(e),
+            )
+            state = add_warning(
+                state,
+                f"Document splitting failed, treating as single document: {e}",
+            )
+            page_images = state.get("page_images", [])
+            n_pages = len(page_images)
+            return update_state(state, {
+                "document_segments": [{
+                    "start_page": 1,
+                    "end_page": max(n_pages, 1),
+                    "document_type": "unknown",
+                    "confidence": 0.3,
+                    "page_count": max(n_pages, 1),
+                    "title": "",
+                }] if n_pages > 0 else [],
+                "is_multi_document": False,
+                "active_segment_index": 0,
+            })
 
     def _run_analyzer(self, state: ExtractionState) -> ExtractionState:
         """Run the analyzer agent node."""
