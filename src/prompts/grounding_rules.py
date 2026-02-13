@@ -106,7 +106,8 @@ Return a JSON object with this exact structure for each field:
   "field_name": {
     "value": "extracted value or null",
     "confidence": 0.95,
-    "location": "description of where found"
+    "location": "description of where found",
+    "bbox": {"x": 0.12, "y": 0.05, "w": 0.25, "h": 0.03}
   }
 }
 ```
@@ -115,6 +116,10 @@ IMPORTANT:
 - Use null (not "null" string, not "", not "N/A") for missing/unreadable fields
 - Confidence must be a decimal number between 0.0 and 1.0
 - Location must describe where in the document the value was found
+- bbox: Bounding box as normalized coordinates (0.0-1.0) where:
+  - x = left edge, y = top edge, w = width, h = height
+  - (0,0) is top-left corner, (1,1) is bottom-right corner of the page
+  - If you cannot determine the bounding box, omit the bbox field
 """
 
 
@@ -193,11 +198,13 @@ Response:
   "patient_name": {
     "value": "SMITH, JOHN A",
     "confidence": 0.95,
-    "location": "Box 2, top-left section"
+    "location": "Box 2, top-left section",
+    "bbox": {"x": 0.05, "y": 0.12, "w": 0.30, "h": 0.03}
   }
 }
 ```
-Why this is correct: Value exactly matches what's visible, high confidence is justified.
+Why this is correct: Value exactly matches what's visible, high confidence is justified,
+bbox pinpoints the exact region in the document.
 
 ### GOOD NULL EXAMPLE ✓
 ```
@@ -215,6 +222,7 @@ Response:
 }
 ```
 Why this is correct: Uncertain characters → return null rather than guess.
+Note: bbox is omitted when value is null (no region to ground).
 
 ### BAD EXTRACTION EXAMPLE ✗
 ```

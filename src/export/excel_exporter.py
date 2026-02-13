@@ -325,6 +325,11 @@ class ExcelExporter:
             "Confidence Level",
             "Location",
             "Passes Agree",
+            "Bbox Page",
+            "Bbox X",
+            "Bbox Y",
+            "Bbox W",
+            "Bbox H",
         ]
         self._write_header_row(worksheet, headers)
 
@@ -354,6 +359,14 @@ class ExcelExporter:
             location = field_data.get("location", "") if isinstance(field_data, dict) else ""
             passes_agree = meta.get("passes_agree", True) if isinstance(meta, dict) else True
 
+            # Extract bbox data if present
+            bbox = meta.get("bbox", {}) if isinstance(meta, dict) else {}
+            bbox_page = bbox.get("page", "") if bbox else ""
+            bbox_x = bbox.get("x", "") if bbox else ""
+            bbox_y = bbox.get("y", "") if bbox else ""
+            bbox_w = bbox.get("width", "") if bbox else ""
+            bbox_h = bbox.get("height", "") if bbox else ""
+
             row_data = [
                 field_name,
                 str(value) if value is not None else "",
@@ -361,6 +374,11 @@ class ExcelExporter:
                 confidence_level,
                 location,
                 "Yes" if passes_agree else "No",
+                bbox_page,
+                bbox_x,
+                bbox_y,
+                bbox_w,
+                bbox_h,
             ]
 
             self._write_data_row(worksheet, row, row_data)

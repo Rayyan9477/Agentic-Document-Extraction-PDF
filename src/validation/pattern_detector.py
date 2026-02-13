@@ -47,6 +47,7 @@ class HallucinationPattern(str, Enum):
     REPEATED_DIGITS = "repeated_digits"
     ALPHABETIC_SEQUENCE = "alphabetic_sequence"
     TEST_DATA = "test_data"
+    SPATIAL_ANOMALY = "spatial_anomaly"
 
 
 class PatternSeverity(str, Enum):
@@ -293,6 +294,10 @@ class HallucinationPatternDetector:
         cross_field_matches = self._check_cross_field_patterns(extracted_data)
         matches.extend(cross_field_matches)
 
+        # Check spatial anomalies in bounding boxes
+        spatial_matches = self._check_spatial_patterns(extracted_data, field_confidences)
+        matches.extend(spatial_matches)
+
         # Build result
         result = self._build_result(matches)
 
@@ -430,6 +435,124 @@ class HallucinationPatternDetector:
                     suggestion="Sequential values may be auto-generated rather than extracted",
                 )
             )
+
+        return matches
+
+    def _check_spatial_patterns(
+        self,
+        extracted_data: dict[str, Any],
+        field_confidences: dict[str, float] | None = None,
+    ) -> list[PatternMatch]:
+        """Check for spatial anomalies in bounding box coordinates.
+
+        Detects:
+        - Identical bboxes across distinct fields (copy-paste hallucination)
+        - Excessively large bboxes covering >60% of page area
+        - Zero-area or degenerate bboxes
+        - Bboxes outside valid page bounds
+        """
+        matches: list[PatternMatch] = []
+        field_confidences = field_confidences or {}
+
+        # Collect bboxes from extracted data
+        bboxes: dict[str, dict[str, float]] = {}
+        for field_name, value in extracted_data.items():
+            if isinstance(value, dict) and "bbox" in value:
+                bbox = value["bbox"]
+                if isinstance(bbox, dict) and "x" in bbox and "y" in bbox:
+                    bboxes[field_name] = bbox
+
+        if not bboxes:
+            return matches
+
+        # Check 1: Identical bboxes across multiple distinct fields
+        bbox_groups: dict[str, list[str]] = {}
+        for field_name, bbox in bboxes.items():
+            key = f"{bbox.get('x', 0):.4f},{bbox.get('y', 0):.4f},{bbox.get('w', bbox.get('width', 0)):.4f},{bbox.get('h', bbox.get('height', 0)):.4f}"
+            if key not in bbox_groups:
+                bbox_groups[key] = []
+            bbox_groups[key].append(field_name)
+
+        for _bbox_key, fields in bbox_groups.items():
+            if len(fields) >= 3:
+                matches.append(
+                    PatternMatch(
+                        field_name=fields[0],
+                        value=f"bbox shared by {len(fields)} fields",
+                        pattern=HallucinationPattern.SPATIAL_ANOMALY,
+                        severity=PatternSeverity.HIGH,
+                        confidence=0.85,
+                        description=(
+                            f"Identical bounding box across {len(fields)} fields: "
+                            f"{', '.join(fields[:5])}. Likely copy-paste hallucination."
+                        ),
+                        suggestion="Fields with identical coordinates likely share a hallucinated bbox",
+                    )
+                )
+
+        # Check 2: Excessively large bboxes (>60% of page area)
+        for field_name, bbox in bboxes.items():
+            w = bbox.get("w", bbox.get("width", 0))
+            h = bbox.get("h", bbox.get("height", 0))
+            area = w * h
+
+            if area > 0.6:
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=f"bbox area={area:.2f}",
+                        pattern=HallucinationPattern.SPATIAL_ANOMALY,
+                        severity=PatternSeverity.MEDIUM,
+                        confidence=0.70,
+                        description=(
+                            f"Bounding box for '{field_name}' covers {area * 100:.0f}% of page. "
+                            f"Individual fields rarely span more than 60% of a page."
+                        ),
+                        suggestion="Oversized bbox may indicate the model did not localize the field",
+                    )
+                )
+
+        # Check 3: Zero-area or degenerate bboxes
+        for field_name, bbox in bboxes.items():
+            w = bbox.get("w", bbox.get("width", 0))
+            h = bbox.get("h", bbox.get("height", 0))
+
+            if w <= 0 or h <= 0:
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=f"bbox w={w}, h={h}",
+                        pattern=HallucinationPattern.SPATIAL_ANOMALY,
+                        severity=PatternSeverity.HIGH,
+                        confidence=0.90,
+                        description=(
+                            f"Degenerate bounding box for '{field_name}' with zero or negative dimension."
+                        ),
+                        suggestion="Zero-area bbox indicates the model failed to locate this field",
+                    )
+                )
+
+        # Check 4: Bboxes outside valid page bounds (0-1 normalized)
+        for field_name, bbox in bboxes.items():
+            x = bbox.get("x", 0)
+            y = bbox.get("y", 0)
+            w = bbox.get("w", bbox.get("width", 0))
+            h = bbox.get("h", bbox.get("height", 0))
+
+            if x < 0 or y < 0 or (x + w) > 1.05 or (y + h) > 1.05:
+                matches.append(
+                    PatternMatch(
+                        field_name=field_name,
+                        value=f"bbox x={x}, y={y}, w={w}, h={h}",
+                        pattern=HallucinationPattern.SPATIAL_ANOMALY,
+                        severity=PatternSeverity.MEDIUM,
+                        confidence=0.80,
+                        description=(
+                            f"Bounding box for '{field_name}' extends outside page bounds."
+                        ),
+                        suggestion="Out-of-bounds bbox suggests hallucinated coordinates",
+                    )
+                )
 
         return matches
 

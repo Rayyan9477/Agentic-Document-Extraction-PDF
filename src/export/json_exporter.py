@@ -279,7 +279,7 @@ class JSONExporter:
         return values
 
     def _extract_field_metadata(self, state: ExtractionState) -> dict[str, dict[str, Any]]:
-        """Extract per-field metadata."""
+        """Extract per-field metadata including visual grounding bbox."""
         field_meta = state.get("field_metadata", {})
         result: dict[str, dict[str, Any]] = {}
 
@@ -288,12 +288,17 @@ class JSONExporter:
                 continue
 
             if isinstance(meta, dict):
-                result[field_name] = {
+                field_info: dict[str, Any] = {
                     "confidence": meta.get("confidence", 0.0),
                     "confidence_level": meta.get("confidence_level", "low"),
                     "passes_agree": meta.get("passes_agree", True),
                     "validation_passed": meta.get("validation_passed", True),
                 }
+                # Include bounding box for visual grounding
+                bbox = meta.get("bbox")
+                if bbox is not None:
+                    field_info["bbox"] = bbox
+                result[field_name] = field_info
 
         return result
 

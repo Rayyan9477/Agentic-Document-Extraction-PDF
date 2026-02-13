@@ -49,7 +49,8 @@
       "Bash(for:*)",
       "Bash(do echo \"$f\")",
       "Bash(done)",
-      "Bash(powershell.exe:*)"
+      "Bash(powershell.exe:*)",
+      "WebFetch(domain:va.landing.ai)"
     ],
     "deny": [],
     "ask": []

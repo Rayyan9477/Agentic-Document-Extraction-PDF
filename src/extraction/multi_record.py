@@ -59,6 +59,7 @@ class ExtractedRecord:
     fields: dict[str, Any]
     confidence: float
     extraction_time_ms: int
+    field_bboxes: dict[str, dict[str, float]] | None = None
 
 
 @dataclass
@@ -685,6 +686,9 @@ Return a JSON object with this EXACT structure:
   "fields": {{
 {field_schema}
   }},
+  "field_bboxes": {{
+    "field_name": {{"x": 0.12, "y": 0.05, "w": 0.25, "h": 0.03}}
+  }},
   "confidence": float 0.0-1.0
 }}
 
@@ -693,7 +697,10 @@ STRUCTURAL RULES:
 - Use null for missing or unreadable values (not the string "null", not "")
 - Confidence must be a number between 0.0 and 1.0
 - Number fields: use numeric values (not currency strings)
-- Date fields: use ISO format YYYY-MM-DD where possible"""
+- Date fields: use ISO format YYYY-MM-DD where possible
+- field_bboxes: normalized coordinates (0.0-1.0) for each field's location
+  - x=left, y=top, w=width, h=height; (0,0)=top-left, (1,1)=bottom-right
+  - Omit fields with null values from field_bboxes"""
 
         return self._build_grounding_system_prompt() + structural_schema
 
@@ -818,6 +825,8 @@ CRITICAL EXTRACTION RULES:
         # C1: Split schema into chunks if needed
         schema_chunks = self._split_schema_for_extraction(schema)
 
+        merged_bboxes: dict[str, dict[str, float]] = {}
+
         if len(schema_chunks) == 1:
             # Single-call path (no decomposition overhead)
             result = self._extract_single_chunk(
@@ -825,6 +834,7 @@ CRITICAL EXTRACTION RULES:
             )
             merged_fields = result.get("fields", {})
             confidence = float(result.get("confidence", 0.0))
+            merged_bboxes.update(result.get("field_bboxes", {}))
         else:
             # Multi-chunk path: extract each chunk, merge results
             merged_fields: dict[str, Any] = {}
@@ -837,6 +847,7 @@ CRITICAL EXTRACTION RULES:
                 )
                 chunk_fields = result.get("fields", {})
                 merged_fields.update(chunk_fields)
+                merged_bboxes.update(result.get("field_bboxes", {}))
                 chunk_conf = float(result.get("confidence", 0.0))
                 min_confidence = min(min_confidence, chunk_conf)
 
@@ -860,6 +871,7 @@ CRITICAL EXTRACTION RULES:
             fields=merged_fields,
             confidence=confidence,
             extraction_time_ms=elapsed_ms,
+            field_bboxes=merged_bboxes if merged_bboxes else None,
         )
 
         logger.info(

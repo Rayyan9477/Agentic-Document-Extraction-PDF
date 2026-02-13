@@ -20,6 +20,7 @@ from src.agents.utils import (
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger, get_settings
 from src.pipeline.state import (
+    BoundingBoxCoords,
     ExtractionState,
     ExtractionStatus,
     FieldMetadata,
@@ -761,6 +762,7 @@ Return structured JSON with extracted fields, confidences, and locations."""
       "value": "extracted value or null",
       "confidence": 0.92,
       "location": "description of where found",
+      "bbox": {{"x": 0.12, "y": 0.05, "w": 0.25, "h": 0.03}},
       "component_type": "table|form|checkbox|key_value",
       "visual_marks": ["any marks associated with this field"]
     }}
@@ -773,6 +775,11 @@ Return structured JSON with extracted fields, confidences, and locations."""
   }}
 }}
 ```
+
+**Bounding Box (bbox)**: For each field, provide normalized coordinates (0.0-1.0):
+- x = left edge, y = top edge, w = width, h = height
+- (0,0) is top-left, (1,1) is bottom-right of the page
+- Omit bbox if value is null or location cannot be determined
 
 ## Critical Reminders
 
@@ -1221,6 +1228,7 @@ Begin adaptive extraction now."""
         pass1_conf: dict[str, float] = {}
         pass2_conf: dict[str, float] = {}
         locations: dict[str, str] = {}
+        bboxes: dict[str, BoundingBoxCoords | None] = {}
 
         all_fields = set(pass1_fields.keys()) | set(pass2_fields.keys())
 
@@ -1233,13 +1241,29 @@ Begin adaptive extraction now."""
             pass2_values[field_name] = p2.get("value") if isinstance(p2, dict) else p2
 
             # Extract confidences
-            pass1_conf[field_name] = p1.get("confidence", 0.5) if isinstance(p1, dict) else 0.5
-            pass2_conf[field_name] = p2.get("confidence", 0.5) if isinstance(p2, dict) else 0.5
+            p1_conf = p1.get("confidence", 0.5) if isinstance(p1, dict) else 0.5
+            p2_conf = p2.get("confidence", 0.5) if isinstance(p2, dict) else 0.5
+            pass1_conf[field_name] = p1_conf
+            pass2_conf[field_name] = p2_conf
 
             # Extract locations
             loc1 = p1.get("location", "") if isinstance(p1, dict) else ""
             loc2 = p2.get("location", "") if isinstance(p2, dict) else ""
             locations[field_name] = loc1 or loc2
+
+            # Extract bounding boxes — prefer bbox from higher-confidence pass
+            bbox1_raw = p1.get("bbox") if isinstance(p1, dict) else None
+            bbox2_raw = p2.get("bbox") if isinstance(p2, dict) else None
+            bbox = None
+            if bbox1_raw and bbox2_raw:
+                # Both passes have bbox — use the one from higher-confidence pass
+                bbox_raw = bbox1_raw if p1_conf >= p2_conf else bbox2_raw
+                bbox = self._parse_bbox(bbox_raw, page_number)
+            elif bbox1_raw:
+                bbox = self._parse_bbox(bbox1_raw, page_number)
+            elif bbox2_raw:
+                bbox = self._parse_bbox(bbox2_raw, page_number)
+            bboxes[field_name] = bbox
 
         # Use DualPassComparator for sophisticated merging
         comparison_result = self._dual_pass_comparator.compare(
@@ -1266,9 +1290,53 @@ Begin adaptive extraction now."""
                 passes_agree=passes_agree,
                 location_hint=locations.get(field_name, ""),
                 source_page=page_number,
+                bbox=bboxes.get(field_name),
             )
 
         return merged
+
+    @staticmethod
+    def _parse_bbox(
+        bbox_raw: Any,
+        page_number: int,
+    ) -> BoundingBoxCoords | None:
+        """
+        Parse a bounding box from VLM response into BoundingBoxCoords.
+
+        Handles multiple VLM response formats:
+        - {"x": 0.1, "y": 0.2, "w": 0.3, "h": 0.04}
+        - {"x": 0.1, "y": 0.2, "width": 0.3, "height": 0.04}
+        - [x, y, w, h] array format
+
+        Args:
+            bbox_raw: Raw bbox data from VLM response.
+            page_number: Page number for the bbox.
+
+        Returns:
+            BoundingBoxCoords or None if parsing fails.
+        """
+        try:
+            if isinstance(bbox_raw, dict):
+                x = float(bbox_raw.get("x", 0))
+                y = float(bbox_raw.get("y", 0))
+                w = float(bbox_raw.get("w", bbox_raw.get("width", 0)))
+                h = float(bbox_raw.get("h", bbox_raw.get("height", 0)))
+            elif isinstance(bbox_raw, (list, tuple)) and len(bbox_raw) >= 4:
+                x, y, w, h = (float(v) for v in bbox_raw[:4])
+            else:
+                return None
+
+            # Validate ranges
+            if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                return None
+            if w <= 0.0 or h <= 0.0:
+                return None
+
+            return BoundingBoxCoords.from_normalized(
+                x=x, y=y, w=w, h=h, page=page_number,
+            )
+        except (TypeError, ValueError):
+            return None
 
     def _merge_page_extractions(
         self,
@@ -1405,12 +1473,21 @@ Begin adaptive extraction now."""
         for field_name, field_data in merged_extraction.items():
             # Handle both old format (dict with value/confidence) and new format (direct values)
             if isinstance(field_data, dict) and "value" in field_data:
-                # Old format: {"value": x, "confidence": y, "source_page": z}
+                # Parse bbox if present in the merged data
+                bbox = None
+                bbox_data = field_data.get("bbox")
+                if isinstance(bbox_data, dict):
+                    bbox = self._parse_bbox(
+                        bbox_data,
+                        field_data.get("source_page", 1),
+                    )
+
                 metadata[field_name] = FieldMetadata(
                     field_name=field_name,
                     value=field_data.get("value"),
                     confidence=field_data.get("confidence", 0.0),
                     source_page=field_data.get("source_page", 1),
+                    bbox=bbox,
                 )
             else:
                 # Direct value without structured metadata — flag with low default

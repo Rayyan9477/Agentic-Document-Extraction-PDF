@@ -37,6 +37,123 @@ class ConfidenceLevel(str, Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class BoundingBoxCoords:
+    """
+    Bounding box coordinates for visual grounding of extracted fields.
+
+    Links every extracted value to its pixel-level location in the source
+    document, enabling visual verification and spatial validation.
+
+    Coordinates are stored in two formats:
+    - Normalized (0.0-1.0): Resolution-independent, used in VLM prompts
+    - Absolute pixel: Computed from page dimensions, used for rendering
+
+    Attributes:
+        x: Normalized left edge (0.0 = left, 1.0 = right).
+        y: Normalized top edge (0.0 = top, 1.0 = bottom).
+        width: Normalized width.
+        height: Normalized height.
+        page: 1-indexed page number.
+        pixel_x: Absolute left edge in pixels.
+        pixel_y: Absolute top edge in pixels.
+        pixel_width: Absolute width in pixels.
+        pixel_height: Absolute height in pixels.
+    """
+
+    x: float
+    y: float
+    width: float
+    height: float
+    page: int = 1
+    pixel_x: int = 0
+    pixel_y: int = 0
+    pixel_width: int = 0
+    pixel_height: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+            "page": self.page,
+            "pixel_x": self.pixel_x,
+            "pixel_y": self.pixel_y,
+            "pixel_width": self.pixel_width,
+            "pixel_height": self.pixel_height,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "BoundingBoxCoords":
+        """Create from dictionary (e.g., deserialized JSON)."""
+        return cls(
+            x=float(data.get("x", 0.0)),
+            y=float(data.get("y", 0.0)),
+            width=float(data.get("width", data.get("w", 0.0))),
+            height=float(data.get("height", data.get("h", 0.0))),
+            page=int(data.get("page", 1)),
+            pixel_x=int(data.get("pixel_x", 0)),
+            pixel_y=int(data.get("pixel_y", 0)),
+            pixel_width=int(data.get("pixel_width", 0)),
+            pixel_height=int(data.get("pixel_height", 0)),
+        )
+
+    @classmethod
+    def from_normalized(
+        cls,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        page: int = 1,
+        page_width_px: int = 0,
+        page_height_px: int = 0,
+    ) -> "BoundingBoxCoords":
+        """
+        Create from normalized VLM coordinates with optional pixel conversion.
+
+        Args:
+            x: Normalized left edge (0.0-1.0).
+            y: Normalized top edge (0.0-1.0).
+            w: Normalized width (0.0-1.0).
+            h: Normalized height (0.0-1.0).
+            page: 1-indexed page number.
+            page_width_px: Page width in pixels (0 = skip pixel computation).
+            page_height_px: Page height in pixels (0 = skip pixel computation).
+
+        Returns:
+            BoundingBoxCoords with both normalized and pixel coordinates.
+        """
+        # Clamp to valid range
+        x = max(0.0, min(1.0, x))
+        y = max(0.0, min(1.0, y))
+        w = max(0.0, min(1.0 - x, w))
+        h = max(0.0, min(1.0 - y, h))
+
+        pixel_x = int(x * page_width_px) if page_width_px else 0
+        pixel_y = int(y * page_height_px) if page_height_px else 0
+        pixel_width = int(w * page_width_px) if page_width_px else 0
+        pixel_height = int(h * page_height_px) if page_height_px else 0
+
+        return cls(
+            x=x,
+            y=y,
+            width=w,
+            height=h,
+            page=page,
+            pixel_x=pixel_x,
+            pixel_y=pixel_y,
+            pixel_width=pixel_width,
+            pixel_height=pixel_height,
+        )
+
+    def is_valid(self) -> bool:
+        """Check if bounding box has valid non-zero dimensions."""
+        return self.width > 0.0 and self.height > 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class FieldMetadata:
     """
     Metadata for an extracted field.
@@ -68,6 +185,7 @@ class FieldMetadata:
     validation_errors: tuple[str, ...] = ()
     source_page: int = 1
     is_hallucination_flag: bool = False
+    bbox: BoundingBoxCoords | None = None
 
     @property
     def confidence_level(self) -> ConfidenceLevel:
@@ -80,7 +198,7 @@ class FieldMetadata:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "field_name": self.field_name,
             "value": self.value,
             "confidence": self.confidence,
@@ -94,6 +212,9 @@ class FieldMetadata:
             "source_page": self.source_page,
             "is_hallucination_flag": self.is_hallucination_flag,
         }
+        if self.bbox is not None:
+            result["bbox"] = self.bbox.to_dict()
+        return result
 
 
 @dataclass(slots=True)
@@ -551,6 +672,9 @@ def serialize_field_metadata(metadata: FieldMetadata) -> dict[str, Any]:
 
 def deserialize_field_metadata(data: dict[str, Any]) -> FieldMetadata:
     """Deserialize FieldMetadata from state storage."""
+    bbox_data = data.get("bbox")
+    bbox = BoundingBoxCoords.from_dict(bbox_data) if bbox_data else None
+
     return FieldMetadata(
         field_name=data["field_name"],
         value=data["value"],
@@ -563,6 +687,7 @@ def deserialize_field_metadata(data: dict[str, Any]) -> FieldMetadata:
         validation_errors=tuple(data.get("validation_errors", [])),
         source_page=data.get("source_page", 1),
         is_hallucination_flag=data.get("is_hallucination_flag", False),
+        bbox=bbox,
     )
 
 
