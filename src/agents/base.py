@@ -160,6 +160,7 @@ class BaseAgent(ABC):
         self,
         name: str,
         client: LMStudioClient | None = None,
+        model_router: Any | None = None,
     ) -> None:
         """
         Initialize the base agent.
@@ -167,9 +168,13 @@ class BaseAgent(ABC):
         Args:
             name: Agent name for logging and identification.
             client: Optional pre-configured LM Studio client.
+            model_router: Optional ModelRouter for multi-model routing
+                (Phase 3C). When set, ``send_vision_request`` can route
+                requests to task-appropriate models.
         """
         self._name = name
         self._client = client or LMStudioClient()
+        self._model_router = model_router
         self._logger = get_logger(f"agent.{name}")
         self._settings = get_settings()
         self._vlm_calls = 0
@@ -191,6 +196,11 @@ class BaseAgent(ABC):
     def total_processing_ms(self) -> int:
         """Get total processing time in milliseconds."""
         return self._total_processing_ms
+
+    @property
+    def model_router(self) -> Any | None:
+        """Get the model router (Phase 3C), if configured."""
+        return self._model_router
 
     @abstractmethod
     def process(self, state: ExtractionState) -> ExtractionState:

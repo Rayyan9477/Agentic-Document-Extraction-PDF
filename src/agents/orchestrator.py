@@ -68,6 +68,7 @@ NODE_COMPLETE = "complete"
 NODE_LAYOUT = "layout"
 NODE_COMPONENTS = "components"
 NODE_SCHEMA = "schema"
+NODE_TABLE_DETECT = "table_detect"  # Table structure detection (Phase 2B)
 
 # Routing decisions
 ROUTE_COMPLETE = "complete"
@@ -151,6 +152,9 @@ class OrchestratorAgent(BaseAgent):
         self._layout_agent: BaseAgent | None = None
         self._component_agent: BaseAgent | None = None
         self._schema_agent: BaseAgent | None = None
+
+        # Table detection agent (Phase 2B)
+        self._table_detector: BaseAgent | None = None
 
         # Workflow graph
         self._workflow: StateGraph | None = None
@@ -365,6 +369,7 @@ class OrchestratorAgent(BaseAgent):
         component_agent: BaseAgent | None = None,
         schema_agent: BaseAgent | None = None,
         splitter_agent: BaseAgent | None = None,
+        table_detector_agent: BaseAgent | None = None,
     ) -> StateGraph:
         """
         Build the LangGraph workflow with all agent nodes.
@@ -377,6 +382,10 @@ class OrchestratorAgent(BaseAgent):
         preprocess and pipeline routing. For multi-document PDFs, each segment is
         processed through the full extract→validate pipeline.
 
+        If a table_detector_agent is provided, table detection runs between
+        component detection and schema generation in the VLM-first pipeline,
+        or between analyze and extract in the legacy pipeline.
+
         Args:
             preprocess_fn: Function to preprocess PDF and create initial state.
             analyzer: Analyzer agent instance (legacy pipeline).
@@ -386,12 +395,14 @@ class OrchestratorAgent(BaseAgent):
             component_agent: Optional component detector agent (VLM-first pipeline).
             schema_agent: Optional schema generator agent (VLM-first pipeline).
             splitter_agent: Optional document splitter agent (Phase 2A).
+            table_detector_agent: Optional table detector agent (Phase 2B).
 
         Returns:
             Configured StateGraph workflow.
         """
         # Store agent references
         self._splitter = splitter_agent
+        self._table_detector = table_detector_agent
         self._analyzer = analyzer
         self._extractor = extractor
         self._validator = validator
@@ -402,6 +413,7 @@ class OrchestratorAgent(BaseAgent):
         # Determine if VLM-first pipeline is available
         has_vlm_first = all([layout_agent, component_agent, schema_agent])
         has_splitter = splitter_agent is not None
+        has_table_detector = table_detector_agent is not None
 
         # Create the state graph
         workflow = StateGraph(ExtractionState)
@@ -421,6 +433,10 @@ class OrchestratorAgent(BaseAgent):
         # Add legacy pipeline nodes
         workflow.add_node(NODE_ANALYZE, self._run_analyzer)
         workflow.add_node(NODE_EXTRACT, self._run_extractor)
+
+        # Add table detector node if available
+        if has_table_detector:
+            workflow.add_node(NODE_TABLE_DETECT, self._run_table_detector)
 
         # Add VLM-first pipeline nodes if available
         if has_vlm_first:
@@ -466,11 +482,21 @@ class OrchestratorAgent(BaseAgent):
         # VLM-first pipeline flow
         if has_vlm_first:
             workflow.add_edge(NODE_LAYOUT, NODE_COMPONENTS)
-            workflow.add_edge(NODE_COMPONENTS, NODE_SCHEMA)
+            if has_table_detector:
+                # Components → Table Detect → Schema → Extract
+                workflow.add_edge(NODE_COMPONENTS, NODE_TABLE_DETECT)
+                workflow.add_edge(NODE_TABLE_DETECT, NODE_SCHEMA)
+            else:
+                workflow.add_edge(NODE_COMPONENTS, NODE_SCHEMA)
             workflow.add_edge(NODE_SCHEMA, NODE_EXTRACT)
 
         # Legacy pipeline flow (after analyze)
-        workflow.add_edge(NODE_ANALYZE, NODE_EXTRACT)
+        if has_table_detector and not has_vlm_first:
+            # Analyze → Table Detect → Extract
+            workflow.add_edge(NODE_ANALYZE, NODE_TABLE_DETECT)
+            workflow.add_edge(NODE_TABLE_DETECT, NODE_EXTRACT)
+        else:
+            workflow.add_edge(NODE_ANALYZE, NODE_EXTRACT)
 
         # Both pipelines converge at extract -> validate -> route
         workflow.add_edge(NODE_EXTRACT, NODE_VALIDATE)
@@ -500,11 +526,13 @@ class OrchestratorAgent(BaseAgent):
             self._logger.info(
                 "workflow_built_with_vlm_first_support",
                 splitter_enabled=has_splitter,
+                table_detector_enabled=has_table_detector,
             )
         else:
             self._logger.info(
                 "workflow_built_legacy_only",
                 splitter_enabled=has_splitter,
+                table_detector_enabled=has_table_detector,
             )
 
         return workflow
@@ -700,6 +728,29 @@ class OrchestratorAgent(BaseAgent):
                 "is_multi_document": False,
                 "active_segment_index": 0,
             })
+
+    def _run_table_detector(self, state: ExtractionState) -> ExtractionState:
+        """Run the table detector agent node."""
+        if self._table_detector is None:
+            raise OrchestrationError(
+                "Table detector agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+
+        try:
+            return self._table_detector.process(state)
+        except AgentError as e:
+            # Table detection failure is non-fatal — continue without table data
+            self._logger.warning(
+                "table_detection_failed_continuing",
+                error=str(e),
+            )
+            state = add_warning(
+                state,
+                f"Table detection failed, continuing without table data: {e}",
+            )
+            return update_state(state, {"detected_tables": []})
 
     def _run_analyzer(self, state: ExtractionState) -> ExtractionState:
         """Run the analyzer agent node."""

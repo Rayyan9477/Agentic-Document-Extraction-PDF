@@ -413,6 +413,41 @@ class SchemaListResponse(BaseModel):
     count: int = Field(0, ge=0, description="Total schema count")
 
 
+class SchemaSuggestRequest(BaseModel):
+    """Request model for schema suggestion wizard."""
+
+    image_base64: str = Field(..., description="Base64-encoded document image")
+    context: str = Field("", description="Optional context about the document")
+
+
+class SchemaRefineRequest(BaseModel):
+    """Request model for refining a schema proposal."""
+
+    feedback: str = Field(..., description="Natural language feedback for changes")
+    image_base64: str | None = Field(None, description="Optional image for visual context")
+
+
+class SchemaSaveRequest(BaseModel):
+    """Request model for saving a schema proposal."""
+
+    schema_name: str | None = Field(None, description="Override schema name")
+
+
+class SchemaProposalResponse(BaseModel):
+    """Response model for schema proposal operations."""
+
+    proposal_id: str = Field(..., description="Proposal identifier")
+    schema_name: str = Field("", description="Proposed schema name")
+    document_type_description: str = Field("", description="Document type description")
+    fields: list[dict[str, Any]] = Field(default_factory=list, description="Proposed fields")
+    field_count: int = Field(0, ge=0, description="Number of fields")
+    groups: list[dict[str, Any]] = Field(default_factory=list, description="Field groups")
+    cross_field_rules: list[dict[str, Any]] = Field(default_factory=list, description="Rules")
+    confidence: float = Field(0.0, description="Proposal confidence")
+    revision: int = Field(0, ge=0, description="Revision number")
+    status: str = Field("draft", description="Proposal status")
+
+
 class ErrorDetail(BaseModel):
     """Detailed error information."""
 

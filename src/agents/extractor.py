@@ -64,6 +64,7 @@ class ExtractorAgent(BaseAgent):
         client: LMStudioClient | None = None,
         agreement_confidence_boost: float = 0.1,
         disagreement_confidence_penalty: float = 0.3,
+        prompt_enhancer: Any | None = None,
     ) -> None:
         """
         Initialize the Extractor agent.
@@ -72,11 +73,14 @@ class ExtractorAgent(BaseAgent):
             client: Optional pre-configured LM Studio client.
             agreement_confidence_boost: Confidence boost when passes agree.
             disagreement_confidence_penalty: Confidence penalty when passes disagree.
+            prompt_enhancer: Optional DynamicPromptEnhancer for correction-based
+                prompt enrichment (Phase 3B).
         """
         super().__init__(name="extractor", client=client)
         self._schema_registry = SchemaRegistry()
         self._agreement_boost = agreement_confidence_boost
         self._disagreement_penalty = disagreement_confidence_penalty
+        self._prompt_enhancer = prompt_enhancer
         # Domain-specific merge strategies for medical document fields
         # Diagnosis codes and financial amounts: require agreement (wrong is worse than missing)
         # Names and addresses: prefer longer value (truncation is common VLM failure)
@@ -568,6 +572,22 @@ class ExtractorAgent(BaseAgent):
                 f"- Small text or annotations you may have overlooked\n"
             )
 
+        # Phase 3B: Enhance prompt with correction history warnings
+        if self._prompt_enhancer is not None:
+            field_names = [f.get("field_name", "") for f in field_defs if f.get("field_name")]
+            try:
+                enhancement = self._prompt_enhancer.enhance_prompt(
+                    base_prompt=user_prompt,
+                    field_names=field_names,
+                    document_type=document_desc,
+                )
+                user_prompt = enhancement.enhanced_prompt
+            except Exception as enh_err:
+                self._logger.warning(
+                    "adaptive_prompt_enhancement_failed",
+                    error=str(enh_err),
+                )
+
         # Retry with backoff
         settings = get_settings()
         retry_config = RetryConfig(
@@ -584,7 +604,7 @@ class ExtractorAgent(BaseAgent):
                 temperature=temperature,
                 max_tokens=6000,
             )
-        
+
         try:
             return retry_with_backoff(
                 func=make_vlm_call,
@@ -1164,6 +1184,22 @@ Begin adaptive extraction now."""
                 f"{ocr_snippet}\n"
                 "--- END OCR TEXT ---"
             )
+
+        # Phase 3B: Enhance prompt with correction history warnings
+        if self._prompt_enhancer is not None:
+            field_names = [f.get("name", "") for f in field_defs if f.get("name")]
+            try:
+                enhancement = self._prompt_enhancer.enhance_prompt(
+                    base_prompt=prompt,
+                    field_names=field_names,
+                    document_type=document_type,
+                )
+                prompt = enhancement.enhanced_prompt
+            except Exception as enh_err:
+                self._logger.warning(
+                    "prompt_enhancement_failed",
+                    error=str(enh_err),
+                )
 
         # Use retry with exponential backoff for VLM calls
         settings = get_settings()

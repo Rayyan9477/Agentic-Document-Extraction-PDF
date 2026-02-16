@@ -17,6 +17,14 @@ from src.client.lm_client import (
     VisionRequest,
     VisionResponse,
 )
+from src.client.model_router import (
+    ModelConfig,
+    ModelRouter,
+    ModelTask,
+    RoutingDecision,
+    florence2_config,
+    qwen3vl_config,
+)
 
 
 __all__ = [
@@ -29,7 +37,13 @@ __all__ = [
     "LMRateLimitError",
     "LMStudioClient",
     "LMTimeoutError",
+    "ModelConfig",
+    "ModelRouter",
+    "ModelTask",
+    "RoutingDecision",
     "ServerHealth",
     "VisionRequest",
     "VisionResponse",
+    "florence2_config",
+    "qwen3vl_config",
 ]

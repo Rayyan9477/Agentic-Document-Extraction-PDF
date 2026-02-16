@@ -2,14 +2,21 @@
 Schema management API routes.
 
 Provides endpoints for listing and managing
-extraction schemas.
+extraction schemas, plus the schema suggestion wizard.
 """
 
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
-from src.api.models import SchemaInfo, SchemaListResponse
+from src.api.models import (
+    SchemaInfo,
+    SchemaListResponse,
+    SchemaProposalResponse,
+    SchemaRefineRequest,
+    SchemaSaveRequest,
+    SchemaSuggestRequest,
+)
 from src.config import get_logger
 from src.security.path_validator import (
     PathTraversalError,
@@ -312,3 +319,279 @@ async def detect_schema(
             status_code=500,
             detail=f"Detection failed: {e!s}",
         )
+
+
+# ──────────────────────────────────────────────────────────────────
+# Schema Wizard Endpoints (Phase 2C)
+# ──────────────────────────────────────────────────────────────────
+
+# Singleton agent — created lazily to avoid import-time VLM connection
+_schema_proposal_agent = None
+
+
+def _get_proposal_agent():
+    """Get or create the schema proposal agent singleton."""
+    global _schema_proposal_agent
+    if _schema_proposal_agent is None:
+        from src.agents.schema_proposal import SchemaProposalAgent
+        _schema_proposal_agent = SchemaProposalAgent()
+    return _schema_proposal_agent
+
+
+@router.post(
+    "/schemas/suggest",
+    response_model=SchemaProposalResponse,
+    summary="Suggest extraction schema",
+    description="Analyze a document image and propose an extraction schema.",
+)
+async def suggest_schema(
+    body: SchemaSuggestRequest,
+    http_request: Request,
+) -> SchemaProposalResponse:
+    """
+    Analyze a document and suggest an extraction schema.
+
+    Args:
+        body: Request with base64-encoded image and optional context.
+        http_request: HTTP request object.
+
+    Returns:
+        Schema proposal with suggested fields.
+    """
+    request_id = getattr(http_request.state, "request_id", "")
+
+    logger.info("suggest_schema_request", request_id=request_id)
+
+    try:
+        agent = _get_proposal_agent()
+        proposal = agent.suggest(
+            image_data=body.image_base64,
+            context=body.context,
+        )
+
+        data = proposal.to_dict()
+        return SchemaProposalResponse(
+            proposal_id=data["proposal_id"],
+            schema_name=data["schema_name"],
+            document_type_description=data["document_type_description"],
+            fields=data["fields"],
+            field_count=data["field_count"],
+            groups=data["groups"],
+            cross_field_rules=data["cross_field_rules"],
+            confidence=data["confidence"],
+            revision=data["revision"],
+            status=data["status"],
+        )
+
+    except Exception as e:
+        logger.error(
+            "suggest_schema_error",
+            request_id=request_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Schema suggestion failed: {e!s}",
+        )
+
+
+@router.post(
+    "/schemas/proposals/{proposal_id}/refine",
+    response_model=SchemaProposalResponse,
+    summary="Refine schema proposal",
+    description="Apply feedback to refine an existing schema proposal.",
+)
+async def refine_schema(
+    proposal_id: str,
+    body: SchemaRefineRequest,
+    http_request: Request,
+) -> SchemaProposalResponse:
+    """
+    Refine an existing schema proposal with user feedback.
+
+    Args:
+        proposal_id: ID of the proposal to refine.
+        body: Request with feedback and optional image.
+        http_request: HTTP request object.
+
+    Returns:
+        Updated schema proposal.
+    """
+    request_id = getattr(http_request.state, "request_id", "")
+
+    logger.info(
+        "refine_schema_request",
+        request_id=request_id,
+        proposal_id=proposal_id,
+    )
+
+    try:
+        agent = _get_proposal_agent()
+        proposal = agent.refine(
+            proposal_id=proposal_id,
+            feedback=body.feedback,
+            image_data=body.image_base64,
+        )
+
+        data = proposal.to_dict()
+        return SchemaProposalResponse(
+            proposal_id=data["proposal_id"],
+            schema_name=data["schema_name"],
+            document_type_description=data["document_type_description"],
+            fields=data["fields"],
+            field_count=data["field_count"],
+            groups=data["groups"],
+            cross_field_rules=data["cross_field_rules"],
+            confidence=data["confidence"],
+            revision=data["revision"],
+            status=data["status"],
+        )
+
+    except Exception as e:
+        error_str = str(e)
+        if "not found" in error_str.lower():
+            raise HTTPException(status_code=404, detail=error_str)
+
+        logger.error(
+            "refine_schema_error",
+            request_id=request_id,
+            proposal_id=proposal_id,
+            error=error_str,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Schema refinement failed: {error_str}",
+        )
+
+
+@router.post(
+    "/schemas/proposals/{proposal_id}/save",
+    response_model=dict[str, Any],
+    summary="Save schema proposal",
+    description="Convert a proposal into a registered schema definition.",
+)
+async def save_schema_proposal(
+    proposal_id: str,
+    body: SchemaSaveRequest,
+    http_request: Request,
+) -> dict[str, Any]:
+    """
+    Save a schema proposal as a reusable schema definition.
+
+    Args:
+        proposal_id: ID of the proposal to save.
+        body: Request with optional schema name override.
+        http_request: HTTP request object.
+
+    Returns:
+        Saved schema definition.
+    """
+    request_id = getattr(http_request.state, "request_id", "")
+
+    logger.info(
+        "save_schema_request",
+        request_id=request_id,
+        proposal_id=proposal_id,
+    )
+
+    try:
+        agent = _get_proposal_agent()
+        schema_def = agent.save(
+            proposal_id=proposal_id,
+            schema_name=body.schema_name,
+        )
+
+        return {
+            "status": "saved",
+            "proposal_id": proposal_id,
+            "schema": schema_def,
+        }
+
+    except Exception as e:
+        error_str = str(e)
+        if "not found" in error_str.lower():
+            raise HTTPException(status_code=404, detail=error_str)
+
+        logger.error(
+            "save_schema_error",
+            request_id=request_id,
+            proposal_id=proposal_id,
+            error=error_str,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Schema save failed: {error_str}",
+        )
+
+
+@router.get(
+    "/schemas/proposals",
+    response_model=list[dict[str, Any]],
+    summary="List schema proposals",
+    description="List all cached schema proposals.",
+)
+async def list_proposals(
+    http_request: Request,
+) -> list[dict[str, Any]]:
+    """List all cached schema proposals."""
+    request_id = getattr(http_request.state, "request_id", "")
+    logger.info("list_proposals_request", request_id=request_id)
+
+    agent = _get_proposal_agent()
+    return agent.list_proposals()
+
+
+@router.get(
+    "/schemas/proposals/{proposal_id}",
+    response_model=dict[str, Any],
+    summary="Get schema proposal",
+    description="Get a specific schema proposal by ID.",
+)
+async def get_proposal(
+    proposal_id: str,
+    http_request: Request,
+) -> dict[str, Any]:
+    """Get a specific schema proposal."""
+    request_id = getattr(http_request.state, "request_id", "")
+    logger.info(
+        "get_proposal_request",
+        request_id=request_id,
+        proposal_id=proposal_id,
+    )
+
+    agent = _get_proposal_agent()
+    proposal = agent.get_proposal(proposal_id)
+    if proposal is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Proposal not found: {proposal_id}",
+        )
+
+    return proposal.to_dict()
+
+
+@router.delete(
+    "/schemas/proposals/{proposal_id}",
+    summary="Delete schema proposal",
+    description="Delete a cached schema proposal.",
+)
+async def delete_proposal(
+    proposal_id: str,
+    http_request: Request,
+) -> dict[str, str]:
+    """Delete a schema proposal."""
+    request_id = getattr(http_request.state, "request_id", "")
+    logger.info(
+        "delete_proposal_request",
+        request_id=request_id,
+        proposal_id=proposal_id,
+    )
+
+    agent = _get_proposal_agent()
+    if not agent.delete_proposal(proposal_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Proposal not found: {proposal_id}",
+        )
+
+    return {"status": "deleted", "proposal_id": proposal_id}
