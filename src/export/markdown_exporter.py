@@ -257,6 +257,12 @@ class MarkdownExporter:
             sections.append(self._h(2, "Audit Trail"))
             sections.append(self._format_audit_trail(state))
 
+        # Pipeline intelligence
+        pipeline_section = self._format_pipeline_intelligence(state)
+        if pipeline_section:
+            sections.append(self._h(2, "Pipeline Intelligence"))
+            sections.append(pipeline_section)
+
         # Errors and warnings
         errors = state.get("errors", [])
         warnings = state.get("warnings", [])
@@ -523,6 +529,85 @@ class MarkdownExporter:
                 lines.append(f"- {self._format_field_name(field_name)}: {display_value}")
 
         return "\n".join(lines)
+
+    def _format_pipeline_intelligence(self, state: ExtractionState) -> str:
+        """Format pipeline intelligence section with Phase 2A-3C metadata."""
+        lines: list[str] = []
+
+        # Document splitting (Phase 2A)
+        is_multi = state.get("is_multi_document", False)
+        segments = state.get("document_segments", [])
+        if is_multi or segments:
+            lines.append(self._h(3, "Document Splitting"))
+            lines.append(f"- **Multi-Document**: {'Yes' if is_multi else 'No'}")
+            lines.append(f"- **Segments**: {len(segments)}")
+            for i, seg in enumerate(segments):
+                if isinstance(seg, dict):
+                    start = seg.get("start_page", "?")
+                    end = seg.get("end_page", "?")
+                    doc_type = seg.get("document_type", "unknown")
+                    lines.append(f"  - Segment {i + 1}: Pages {start}-{end} ({doc_type})")
+            lines.append("")
+
+        # Table detection (Phase 2B)
+        tables = state.get("detected_tables", [])
+        if tables:
+            lines.append(self._h(3, "Table Detection"))
+            lines.append(f"- **Tables Detected**: {len(tables)}")
+            for i, tbl in enumerate(tables):
+                if isinstance(tbl, dict):
+                    page = tbl.get("page", "?")
+                    rows = tbl.get("row_count", tbl.get("rows", "?"))
+                    cols = tbl.get("column_count", tbl.get("columns", "?"))
+                    lines.append(f"  - Table {i + 1}: Page {page} ({rows}R x {cols}C)")
+            lines.append("")
+
+        # Schema proposal (Phase 2C)
+        proposal = state.get("schema_proposal")
+        if isinstance(proposal, dict):
+            lines.append(self._h(3, "Schema Proposal"))
+            lines.append(f"- **Proposed Schema**: {proposal.get('schema_name', 'N/A')}")
+            lines.append(f"- **Proposed Fields**: {len(proposal.get('fields', []))}")
+            lines.append("")
+
+        # Prompt enhancement (Phase 3B)
+        enhancement = state.get("prompt_enhancement_applied", False)
+        if enhancement:
+            lines.append(self._h(3, "Prompt Enhancement"))
+            lines.append("- **Correction-Based Enhancement**: Applied")
+            lines.append("")
+
+        # Extraction mode
+        adaptive = state.get("use_adaptive_extraction", False)
+        layout_count = len(state.get("layout_analyses", []))
+        component_count = len(state.get("component_maps", []))
+        has_adaptive_schema = state.get("adaptive_schema") is not None
+        if adaptive or layout_count or component_count:
+            lines.append(self._h(3, "Extraction Mode"))
+            lines.append(f"- **Adaptive (VLM-First)**: {'Yes' if adaptive else 'No (Legacy)'}")
+            lines.append(f"- **Layout Analyses**: {layout_count}")
+            lines.append(f"- **Component Maps**: {component_count}")
+            lines.append(
+                f"- **Adaptive Schema**: {'Generated' if has_adaptive_schema else 'Not generated'}"
+            )
+            lines.append("")
+
+        # Memory
+        similar = state.get("similar_docs", [])
+        has_corrections = state.get("correction_hints") is not None
+        has_patterns = state.get("provider_patterns") is not None
+        if similar or has_corrections or has_patterns:
+            lines.append(self._h(3, "Memory Context"))
+            lines.append(f"- **Similar Documents**: {len(similar)}")
+            lines.append(
+                f"- **Correction Hints**: {'Available' if has_corrections else 'None'}"
+            )
+            lines.append(
+                f"- **Provider Patterns**: {'Available' if has_patterns else 'None'}"
+            )
+            lines.append("")
+
+        return "\n".join(lines) if lines else ""
 
     def _format_key_value_list(self, data: dict[str, Any]) -> str:
         """Format key-value pairs as a list."""

@@ -44,6 +44,7 @@ class SheetType(str, Enum):
     AUDIT = "audit"
     PAGE_DETAILS = "page_details"
     RAW_PASSES = "raw_passes"
+    PIPELINE = "pipeline"
 
 
 @dataclass(slots=True)
@@ -93,6 +94,7 @@ class ExcelExportConfig:
             SheetConfig(SheetType.METADATA, "Processing Metadata"),
             SheetConfig(SheetType.VALIDATION, "Validation Results"),
             SheetConfig(SheetType.AUDIT, "Audit Trail"),
+            SheetConfig(SheetType.PIPELINE, "Pipeline Intelligence"),
         ]
     )
     include_styling: bool = True
@@ -299,6 +301,7 @@ class ExcelExporter:
             SheetType.AUDIT: self._build_audit_sheet,
             SheetType.PAGE_DETAILS: self._build_page_details_sheet,
             SheetType.RAW_PASSES: self._build_raw_passes_sheet,
+            SheetType.PIPELINE: self._build_pipeline_sheet,
         }
 
         builder = builders.get(config.sheet_type)
@@ -655,6 +658,91 @@ class ExcelExporter:
                 row_data = [page_num, "Pass 2", field_name, str(value), confidence]
                 self._write_data_row(worksheet, row, row_data)
                 row += 1
+
+        self._auto_size_columns(worksheet)
+
+    def _build_pipeline_sheet(
+        self,
+        worksheet: Worksheet,
+        state: ExtractionState,
+    ) -> None:
+        """Build the pipeline intelligence sheet with Phase 2A-3C metadata."""
+        headers = ["Category", "Property", "Value"]
+        self._write_header_row(worksheet, headers)
+
+        rows: list[tuple[str, str, Any]] = []
+
+        # --- Document Splitting (Phase 2A) ---
+        is_multi = state.get("is_multi_document", False)
+        segments = state.get("document_segments", [])
+        rows.append(("Document Splitting", "Is Multi-Document", "Yes" if is_multi else "No"))
+        rows.append(("Document Splitting", "Segment Count", len(segments)))
+        for i, seg in enumerate(segments):
+            if isinstance(seg, dict):
+                start = seg.get("start_page", "?")
+                end = seg.get("end_page", "?")
+                doc_type = seg.get("document_type", "unknown")
+                rows.append(
+                    ("Document Splitting", f"Segment {i + 1}", f"Pages {start}-{end} ({doc_type})")
+                )
+
+        # --- Table Detection (Phase 2B) ---
+        tables = state.get("detected_tables", [])
+        rows.append(("Table Detection", "Tables Detected", len(tables)))
+        for i, tbl in enumerate(tables):
+            if isinstance(tbl, dict):
+                page = tbl.get("page", "?")
+                row_count = tbl.get("row_count", tbl.get("rows", "?"))
+                col_count = tbl.get("column_count", tbl.get("columns", "?"))
+                rows.append(
+                    ("Table Detection", f"Table {i + 1}", f"Page {page}: {row_count}R x {col_count}C")
+                )
+
+        # --- Schema Proposal (Phase 2C) ---
+        proposal = state.get("schema_proposal")
+        rows.append(("Schema Proposal", "Proposal Generated", "Yes" if proposal else "No"))
+        if isinstance(proposal, dict):
+            rows.append(
+                ("Schema Proposal", "Proposed Schema Name", proposal.get("schema_name", "N/A"))
+            )
+            rows.append(
+                ("Schema Proposal", "Proposed Field Count", len(proposal.get("fields", [])))
+            )
+
+        # --- Dynamic Prompt Enhancement (Phase 3B) ---
+        enhancement = state.get("prompt_enhancement_applied", False)
+        rows.append(
+            ("Prompt Enhancement", "Correction-Based Enhancement", "Applied" if enhancement else "Not Applied")
+        )
+
+        # --- Adaptive Extraction ---
+        adaptive = state.get("use_adaptive_extraction", False)
+        rows.append(("Extraction Mode", "Adaptive (VLM-First)", "Yes" if adaptive else "No (Legacy)"))
+
+        layout_count = len(state.get("layout_analyses", []))
+        component_count = len(state.get("component_maps", []))
+        rows.append(("Extraction Mode", "Layout Analyses", layout_count))
+        rows.append(("Extraction Mode", "Component Maps", component_count))
+
+        has_adaptive_schema = state.get("adaptive_schema") is not None
+        rows.append(
+            ("Extraction Mode", "Adaptive Schema Generated", "Yes" if has_adaptive_schema else "No")
+        )
+
+        # --- Memory Context ---
+        similar = state.get("similar_docs", [])
+        rows.append(("Memory", "Similar Documents Found", len(similar)))
+        rows.append(
+            ("Memory", "Correction Hints Available", "Yes" if state.get("correction_hints") else "No")
+        )
+        rows.append(
+            ("Memory", "Provider Patterns Available", "Yes" if state.get("provider_patterns") else "No")
+        )
+
+        # Write all rows
+        for row_idx, (category, prop, value) in enumerate(rows, start=2):
+            row_data = [category, prop, str(value) if value is not None else ""]
+            self._write_data_row(worksheet, row_idx, row_data)
 
         self._auto_size_columns(worksheet)
 

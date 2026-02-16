@@ -295,7 +295,7 @@ class TestExcelExporter:
     def test_default_config(self) -> None:
         """Test default configuration values."""
         config = ExcelExportConfig()
-        assert len(config.sheets) == 4
+        assert len(config.sheets) == 5
         assert config.include_styling is True
         assert config.include_confidence_colors is True
         assert config.mask_phi is False

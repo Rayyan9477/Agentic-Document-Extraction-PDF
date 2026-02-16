@@ -177,6 +177,11 @@ class JSONExporter:
         if self.config.include_metadata:
             result["metadata"] = self._build_metadata(state)
 
+        # Pipeline intelligence (Phase 2A-3C metadata)
+        pipeline = self._build_pipeline_intelligence(state)
+        if pipeline:
+            result["pipeline"] = pipeline
+
         return result
 
     def _build_detailed_export(self, state: ExtractionState) -> dict[str, Any]:
@@ -261,6 +266,63 @@ class JSONExporter:
                 },
             ],
         }
+
+    def _build_pipeline_intelligence(self, state: ExtractionState) -> dict[str, Any]:
+        """Build pipeline intelligence section with Phase 2A-3C metadata."""
+        pipeline: dict[str, Any] = {}
+
+        # Document splitting (Phase 2A)
+        is_multi = state.get("is_multi_document", False)
+        segments = state.get("document_segments", [])
+        if is_multi or segments:
+            pipeline["document_splitting"] = {
+                "is_multi_document": is_multi,
+                "segment_count": len(segments),
+                "segments": segments,
+            }
+
+        # Table detection (Phase 2B)
+        tables = state.get("detected_tables", [])
+        if tables:
+            pipeline["table_detection"] = {
+                "tables_detected": len(tables),
+                "tables": tables,
+            }
+
+        # Schema proposal (Phase 2C)
+        proposal = state.get("schema_proposal")
+        if proposal:
+            pipeline["schema_proposal"] = proposal
+
+        # Prompt enhancement (Phase 3B)
+        enhancement = state.get("prompt_enhancement_applied", False)
+        if enhancement:
+            pipeline["prompt_enhancement"] = {
+                "applied": True,
+            }
+
+        # Extraction mode
+        adaptive = state.get("use_adaptive_extraction", False)
+        if adaptive:
+            pipeline["extraction_mode"] = {
+                "adaptive": True,
+                "layout_analyses": len(state.get("layout_analyses", [])),
+                "component_maps": len(state.get("component_maps", [])),
+                "adaptive_schema_generated": state.get("adaptive_schema") is not None,
+            }
+
+        # Memory context
+        similar = state.get("similar_docs", [])
+        has_corrections = state.get("correction_hints") is not None
+        has_patterns = state.get("provider_patterns") is not None
+        if similar or has_corrections or has_patterns:
+            pipeline["memory"] = {
+                "similar_documents": len(similar),
+                "correction_hints_available": has_corrections,
+                "provider_patterns_available": has_patterns,
+            }
+
+        return pipeline
 
     def _extract_values(self, state: ExtractionState) -> dict[str, Any]:
         """Extract field values from state."""
