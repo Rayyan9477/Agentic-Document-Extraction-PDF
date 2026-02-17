@@ -394,6 +394,15 @@ class ExtractionState(TypedDict, total=False):
     is_multi_document: bool  # Whether PDF contains multiple documents
     active_segment_index: int  # Current segment being processed (0-indexed)
 
+    # === Table Detection Fields (Phase 2B) ===
+    detected_tables: list[dict[str, Any]]  # Per-page table detection results
+
+    # === Schema Proposal Fields (Phase 2C) ===
+    schema_proposal: dict[str, Any] | None  # Wizard-generated schema proposal
+
+    # === Dynamic Prompt Enhancement Fields (Phase 3B) ===
+    prompt_enhancement_applied: bool  # Whether correction-based enhancement was used
+
     # === Memory Fields (Mem0 Integration) ===
     session_id: str | None  # Session identifier for memory grouping
     recovery_checkpoint: (
@@ -474,6 +483,12 @@ def create_initial_state(
         document_segments=[],
         is_multi_document=False,
         active_segment_index=0,
+        # Table Detection
+        detected_tables=[],
+        # Schema Proposal
+        schema_proposal=None,
+        # Dynamic Prompt Enhancement
+        prompt_enhancement_applied=False,
         # Memory
         session_id=secrets.token_hex(8),
         recovery_checkpoint=None,

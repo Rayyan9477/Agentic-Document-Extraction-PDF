@@ -58,6 +58,11 @@ class FieldType(str, Enum):
     CLAIM_NUMBER = "claim_number"
     ACCOUNT_NUMBER = "account_number"
 
+    # Finance
+    EIN = "ein"
+    ROUTING_NUMBER = "routing_number"
+    BANK_ACCOUNT = "bank_account"
+
     # Document-specific
     NAME = "name"
     SIGNATURE = "signature"
@@ -103,6 +108,9 @@ class FieldType(str, Enum):
             FieldType.CLAIM_NUMBER,
             FieldType.ACCOUNT_NUMBER,
             FieldType.NPI,
+            FieldType.EIN,
+            FieldType.ROUTING_NUMBER,
+            FieldType.BANK_ACCOUNT,
         )
 
     @property

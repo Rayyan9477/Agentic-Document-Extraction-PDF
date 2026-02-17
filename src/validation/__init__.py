@@ -82,6 +82,18 @@ from src.validation.medical_codes import (
     validate_medical_codes,
 )
 
+# Confidence calibration
+from src.validation.calibration import (
+    BaseCalibrator,
+    CalibrationMetrics,
+    CalibrationPoint,
+    CalibrationResult,
+    ConfidenceCalibrator,
+    IsotonicCalibrator,
+    LinearCalibrator,
+    PlattCalibrator,
+)
+
 # Hallucination pattern detection
 from src.validation.pattern_detector import (
     HallucinationPattern,
@@ -133,6 +145,15 @@ __all__ = [
     "MedicalCodeValidationResult",
     "MedicalCodeValidationEngine",
     "validate_medical_codes",
+    # Confidence calibration
+    "CalibrationPoint",
+    "CalibrationResult",
+    "CalibrationMetrics",
+    "BaseCalibrator",
+    "PlattCalibrator",
+    "IsotonicCalibrator",
+    "LinearCalibrator",
+    "ConfidenceCalibrator",
     # Human review queue
     "ReviewPriority",
     "ReviewStatus",

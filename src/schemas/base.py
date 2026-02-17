@@ -35,6 +35,12 @@ class DocumentType(str, Enum):
     PATIENT_INTAKE = "patient_intake"
     CONSENT_FORM = "consent_form"
 
+    # Finance
+    INVOICE = "invoice"
+    W2 = "w2"
+    FORM_1099 = "form_1099"
+    BANK_STATEMENT = "bank_statement"
+
     # Generic
     CUSTOM = "custom"
     UNKNOWN = "unknown"
