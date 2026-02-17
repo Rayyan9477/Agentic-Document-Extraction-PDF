@@ -362,6 +362,7 @@ def create_app(
     from src.api.routes.queue import router as queue_router
     from src.api.routes.schemas import router as schemas_router
     from src.api.routes.tasks import router as tasks_router
+    from src.api.routes.webhooks import router as webhooks_router
 
     app.include_router(auth_router, prefix="/api/v1", tags=["Authentication"])
     app.include_router(documents_router, prefix="/api/v1", tags=["Documents"])
@@ -370,6 +371,7 @@ def create_app(
     app.include_router(schemas_router, prefix="/api/v1", tags=["Schemas"])
     app.include_router(dashboard_router, prefix="/api/v1", tags=["Dashboard"])
     app.include_router(queue_router, prefix="/api/v1", tags=["Queue"])
+    app.include_router(webhooks_router, prefix="/api/v1", tags=["Webhooks"])
 
     # Root endpoint
     @app.get("/", include_in_schema=False)

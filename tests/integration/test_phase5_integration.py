@@ -296,11 +296,16 @@ class TestAuditLoggingIntegration:
 class TestRBACIntegration:
     """Integration tests for RBAC."""
 
-    def test_user_authentication_flow(self) -> None:
+    def test_user_authentication_flow(self, tmp_path) -> None:
         """Test complete user authentication flow."""
         from src.security.rbac import RBACManager, Role
 
-        manager = RBACManager(secret_key="test-secret-key-12345")
+        RBACManager.reset_instance()
+        manager = RBACManager(
+            secret_key="test-secret-key-12345",
+            user_storage_path=str(tmp_path / "users.json"),
+            revocation_storage_path=str(tmp_path / "revoked.json"),
+        )
 
         # Create user
         user = manager.users.create_user(
@@ -319,11 +324,16 @@ class TestRBACIntegration:
         payload = manager.tokens.validate_token(tokens.access_token)
         assert payload.username == "doctor_smith"
 
-    def test_permission_enforcement(self) -> None:
+    def test_permission_enforcement(self, tmp_path) -> None:
         """Test permission enforcement across roles."""
         from src.security.rbac import Permission, RBACManager, Role
 
-        manager = RBACManager(secret_key="test-secret-key-12345")
+        RBACManager.reset_instance()
+        manager = RBACManager(
+            secret_key="test-secret-key-12345",
+            user_storage_path=str(tmp_path / "users.json"),
+            revocation_storage_path=str(tmp_path / "revoked.json"),
+        )
 
         # Create users with different roles
         viewer = manager.users.create_user(

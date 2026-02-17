@@ -1104,13 +1104,50 @@ def create_extraction_workflow(
     from src.agents.extractor import ExtractorAgent
     from src.agents.validator import ValidatorAgent
 
+    from src.config import get_settings
+
+    settings = get_settings()
+
     # Create shared client
     shared_client = client or LMStudioClient()
 
+    # --- Confidence calibration (opt-in via settings) ---
+    calibrator = None
+    if settings.calibration.enabled:
+        try:
+            from src.validation.calibration import ConfidenceCalibrator
+
+            calibrator = ConfidenceCalibrator(
+                storage_path=settings.calibration.storage_path,
+            )
+            logger.info(
+                "calibration_enabled",
+                method=calibrator.active_method,
+                samples=calibrator.sample_count,
+            )
+        except Exception as e:
+            logger.warning("calibration_init_failed", error=str(e))
+
+    # --- Dynamic prompt enhancement (always created — lightweight) ---
+    prompt_enhancer = None
+    try:
+        from src.memory.dynamic_prompt import DynamicPromptEnhancer
+
+        prompt_enhancer = DynamicPromptEnhancer()
+        logger.info("prompt_enhancer_created")
+    except Exception as e:
+        logger.warning("prompt_enhancer_init_failed", error=str(e))
+
     # Create legacy pipeline agents (always needed)
     analyzer = AnalyzerAgent(client=shared_client)
-    extractor = ExtractorAgent(client=shared_client)
-    validator = ValidatorAgent(client=shared_client)
+    extractor = ExtractorAgent(
+        client=shared_client,
+        prompt_enhancer=prompt_enhancer,
+    )
+    validator = ValidatorAgent(
+        client=shared_client,
+        calibrator=calibrator,
+    )
 
     # Create VLM-first pipeline agents if enabled
     layout_agent = None
@@ -1161,6 +1198,8 @@ def create_extraction_workflow(
         checkpointing=enable_checkpointing,
         max_retries=max_retries,
         vlm_first_enabled=enable_vlm_first,
+        calibration_enabled=calibrator is not None,
+        prompt_enhancement_enabled=prompt_enhancer is not None,
     )
 
     return orchestrator, compiled_workflow

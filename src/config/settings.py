@@ -570,6 +570,84 @@ class DatabaseSettings(BaseSettings):
     )
 
 
+class CalibrationSettings(BaseSettings):
+    """Confidence calibration configuration settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="CALIBRATION_",
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable confidence score calibration",
+    )
+    method: str = Field(
+        default="auto",
+        description="Calibration method: auto, platt, isotonic, or linear",
+    )
+    storage_path: Path = Field(
+        default=Path("./data/calibration"),
+        description="Directory for calibration model persistence",
+    )
+
+    @field_validator("storage_path", mode="before")
+    @classmethod
+    def create_storage_dir(cls, v: Any) -> Path:
+        """Ensure storage directory exists."""
+        path = Path(v) if isinstance(v, str) else v
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+
+class ModelRoutingSettings(BaseSettings):
+    """Multi-model routing configuration settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="MODEL_ROUTING_",
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable task-based multi-model routing",
+    )
+    default_model: str = Field(
+        default="qwen3-vl",
+        description="Default model ID when no task-specific routing applies",
+    )
+    default_base_url: str = Field(
+        default="http://localhost:1234/v1",
+        description="Default base URL for model endpoints",
+    )
+    task_models: dict[str, str] = Field(
+        default_factory=dict,
+        description="Mapping of task name to model ID (e.g. layout_analysis: florence-2)",
+    )
+
+
+class WebhookSettings(BaseSettings):
+    """Webhook subscription and delivery settings."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="WEBHOOK_",
+        extra="ignore",
+    )
+
+    store_path: Path = Field(
+        default=Path("./data/webhooks.json"),
+        description="JSON file for webhook subscription persistence",
+    )
+    max_retries: Annotated[int, Field(ge=0, le=10)] = Field(
+        default=3,
+        description="Maximum delivery retry attempts per subscription",
+    )
+    timeout_seconds: Annotated[int, Field(ge=1, le=120)] = Field(
+        default=30,
+        description="HTTP timeout for webhook delivery in seconds",
+    )
+
+
 class LoggingSettings(BaseSettings):
     """Logging configuration settings."""
 
@@ -666,6 +744,9 @@ class Settings(BaseSettings):
     monitoring: MonitoringSettings = Field(default_factory=MonitoringSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
+    model_routing: ModelRoutingSettings = Field(default_factory=ModelRoutingSettings)
+    webhook: WebhookSettings = Field(default_factory=WebhookSettings)
 
     @staticmethod
     def _is_weak_secret(secret: str) -> bool:

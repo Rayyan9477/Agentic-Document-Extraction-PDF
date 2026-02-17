@@ -327,7 +327,7 @@ class HumanReviewQueue:
                         task.assigned_to = assignee
                         if self.auto_persist:
                             self._save_queue()
-                    return task
+                        return task
 
         return None
 

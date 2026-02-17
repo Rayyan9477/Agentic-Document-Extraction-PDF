@@ -109,6 +109,7 @@ class ValidatorAgent(BaseAgent):
         low_confidence_threshold: float = 0.50,
         enable_vlm_verification: bool = False,
         review_queue_path: str | None = None,
+        calibrator: Any | None = None,
     ) -> None:
         """
         Initialize the Validator agent.
@@ -119,12 +120,14 @@ class ValidatorAgent(BaseAgent):
             low_confidence_threshold: Threshold for low confidence (human review).
             enable_vlm_verification: Whether to use VLM for additional verification.
             review_queue_path: Optional path for persisting human review queue.
+            calibrator: Optional ConfidenceCalibrator for post-scoring calibration.
         """
         super().__init__(name="validator", client=client)
         self._schema_registry = SchemaRegistry()
         self._high_threshold = high_confidence_threshold
         self._low_threshold = low_confidence_threshold
         self._enable_vlm_verification = enable_vlm_verification
+        self._calibrator = calibrator
 
         # Initialize Phase 3 validation components
         self._pattern_detector = HallucinationPatternDetector()
@@ -373,6 +376,15 @@ class ValidatorAgent(BaseAgent):
         )
 
         result.overall_confidence = conf_result.overall_confidence
+
+        # Step 7: Apply calibration if a calibrator is configured
+        if self._calibrator is not None:
+            try:
+                cal_result = self._calibrator.calibrate(result.overall_confidence)
+                result.raw_confidence = result.overall_confidence
+                result.overall_confidence = cal_result.calibrated_confidence
+            except Exception as e:
+                self._logger.warning("calibration_failed", error=str(e))
 
         # Map confidence level from validation module to pipeline state
         if conf_result.overall_level.value == "high":

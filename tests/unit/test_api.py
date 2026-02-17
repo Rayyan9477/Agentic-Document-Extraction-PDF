@@ -223,7 +223,7 @@ class TestDocumentEndpoints:
 
     def test_get_processing_result_not_found(self, client: TestClient) -> None:
         """Test getting non-existent result."""
-        response = client.get("/api/v1/documents/nonexistent-id")
+        response = client.get("/api/v1/documents/nonexistent-id-test")
 
         assert response.status_code == 404
 
@@ -321,13 +321,14 @@ class TestSchemaEndpoints:
         client: TestClient,
     ) -> None:
         """Test listing schemas."""
-        mock_get_schemas.return_value = {
-            "cms1500": {
-                "description": "CMS-1500 form",
-                "document_type": "CMS-1500",
-                "fields": {"field1": {}, "field2": {}},
-            },
-        }
+        # Mock returns a list of objects with .name attribute (like DocumentSchema)
+        mock_schema = MagicMock()
+        mock_schema.name = "cms1500"
+        mock_schema.description = "CMS-1500 form"
+        mock_schema.document_type = "CMS-1500"
+        mock_schema.fields = [MagicMock(), MagicMock()]
+        mock_schema.version = "1.0.0"
+        mock_get_schemas.return_value = [mock_schema]
 
         response = client.get("/api/v1/schemas")
 

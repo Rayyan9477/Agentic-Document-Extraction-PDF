@@ -292,6 +292,7 @@ class ValidationResult:
 
     is_valid: bool = True
     overall_confidence: float = 0.0
+    raw_confidence: float | None = None
     confidence_level: ConfidenceLevel = ConfidenceLevel.LOW
     field_validations: dict[str, bool] = field(default_factory=dict)
     cross_field_validations: list[dict[str, Any]] = field(default_factory=list)
@@ -307,6 +308,7 @@ class ValidationResult:
         return {
             "is_valid": self.is_valid,
             "overall_confidence": self.overall_confidence,
+            "raw_confidence": self.raw_confidence,
             "confidence_level": self.confidence_level.value,
             "field_validations": self.field_validations,
             "cross_field_validations": self.cross_field_validations,

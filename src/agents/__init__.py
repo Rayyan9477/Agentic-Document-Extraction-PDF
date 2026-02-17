@@ -23,7 +23,9 @@ from src.agents.base import (
     OrchestrationError,
     ValidationError,
 )
+from src.agents.component_detector import ComponentDetectorAgent
 from src.agents.extractor import ExtractorAgent
+from src.agents.layout_agent import LayoutAgent
 from src.agents.orchestrator import (
     CheckpointerType,
     OrchestratorAgent,
@@ -31,6 +33,10 @@ from src.agents.orchestrator import (
     generate_processing_id,
     generate_thread_id,
 )
+from src.agents.schema_generator import SchemaGeneratorAgent
+from src.agents.schema_proposal import SchemaProposalAgent
+from src.agents.splitter import SplitterAgent
+from src.agents.table_detector import TableDetectorAgent
 from src.agents.validator import ValidatorAgent
 
 
@@ -41,10 +47,16 @@ __all__ = [
     "AnalyzerAgent",
     "BaseAgent",
     "CheckpointerType",
+    "ComponentDetectorAgent",
     "ExtractionError",
     "ExtractorAgent",
+    "LayoutAgent",
     "OrchestrationError",
     "OrchestratorAgent",
+    "SchemaGeneratorAgent",
+    "SchemaProposalAgent",
+    "SplitterAgent",
+    "TableDetectorAgent",
     "ValidationError",
     "ValidatorAgent",
     "create_extraction_workflow",

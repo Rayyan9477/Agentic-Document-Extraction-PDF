@@ -121,8 +121,8 @@ class TestSignupEndpoint:
             json={
                 "username": "usr",  # 3 chars minimum
                 "email": "a@b.co",
-                "password": "12345678",  # 8 chars minimum
-                "confirm_password": "12345678",
+                "password": "TestPwd8!x",  # 8+ chars, not common
+                "confirm_password": "TestPwd8!x",
             },
         )
 
@@ -561,25 +561,33 @@ class TestGetCurrentUserEndpoint:
 
     def test_get_current_user_expired_token(self, client, rbac_manager, test_user):
         """Test getting current user with expired token."""
-        # Create token manager with very short expiration
-        short_lived_manager = RBACManager(
-            secret_key="test-secret",
-            access_token_expire_minutes=-1,  # Already expired
-        )
+        from datetime import UTC, datetime, timedelta
 
-        # Create user in new manager
-        user = short_lived_manager.users.create_user(
-            username="expireduser",
-            email="expired@example.com",
-            password="Password123!",
-            roles={Role.VIEWER},
-        )
+        from jose import jwt
 
-        token, _ = short_lived_manager.tokens.create_access_token(user)
+        # Create an already-expired token using the SAME secret as the fixture manager
+        now = datetime.now(UTC)
+        payload = {
+            "sub": test_user.user_id,
+            "username": test_user.username,
+            "email": test_user.email,
+            "roles": [r.value for r in test_user.roles],
+            "permissions": [],
+            "token_type": "access",
+            "iat": (now - timedelta(hours=2)).timestamp(),
+            "exp": (now - timedelta(hours=1)).timestamp(),  # Already expired
+            "jti": "expired-test-token-id",
+        }
+
+        expired_token = jwt.encode(
+            payload,
+            "test-secret-key-for-auth-tests-12345",
+            algorithm="HS256",
+        )
 
         response = client.get(
             "/api/v1/auth/me",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"Authorization": f"Bearer {expired_token}"},
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -634,7 +642,8 @@ class TestRefreshTokenEndpoint:
         """Test refresh without providing token."""
         response = client.post("/api/v1/auth/refresh")
 
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+        # Missing token falls through to "Refresh token required" → 401
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_refresh_token_for_deleted_user(self, client, test_user, test_tokens, rbac_manager):
         """Test that refresh fails if user no longer exists."""

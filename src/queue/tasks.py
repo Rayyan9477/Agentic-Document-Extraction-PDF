@@ -291,6 +291,14 @@ def _send_completion_webhook(
             attempts=delivery_result.attempts,
         )
 
+        # Fan out to all registered webhook subscriptions
+        _fan_out_to_subscriptions(
+            event_type=event_type,
+            processing_id=processing_id,
+            task_id=task_id,
+            data=data,
+        )
+
     except Exception as e:
         # Webhook failures should not affect task completion
         logger.error(
@@ -300,6 +308,54 @@ def _send_completion_webhook(
             callback_url=callback_url,
             error=str(e),
             error_type=type(e).__name__,
+        )
+
+
+def _fan_out_to_subscriptions(
+    event_type: Any,
+    processing_id: str,
+    task_id: str,
+    data: dict[str, Any],
+) -> None:
+    """
+    Fan out a webhook event to all registered subscriptions.
+
+    Uses the WebhookStore to deliver to all matching active subscriptions.
+    Failures are logged but never propagated.
+    """
+    try:
+        from src.config import get_settings
+
+        settings = get_settings()
+        store_path = settings.webhook.store_path
+
+        if not store_path.exists():
+            return  # No subscriptions registered yet
+
+        from src.queue.webhook_store import WebhookStore
+
+        store = WebhookStore(persist_path=store_path)
+        fan_out_result = store.fan_out(
+            event_type=event_type,
+            processing_id=processing_id,
+            task_id=task_id,
+            data=data,
+        )
+
+        if fan_out_result.total_subscriptions > 0:
+            logger.info(
+                "webhook_fan_out_complete",
+                processing_id=processing_id,
+                total=fan_out_result.total_subscriptions,
+                delivered=fan_out_result.delivered,
+                failed=fan_out_result.failed,
+            )
+
+    except Exception as e:
+        logger.warning(
+            "webhook_fan_out_error",
+            processing_id=processing_id,
+            error=str(e),
         )
 
 
