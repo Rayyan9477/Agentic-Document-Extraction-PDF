@@ -407,8 +407,8 @@ def clean_ocr_text(text: str) -> str:
     result = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", result)
 
     # Normalize unicode quotation marks
-    result = result.replace(""", '"').replace(""", '"')
-    result = result.replace("'", "'").replace("'", "'")
+    result = result.replace("\u201c", '"').replace("\u201d", '"')
+    result = result.replace("\u2018", "'").replace("\u2019", "'")
 
     # Remove zero-width characters
     result = re.sub(r"[\u200b-\u200d\ufeff]", "", result)
