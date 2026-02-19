@@ -301,13 +301,16 @@ class TestClassifyDocumentStandalone:
         assert result.success is True
         assert result.data["document_type"] == "EOB"
 
-    def test_standalone_failure(self) -> None:
+    def test_standalone_fallback_on_error(self) -> None:
+        """_classify_document has its own fallback, so standalone still succeeds."""
         client = MagicMock()
         client.send_vision_request.side_effect = Exception("boom")
         agent = AnalyzerAgent(client=client)
         result = agent.classify_document_standalone("data:image/png;base64,abc")
-        assert result.success is False
-        assert result.error is not None
+        # _classify_document catches errors and returns OTHER fallback
+        assert result.success is True
+        assert result.data["document_type"] == "OTHER"
+        assert result.data["confidence"] == 0.0
 
 
 # ---------------------------------------------------------------------------

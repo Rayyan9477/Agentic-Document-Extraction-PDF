@@ -44,6 +44,7 @@ from src.schemas import (
     validate_icd10_code,
     validate_npi,
 )
+from src.schemas.validators import ValidationResult as CodeValidationResult
 from src.validation import (
     ConfidenceAction,
     ConfidenceScorer,
@@ -472,17 +473,20 @@ class ValidatorAgent(BaseAgent):
 
         # CPT code validation
         if "cpt" in field_name.lower():
-            if not validate_cpt_code(str_value):
+            cpt_result = validate_cpt_code(str_value)
+            if cpt_result.result == CodeValidationResult.INVALID:
                 errors.append(f"Invalid CPT code format: {str_value}")
 
         # ICD-10 code validation
         if "icd" in field_name.lower() or "diagnosis" in field_name.lower():
-            if not validate_icd10_code(str_value):
+            icd_result = validate_icd10_code(str_value)
+            if icd_result.result == CodeValidationResult.INVALID:
                 errors.append(f"Invalid ICD-10 code format: {str_value}")
 
         # NPI validation
         if "npi" in field_name.lower():
-            if not validate_npi(str_value):
+            npi_result = validate_npi(str_value)
+            if npi_result.result == CodeValidationResult.INVALID:
                 errors.append(f"Invalid NPI (Luhn check failed): {str_value}")
 
         return errors

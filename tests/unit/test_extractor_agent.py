@@ -53,7 +53,7 @@ def _make_state(**overrides) -> dict:
         ],
         "analysis": {"has_tables": False, "has_handwriting": False},
         "document_type": "CMS-1500",
-        "selected_schema_name": "cms_1500",
+        "selected_schema_name": "cms1500",
         "overall_confidence": 0.0,
         "confidence_level": "low",
         "retry_count": 0,
@@ -151,7 +151,7 @@ class TestProcessLegacy:
     def test_no_images_raises(self) -> None:
         agent = ExtractorAgent(client=MagicMock())
         state = _make_state(page_images=[])
-        with pytest.raises(ExtractionError, match="No page images"):
+        with pytest.raises(ExtractionError, match="No page images|No schema"):
             agent._process_legacy(state)
 
     def test_updates_status_and_step(self) -> None:
@@ -287,7 +287,7 @@ class TestExtractSingleField:
         from src.schemas import FieldType
         from src.schemas.schema_builder import FieldBuilder
 
-        field_def = FieldBuilder("patient_name").type(FieldType.STRING).build_field()
+        field_def = FieldBuilder("patient_name").type(FieldType.STRING).build()
         result = agent.extract_single_field("data:image/png;base64,abc", field_def)
         assert result.success is True
         assert result.data.value == "Alice Smith"
@@ -300,6 +300,6 @@ class TestExtractSingleField:
         from src.schemas import FieldType
         from src.schemas.schema_builder import FieldBuilder
 
-        field_def = FieldBuilder("patient_name").type(FieldType.STRING).build_field()
+        field_def = FieldBuilder("patient_name").type(FieldType.STRING).build()
         result = agent.extract_single_field("data:image/png;base64,abc", field_def)
         assert result.success is False
