@@ -313,10 +313,19 @@ class ValidatorAgent(BaseAgent):
         # Step 2: Medical code validation using validation module
         code_result = self._medical_validator.validate_all(values)
 
+        # Build reverse map: code value -> field name(s) for confidence scoring
+        code_to_field: dict[str, list[str]] = {}
+        for fn, v in values.items():
+            if isinstance(v, str):
+                code_to_field.setdefault(v, []).append(fn)
+
         for code_detail in code_result.validations:
             if not code_detail.is_valid:
                 result.errors.append(f"{code_detail.code}: {code_detail.message}")
             result.field_validations[code_detail.code] = code_detail.is_valid
+            # Also store by field name so confidence scorer can look it up
+            for fn in code_to_field.get(code_detail.code, []):
+                result.field_validations[fn] = code_detail.is_valid
 
         # Step 3: Schema-based field validation (existing logic)
         for field_name, value in values.items():
@@ -341,7 +350,10 @@ class ValidatorAgent(BaseAgent):
                     if not is_valid and error:
                         field_errors.append(error)
 
-            result.field_validations[field_name] = len(field_errors) == 0
+            result.field_validations[field_name] = (
+                len(field_errors) == 0
+                and result.field_validations.get(field_name, True)
+            )
 
             if field_errors:
                 result.errors.extend([f"{field_name}: {e}" for e in field_errors])

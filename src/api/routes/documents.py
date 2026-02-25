@@ -71,14 +71,14 @@ SUPPORTED_DOCUMENT_EXTENSIONS = [
 
 # Initialize validators
 _pdf_validator = SecurePathValidator(
-    allowed_directories=None,  # Allow any directory but validate for traversal
+    allowed_directories=ALLOWED_PDF_DIRECTORIES,
     allowed_extensions=SUPPORTED_DOCUMENT_EXTENSIONS,
     allow_absolute_paths=True,
     resolve_symlinks=True,
 )
 
 _output_validator = SecurePathValidator(
-    allowed_directories=None,  # Allow any directory but validate for traversal
+    allowed_directories=ALLOWED_OUTPUT_DIRECTORIES,
     allowed_extensions=[".json", ".xlsx", ".xls", ".md", ".csv"],
     allow_absolute_paths=True,
     resolve_symlinks=True,

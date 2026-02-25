@@ -125,7 +125,17 @@ class ContextManager:
                         "duplicate_document_found",
                         pdf_hash=pdf_hash,
                     )
-                    context.similar_extractions = [r.entry.metadata for r in duplicate_results]
+                    context.similar_extractions = [
+                        {
+                            "id": r.entry.id,
+                            "score": r.score,
+                            "document_type": r.entry.metadata.get("document_type"),
+                            "fields": r.entry.metadata.get("fields", {}),
+                            "confidence": r.entry.metadata.get("confidence", 0.0),
+                            "is_duplicate": True,
+                        }
+                        for r in duplicate_results
+                    ]
 
             # Search for similar document extractions
             query = f"document_type:{document_type}"

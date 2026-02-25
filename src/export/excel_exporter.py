@@ -345,7 +345,7 @@ class ExcelExporter:
 
         row = 2
         for field_name, field_data in merged.items():
-            if field_name in self.config.phi_fields and self.config.mask_phi:
+            if field_name.lower() in self.config.phi_fields and self.config.mask_phi:
                 value = self._mask_phi_value(
                     field_data.get("value") if isinstance(field_data, dict) else field_data
                 )

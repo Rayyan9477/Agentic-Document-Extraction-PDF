@@ -1420,7 +1420,7 @@ CRITICAL: Read the actual text in the image. Do not guess or infer."""
         overall_start = time.time()
 
         # Filter pages
-        if start_page or end_page:
+        if start_page is not None or end_page is not None:
             page_images = [
                 p
                 for p in page_images

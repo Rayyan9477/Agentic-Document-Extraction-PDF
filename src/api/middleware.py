@@ -11,6 +11,7 @@ Provides comprehensive middleware for the FastAPI application including:
 
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from collections import defaultdict
@@ -209,6 +210,7 @@ class RateLimiter:
         self._burst_size = burst_size
         self._clients: dict[str, RateLimitState] = defaultdict(RateLimitState)
         self._endpoint_limits: dict[str, RateLimitConfig] = {}
+        self._lock = threading.Lock()
 
     def set_endpoint_limit(
         self,
@@ -244,30 +246,31 @@ class RateLimiter:
         config = self._endpoint_limits.get(endpoint or "", None)
         rpm = config.requests_per_minute if config else self._default_rpm
 
-        # Get/create client state
-        state = self._clients[client_id]
+        with self._lock:
+            # Get/create client state
+            state = self._clients[client_id]
 
-        # Cleanup old requests
-        if now - state.last_cleanup > 10:
-            state.requests = [t for t in state.requests if t > window_start]
-            state.last_cleanup = now
+            # Cleanup old requests
+            if now - state.last_cleanup > 10:
+                state.requests = [t for t in state.requests if t > window_start]
+                state.last_cleanup = now
 
-        # Check limit
-        remaining = max(0, rpm - len(state.requests))
-        headers = {
-            "X-RateLimit-Limit": rpm,
-            "X-RateLimit-Remaining": remaining,
-            "X-RateLimit-Reset": int(window_start + 60),
-        }
+            # Check limit
+            remaining = max(0, rpm - len(state.requests))
+            headers = {
+                "X-RateLimit-Limit": rpm,
+                "X-RateLimit-Remaining": remaining,
+                "X-RateLimit-Reset": int(window_start + 60),
+            }
 
-        if len(state.requests) >= rpm:
-            return False, headers
+            if len(state.requests) >= rpm:
+                return False, headers
 
-        # Record request
-        state.requests.append(now)
-        headers["X-RateLimit-Remaining"] = remaining - 1
+            # Record request
+            state.requests.append(now)
+            headers["X-RateLimit-Remaining"] = remaining - 1
 
-        return True, headers
+            return True, headers
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

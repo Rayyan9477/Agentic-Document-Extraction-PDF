@@ -427,24 +427,15 @@ class HealthMonitor:
             health.error_message = f"Unexpected error: {e}"
             self._consecutive_failures += 1
 
-        # Update state
-        with self._lock:
-            old_status = self._current_health.status
-            self._current_health = health
+        # Set consecutive failures count on health object
+        health.consecutive_failures = self._consecutive_failures
 
-        # Fire callbacks
-        if old_status != health.status:
-            for callback in self._status_callbacks:
-                try:
-                    callback(old_status, health.status)
-                except Exception as e:
-                    logger.warning("status_callback_error", error=str(e))
+        # Check if we've exceeded failure threshold
+        if self._consecutive_failures >= self._failure_threshold:
+            health.status = HealthStatus.UNHEALTHY
 
-        for callback in self._health_callbacks:
-            try:
-                callback(health)
-            except Exception as e:
-                logger.warning("health_callback_error", error=str(e))
+        # Update state using shared method for consistent callback handling
+        self._update_health(health)
 
         return health
 

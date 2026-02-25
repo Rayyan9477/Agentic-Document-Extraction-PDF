@@ -441,11 +441,19 @@ class ConnectionManager:
         if asyncio.iscoroutine(result):
             # True async - await directly for proper async I/O
             try:
-                return await result
-            except Exception:
+                async_result = await result
+                # Track success metrics
+                self._circuit_breaker.record_success()
+                self._metrics.record_success(0)
                 with self._lock:
-                    self._metrics.total_requests += 1
-                    self._record_failure()
+                    self._state = ConnectionState.CONNECTED
+                return async_result
+            except Exception:
+                self._circuit_breaker.record_failure()
+                self._metrics.record_failure()
+                with self._lock:
+                    if self._metrics.consecutive_failures > 1:
+                        self._state = ConnectionState.RECONNECTING
                 raise
         else:
             # Sync function already called - return result

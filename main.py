@@ -38,7 +38,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dataclass_fields
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -145,7 +145,10 @@ def load_config() -> ExtractionConfig:
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, "r") as f:
             data = json.load(f)
-            return ExtractionConfig(**data)
+            # Filter out keys not in ExtractionConfig to avoid TypeError
+            known_fields = {fld.name for fld in dataclass_fields(ExtractionConfig)}
+            filtered = {k: v for k, v in data.items() if k in known_fields}
+            return ExtractionConfig(**filtered)
     return ExtractionConfig()
 
 

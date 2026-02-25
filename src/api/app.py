@@ -118,8 +118,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from src.security.data_cleanup import TempFileManager
 
+        import asyncio
+
         temp_manager = TempFileManager()
-        temp_manager.cleanup_all()  # Use sync method (cleanup_async doesn't exist)
+        await asyncio.to_thread(temp_manager.cleanup_all)
         logger.info("temp_files_cleaned")
     except Exception as e:
         logger.warning("temp_cleanup_failed", error=str(e))
@@ -156,19 +158,14 @@ def create_app(
     )
 
     # Configure CORS - strict security requirements
-    cors_origins = getattr(settings, "cors_origins", None)
+    cors_origins = getattr(getattr(settings, "api", None), "cors_origins", None)
     if not cors_origins:
         # Development defaults - strict even for dev
         cors_origins = ["http://localhost:3000"]
         logger.warning("cors_origins_not_configured", using_defaults=cors_origins)
 
     # Production validation: NEVER allow wildcards with credentials
-    # Check if running in production (env variable or settings)
-    import os
-
-    is_production = os.getenv("APP_ENV", "").lower() == "production" or (
-        hasattr(settings, "app_env") and str(settings.app_env).lower() == "production"
-    )
+    is_production = str(getattr(settings, "app_env", "")).lower() == "production"
 
     if is_production:
         for origin in cors_origins:
