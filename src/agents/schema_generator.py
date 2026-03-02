@@ -13,7 +13,7 @@ from typing import Any
 from src.agents.base import AgentError, BaseAgent
 from src.agents.utils import RetryConfig, retry_with_backoff
 from src.config import get_settings
-from src.pipeline.state import ExtractionState
+from src.pipeline.state import ExtractionState, update_state
 from src.prompts.grounding_rules import build_grounded_system_prompt
 
 
@@ -74,11 +74,10 @@ class SchemaGeneratorAgent(BaseAgent):
                     recoverable=False,
                 )
             
-            # Use first page for schema generation (assume consistent structure)
-            # For multi-page documents, could aggregate across pages
+            # Primary analysis from first page (used for VLM image + detailed context)
             first_page_layout = layout_analyses[0] if layout_analyses else None
             first_page_components = component_maps[0] if component_maps else None
-            
+
             # Get page image for VLM analysis
             page_images = state.get("page_images", [])
             if not page_images:
@@ -87,25 +86,46 @@ class SchemaGeneratorAgent(BaseAgent):
                     agent_name=self.name,
                     recoverable=False,
                 )
-            
+
             first_page_image = page_images[0]
             image_data_uri = first_page_image.get("data_uri")
-            
+
+            # Aggregate component summaries across ALL pages so the schema
+            # covers fields that only appear on page 2+.
+            multi_page_summary = None
+            if len(component_maps) > 1:
+                all_tables = []
+                all_forms = []
+                all_kv_pairs = []
+                for cm in component_maps:
+                    all_tables.extend(cm.get("tables", []))
+                    all_forms.extend(cm.get("forms", []))
+                    all_kv_pairs.extend(cm.get("key_value_pairs", []))
+                multi_page_summary = {
+                    "total_pages": len(page_images),
+                    "total_tables": len(all_tables),
+                    "total_form_fields": len(all_forms),
+                    "total_kv_pairs": len(all_kv_pairs),
+                    "page_layout_types": [
+                        la.get("layout_type", "unknown") for la in layout_analyses
+                    ],
+                    # Show unique field labels from later pages not on page 1
+                    "additional_page_fields": self._get_additional_page_fields(
+                        component_maps
+                    ),
+                }
+
             # Generate adaptive schema
             adaptive_schema = self._generate_schema(
                 image_data_uri=image_data_uri,
                 layout=first_page_layout,
                 components=first_page_components,
                 total_pages=len(page_images),
+                multi_page_summary=multi_page_summary,
             )
             
-            # Update state
-            state["adaptive_schema"] = adaptive_schema
-            state["total_vlm_calls"] = state.get("total_vlm_calls", 0) + 1
-            
             elapsed_ms = int((time.time() - start_time) * 1000)
-            state["total_processing_time_ms"] = state.get("total_processing_time_ms", 0) + elapsed_ms
-            
+
             self._logger.info(
                 "schema_generation_completed",
                 field_count=adaptive_schema.get("total_field_count", 0),
@@ -113,8 +133,13 @@ class SchemaGeneratorAgent(BaseAgent):
                 confidence=adaptive_schema.get("schema_confidence", 0.0),
                 time_ms=elapsed_ms,
             )
-            
-            return state
+
+            # Immutable state update for LangGraph compatibility
+            return update_state(state, {
+                "adaptive_schema": adaptive_schema,
+                "total_vlm_calls": state.get("total_vlm_calls", 0) + 1,
+                "total_processing_time_ms": state.get("total_processing_time_ms", 0) + elapsed_ms,
+            })
         
         except Exception as e:
             self._logger.error(
@@ -134,21 +159,23 @@ class SchemaGeneratorAgent(BaseAgent):
         layout: dict[str, Any] | None,
         components: dict[str, Any] | None,
         total_pages: int,
+        multi_page_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """
         Generate adaptive schema using VLM analysis.
-        
+
         Args:
             image_data_uri: Data URI of first page image.
             layout: Layout analysis from LayoutAgent.
             components: Component map from ComponentDetectorAgent.
             total_pages: Total page count.
-        
+            multi_page_summary: Aggregated component data across all pages.
+
         Returns:
             AdaptiveSchema dict with field definitions and strategies.
         """
         start_time = time.time()
-        
+
         system_prompt = build_grounded_system_prompt(
             additional_context=(
                 "You are generating an extraction schema based on document structure. "
@@ -159,11 +186,12 @@ class SchemaGeneratorAgent(BaseAgent):
             include_confidence_scale=True,
             include_few_shot_examples=False,  # Zero-shot mode
         )
-        
+
         user_prompt = self._build_schema_generation_prompt(
             layout=layout,
             components=components,
             total_pages=total_pages,
+            multi_page_summary=multi_page_summary,
         )
         
         # Retry with backoff
@@ -206,11 +234,43 @@ class SchemaGeneratorAgent(BaseAgent):
             # Return minimal fallback schema
             return self._create_fallback_schema(layout, components)
     
+    @staticmethod
+    def _get_additional_page_fields(
+        component_maps: list[dict[str, Any]],
+    ) -> list[str]:
+        """Get field labels from page 2+ that don't appear on page 1."""
+        if len(component_maps) <= 1:
+            return []
+        page1_labels = set()
+        for f in component_maps[0].get("forms", []):
+            label = f.get("label_text", "")
+            if label:
+                page1_labels.add(label.lower().strip())
+        for kv in component_maps[0].get("key_value_pairs", []):
+            key = kv.get("key_text", "")
+            if key:
+                page1_labels.add(key.lower().strip())
+
+        additional = []
+        for cm in component_maps[1:]:
+            for f in cm.get("forms", []):
+                label = f.get("label_text", "")
+                if label and label.lower().strip() not in page1_labels:
+                    additional.append(label)
+                    page1_labels.add(label.lower().strip())
+            for kv in cm.get("key_value_pairs", []):
+                key = kv.get("key_text", "")
+                if key and key.lower().strip() not in page1_labels:
+                    additional.append(key)
+                    page1_labels.add(key.lower().strip())
+        return additional[:30]  # Cap to avoid prompt bloat
+
     def _build_schema_generation_prompt(
         self,
         layout: dict[str, Any] | None,
         components: dict[str, Any] | None,
         total_pages: int,
+        multi_page_summary: dict[str, Any] | None = None,
     ) -> str:
         """Build schema generation prompt with context."""
         
@@ -301,6 +361,27 @@ class SchemaGeneratorAgent(BaseAgent):
             for comp_type, strategy in strategies.items():
                 component_context += f"  - {comp_type}: {strategy}\n"
         
+        # Build multi-page context section if available
+        multi_page_context = ""
+        if multi_page_summary:
+            multi_page_context = f"""
+## Multi-Page Document Summary (IMPORTANT)
+
+This is a **{multi_page_summary['total_pages']}-page** document. The layout/component context above
+is from page 1 only. Across ALL pages the document contains:
+- **Total Tables:** {multi_page_summary['total_tables']}
+- **Total Form Fields:** {multi_page_summary['total_form_fields']}
+- **Total Key-Value Pairs:** {multi_page_summary['total_kv_pairs']}
+- **Page Layout Types:** {', '.join(multi_page_summary['page_layout_types'])}
+"""
+            additional_fields = multi_page_summary.get("additional_page_fields", [])
+            if additional_fields:
+                multi_page_context += (
+                    "\n**Fields found on later pages (NOT on page 1) — include these in the schema:**\n"
+                )
+                for label in additional_fields:
+                    multi_page_context += f"  - \"{label}\"\n"
+
         return f"""# TASK: Generate Adaptive Extraction Schema
 
 You have analyzed this document's layout and components. Now propose an extraction schema.
@@ -310,6 +391,8 @@ You have analyzed this document's layout and components. Now propose an extracti
 {layout_context}
 
 {component_context}
+
+{multi_page_context}
 
 ## Document Info
 - Total Pages: {total_pages}

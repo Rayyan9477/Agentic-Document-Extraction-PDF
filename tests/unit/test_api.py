@@ -178,7 +178,7 @@ class TestDocumentEndpoints:
     """Test cases for document processing endpoints."""
 
     def test_process_document_file_not_found(self, client: TestClient) -> None:
-        """Test processing with non-existent file."""
+        """Test processing with non-existent file outside allowed directories."""
         response = client.post(
             "/api/v1/documents/process",
             json={
@@ -186,8 +186,9 @@ class TestDocumentEndpoints:
             },
         )
 
-        assert response.status_code == 404
-        assert "not found" in response.json()["detail"].lower()
+        # Path validation rejects paths outside allowed directories with 400
+        assert response.status_code == 400
+        assert "invalid" in response.json()["detail"].lower()
 
     @patch("src.queue.tasks.process_document_task")
     def test_process_document_async(

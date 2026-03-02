@@ -800,6 +800,17 @@ class ValidatorAgent(BaseAgent):
                 f"Validation errors: {len(validation.errors)}"
             )
 
+        # Zero-shot confidence penalty: adaptive extractions without a known
+        # schema deserve extra scrutiny since the schema was auto-generated.
+        is_adaptive = state.get("use_adaptive_extraction", False)
+        has_known_schema = bool(state.get("document_type", ""))
+        if is_adaptive and not has_known_schema:
+            if validation.overall_confidence < 0.75:
+                recommendation_reasons.append(
+                    "Zero-shot extraction without known schema"
+                )
+                validation.requires_retry = True
+
         # Annotate state with validation results — let orchestrator decide routing
         return update_state(
             state,

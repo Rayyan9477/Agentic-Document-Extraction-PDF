@@ -261,7 +261,7 @@ async def process_document(
         from src.queue.tasks import process_document_task
 
         task = process_document_task.delay(
-            pdf_path=request.pdf_path,
+            pdf_path=str(validated_pdf_path),
             output_dir=request.output_dir,
             schema_name=request.schema_name,
             export_format=request.export_format.value,

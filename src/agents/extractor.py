@@ -511,6 +511,52 @@ class ExtractorAgent(BaseAgent):
         
         return page_extraction
     
+    _MAX_FIELDS_PER_PROMPT = 25
+    _CRITICAL_FIELD_KEYWORDS = (
+        "id", "number", "code", "mrn", "ssn",
+        "date", "dob", "amount", "charge", "total", "balance",
+    )
+
+    @staticmethod
+    def _chunk_field_defs(
+        field_defs: list[dict[str, Any]],
+        max_per_chunk: int,
+    ) -> list[list[dict[str, Any]]]:
+        """Split field definitions into priority-ordered chunks.
+
+        Critical fields (identifiers, dates, amounts) go in the first chunk.
+        Remaining fields are distributed evenly across subsequent chunks.
+        """
+        if len(field_defs) <= max_per_chunk:
+            return [field_defs]
+
+        critical = []
+        other = []
+        for f in field_defs:
+            name_lower = (f.get("field_name") or f.get("name") or "").lower()
+            if any(kw in name_lower for kw in ExtractorAgent._CRITICAL_FIELD_KEYWORDS):
+                critical.append(f)
+            else:
+                other.append(f)
+
+        chunks: list[list[dict[str, Any]]] = []
+
+        # First chunk: critical fields, then fill remaining capacity
+        first_chunk = list(critical)
+        remaining_capacity = max_per_chunk - len(first_chunk)
+        if remaining_capacity > 0 and other:
+            first_chunk.extend(other[:remaining_capacity])
+            other = other[remaining_capacity:]
+        chunks.append(first_chunk)
+
+        # Distribute remaining into balanced chunks
+        while other:
+            chunk_size = min(max_per_chunk, len(other))
+            chunks.append(other[:chunk_size])
+            other = other[chunk_size:]
+
+        return [c for c in chunks if c]
+
     def _extract_page_pass_adaptive(
         self,
         image_data: str,
@@ -526,9 +572,81 @@ class ExtractorAgent(BaseAgent):
         """
         Perform single extraction pass with full VLM context.
 
+        For schemas with more fields than _MAX_FIELDS_PER_PROMPT, splits
+        into priority-ordered chunks and merges results across VLM calls.
+
         Args:
             image_data: Base64-encoded image.
             field_defs: Adaptive field definitions.
+            document_desc: Document type description.
+            layout: Layout analysis context.
+            components: Component map context.
+            page_number: Current page number.
+            total_pages: Total pages.
+            is_first_pass: Whether this is pass 1 or 2.
+            retry_count: Pipeline retry attempt (0 = first try).
+
+        Returns:
+            Extraction result dictionary.
+        """
+        # Chunk large schemas to avoid silently dropping fields
+        chunks = self._chunk_field_defs(field_defs, self._MAX_FIELDS_PER_PROMPT)
+        if len(chunks) > 1:
+            self._logger.info(
+                "field_chunking_applied",
+                total_fields=len(field_defs),
+                chunks=len(chunks),
+                fields_per_chunk=[len(c) for c in chunks],
+                page_number=page_number,
+                is_first_pass=is_first_pass,
+            )
+            merged_fields: dict[str, Any] = {}
+            for chunk in chunks:
+                chunk_result = self._extract_single_chunk_adaptive(
+                    image_data=image_data,
+                    field_defs=chunk,
+                    document_desc=document_desc,
+                    layout=layout,
+                    components=components,
+                    page_number=page_number,
+                    total_pages=total_pages,
+                    is_first_pass=is_first_pass,
+                    retry_count=retry_count,
+                )
+                chunk_fields = chunk_result.get("fields", {})
+                merged_fields.update(chunk_fields)
+            return {"fields": merged_fields}
+
+        return self._extract_single_chunk_adaptive(
+            image_data=image_data,
+            field_defs=field_defs,
+            document_desc=document_desc,
+            layout=layout,
+            components=components,
+            page_number=page_number,
+            total_pages=total_pages,
+            is_first_pass=is_first_pass,
+            retry_count=retry_count,
+        )
+
+    def _extract_single_chunk_adaptive(
+        self,
+        image_data: str,
+        field_defs: list[dict[str, Any]],
+        document_desc: str,
+        layout: dict[str, Any] | None,
+        components: dict[str, Any] | None,
+        page_number: int,
+        total_pages: int,
+        is_first_pass: bool,
+        retry_count: int = 0,
+    ) -> dict[str, Any]:
+        """
+        Perform single extraction VLM call for one chunk of fields.
+
+        Args:
+            image_data: Base64-encoded image.
+            field_defs: Chunk of field definitions (already sized).
             document_desc: Document type description.
             layout: Layout analysis context.
             components: Component map context.
@@ -562,7 +680,7 @@ class ExtractorAgent(BaseAgent):
         temperature = 0.1
         if retry_count > 0:
             # Increase temperature: 0.1 → 0.2 → 0.3 (capped at 0.4)
-            temperature = min(0.1 + retry_count * 0.1, 0.4)
+            temperature = min(0.1 + retry_count * 0.15, 0.6)
             user_prompt += (
                 f"\n\n**RETRY ATTEMPT {retry_count}**: Previous extraction "
                 f"scored below threshold. Pay extra attention to:\n"
@@ -708,9 +826,9 @@ Return structured JSON with extracted fields, confidences, and locations."""
 **Extraction Strategy:** {components.get('suggested_extraction_strategies', {})}
 """
         
-        # Build field instructions
+        # Build field instructions (field_defs already chunked by caller)
         field_instructions = ""
-        for field in field_defs[:30]:  # Limit to first 30 fields per page
+        for field in field_defs:
             name = field.get("field_name", "unknown")
             display = field.get("display_name", name)
             ftype = field.get("field_type", "text")
@@ -884,7 +1002,7 @@ Begin adaptive extraction now."""
             merged_fields = page_ext.get("merged_fields", {})
 
             for field_name, field_data in merged_fields.items():
-                if field_name in consumed_fields or field_name in merged:
+                if field_name in consumed_fields:
                     continue  # Already handled by schema match
 
                 value = field_data.get("value") if isinstance(field_data, dict) else field_data
@@ -1175,7 +1293,11 @@ Begin adaptive extraction now."""
         # Inject OCR text layer as supplementary context for hybrid extraction
         # This helps the VLM cross-validate its visual reading against embedded text
         if ocr_text:
-            ocr_snippet = ocr_text[:2000]  # Cap to avoid token overflow
+            # Smart truncation: keep header/body AND footer (totals, signatures)
+            if len(ocr_text) > 2000:
+                ocr_snippet = ocr_text[:1200] + "\n...[truncated middle]...\n" + ocr_text[-800:]
+            else:
+                ocr_snippet = ocr_text
             prompt += (
                 "\n\n--- OCR TEXT LAYER (for cross-reference only) ---\n"
                 "The following text was extracted from the PDF's embedded text layer. "
@@ -1187,7 +1309,7 @@ Begin adaptive extraction now."""
 
         # Phase 3B: Enhance prompt with correction history warnings
         if self._prompt_enhancer is not None:
-            field_names = [f.get("name", "") for f in field_defs if f.get("name")]
+            field_names = [f.get("field_name") or f.get("name", "") for f in field_defs if f.get("field_name") or f.get("name")]
             try:
                 enhancement = self._prompt_enhancer.enhance_prompt(
                     base_prompt=prompt,
@@ -1209,12 +1331,16 @@ Begin adaptive extraction now."""
             max_delay_ms=settings.agent.max_retry_delay_ms,
         )
 
+        # Differentiate temperature between passes for independent verification.
+        # Same temperature produces correlated errors, inflating agreement scores.
+        temperature = 0.1 if is_first_pass else 0.3
+
         def make_vlm_call() -> dict[str, Any]:
             return self.send_vision_request_with_json(
                 image_data=image_data,
                 prompt=prompt,
                 system_prompt=system_prompt,
-                temperature=0.1,
+                temperature=temperature,
             )
 
         try:

@@ -11,7 +11,7 @@ from typing import Any
 from src.agents.base import AgentError, BaseAgent
 from src.agents.utils import RetryConfig, retry_with_backoff
 from src.config import get_settings
-from src.pipeline.state import ExtractionState
+from src.pipeline.state import ExtractionState, update_state
 from src.prompts.grounding_rules import build_grounded_system_prompt
 
 
@@ -107,20 +107,20 @@ class ComponentDetectorAgent(BaseAgent):
                                   if f.get("field_type") == "checkbox"),
                 )
             
-            # Update state
-            state["component_maps"] = component_maps
-            state["total_vlm_calls"] = state.get("total_vlm_calls", 0) + len(component_maps)
-            
             elapsed_ms = int((time.time() - start_time) * 1000)
-            state["total_processing_time_ms"] = state.get("total_processing_time_ms", 0) + elapsed_ms
-            
+
             self._logger.info(
                 "component_detection_completed",
                 pages_processed=len(component_maps),
                 total_time_ms=elapsed_ms,
             )
-            
-            return state
+
+            # Immutable state update for LangGraph compatibility
+            return update_state(state, {
+                "component_maps": component_maps,
+                "total_vlm_calls": state.get("total_vlm_calls", 0) + len(component_maps),
+                "total_processing_time_ms": state.get("total_processing_time_ms", 0) + elapsed_ms,
+            })
         
         except Exception as e:
             self._logger.error(

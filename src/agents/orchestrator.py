@@ -513,8 +513,19 @@ class OrchestratorAgent(BaseAgent):
             },
         )
 
-        # Retry loops back to extract (works for both pipelines)
-        workflow.add_edge(NODE_RETRY, NODE_EXTRACT)
+        # Retry target depends on confidence and pipeline type.
+        # Low-confidence adaptive retries regenerate schema first.
+        if has_vlm_first:
+            workflow.add_conditional_edges(
+                NODE_RETRY,
+                self._determine_retry_target,
+                {
+                    "schema": NODE_SCHEMA,
+                    "extract": NODE_EXTRACT,
+                },
+            )
+        else:
+            workflow.add_edge(NODE_RETRY, NODE_EXTRACT)
 
         # Terminal nodes
         workflow.add_edge(NODE_COMPLETE, END)
@@ -829,6 +840,11 @@ class OrchestratorAgent(BaseAgent):
 
     def _run_components(self, state: ExtractionState) -> ExtractionState:
         """Run the component detector agent node."""
+        # Skip if adaptive pipeline was disabled (e.g., layout failed)
+        if not state.get("use_adaptive_extraction", True):
+            self._logger.info("skipping_components_adaptive_disabled")
+            return state
+
         if self._component_agent is None:
             raise OrchestrationError(
                 "Component detector agent not configured",
@@ -854,6 +870,11 @@ class OrchestratorAgent(BaseAgent):
 
     def _run_schema_generator(self, state: ExtractionState) -> ExtractionState:
         """Run the schema generator agent node."""
+        # Skip if adaptive pipeline was disabled (e.g., earlier stage failed)
+        if not state.get("use_adaptive_extraction", True):
+            self._logger.info("skipping_schema_generation_adaptive_disabled")
+            return state
+
         if self._schema_agent is None:
             raise OrchestrationError(
                 "Schema generator agent not configured",
@@ -953,10 +974,35 @@ class OrchestratorAgent(BaseAgent):
                 return ROUTE_RETRY
             return ROUTE_COMPLETE
 
-        # LOW confidence: retry once, then human review
-        if retry_count < 1:
+        # LOW confidence: retry up to max, then human review
+        if retry_count < self._max_retries:
             return ROUTE_RETRY
         return ROUTE_HUMAN_REVIEW
+
+    def _determine_retry_target(
+        self,
+        state: ExtractionState,
+    ) -> Literal["schema", "extract"]:
+        """
+        Determine whether retry should regenerate schema or just re-extract.
+
+        On the first retry of a low-confidence adaptive extraction, loop back
+        to schema generation so the VLM can produce a better field list.
+        Subsequent retries go straight to extraction.
+        """
+        use_adaptive = state.get("use_adaptive_extraction", False)
+        confidence = state.get("overall_confidence", 1.0)
+        retry_count = state.get("retry_count", 0)
+
+        if use_adaptive and confidence < 0.5 and retry_count <= 1:
+            self._logger.info(
+                "retry_target_schema",
+                confidence=confidence,
+                retry_count=retry_count,
+            )
+            return "schema"
+
+        return "extract"
 
     def _determine_pipeline(
         self,

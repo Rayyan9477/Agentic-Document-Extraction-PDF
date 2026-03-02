@@ -498,6 +498,15 @@ class TokenManager:
         Returns:
             TokenPair with both tokens.
         """
+        access_token, access_expires = self.create_access_token(user)
+        refresh_token, refresh_expires = self.create_refresh_token(user)
+
+        return TokenPair(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            access_expires_at=access_expires,
+            refresh_expires_at=refresh_expires,
+        )
 
     def encode_payload(self, payload: dict) -> str:
         """
@@ -510,15 +519,6 @@ class TokenManager:
             Encoded JWT string.
         """
         return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
-        access_token, access_expires = self.create_access_token(user)
-        refresh_token, refresh_expires = self.create_refresh_token(user)
-
-        return TokenPair(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            access_expires_at=access_expires,
-            refresh_expires_at=refresh_expires,
-        )
 
     def validate_token(self, token: str) -> TokenPayload:
         """

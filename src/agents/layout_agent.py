@@ -13,7 +13,7 @@ from src.agents.base import AgentError, BaseAgent
 from src.agents.utils import RetryConfig, retry_with_backoff
 from src.config import get_settings
 from src.pipeline.layout_types import LayoutAnalysis, Region, VisualMark, BoundingBox
-from src.pipeline.state import ExtractionState
+from src.pipeline.state import ExtractionState, update_state
 from src.prompts.grounding_rules import build_grounded_system_prompt
 
 
@@ -96,20 +96,20 @@ class LayoutAgent(BaseAgent):
                     estimated_fields=layout.get("estimated_field_count", 0),
                 )
             
-            # Update state
-            state["layout_analyses"] = layout_analyses
-            state["total_vlm_calls"] = state.get("total_vlm_calls", 0) + len(layout_analyses)
-            
             elapsed_ms = int((time.time() - start_time) * 1000)
-            state["total_processing_time_ms"] = state.get("total_processing_time_ms", 0) + elapsed_ms
-            
+
             self._logger.info(
                 "layout_analysis_completed",
                 pages_analyzed=len(layout_analyses),
                 total_time_ms=elapsed_ms,
             )
-            
-            return state
+
+            # Immutable state update for LangGraph compatibility
+            return update_state(state, {
+                "layout_analyses": layout_analyses,
+                "total_vlm_calls": state.get("total_vlm_calls", 0) + len(layout_analyses),
+                "total_processing_time_ms": state.get("total_processing_time_ms", 0) + elapsed_ms,
+            })
         
         except Exception as e:
             self._logger.error(
