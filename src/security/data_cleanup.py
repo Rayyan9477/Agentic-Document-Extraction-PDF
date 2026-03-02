@@ -367,11 +367,17 @@ class SecureDataCleanup:
 
                 if verify and random_name.exists():
                     result.success = False
-                    result.error = "File still exists after deletion"
+                    result.error = (
+                        f"File still exists after deletion "
+                        f"(renamed to {random_name.name})"
+                    )
 
             except Exception as e:
                 result.success = False
-                result.error = f"Failed to delete file: {e}"
+                result.error = (
+                    f"Failed to delete file (may be orphaned as "
+                    f"'{random_name.name}' in {file_path.parent}): {e}"
+                )
 
         logger.info(
             "secure_delete_complete",
@@ -502,13 +508,21 @@ class SecureDataCleanup:
         """
         Attempt to wipe a string from memory.
 
-        Note: Python strings are immutable, so this has limited effectiveness.
-        Use bytearray for sensitive data when possible.
+        WARNING: This method is effectively a no-op. Python strings are
+        immutable objects and cannot be overwritten in place. The original
+        string data will persist in memory until garbage collected.
+        Use bytearray (via secure_wipe_memory) for sensitive data instead.
 
         Args:
             s: String to wipe (reference will be cleared).
         """
-        # We can't actually modify the string, but we can trigger GC
+        # Python strings are immutable - we cannot modify the underlying buffer.
+        # This call only triggers GC to potentially collect unreferenced copies.
+        # For real security, use bytearray with secure_wipe_memory().
+        logger.debug(
+            "secure_wipe_string_called",
+            warning="Python strings are immutable; use bytearray for sensitive data",
+        )
         gc.collect()
 
 
@@ -645,7 +659,9 @@ class RetentionManager:
                     )
                     age = now - mtime
 
-                    if min_age <= age <= max_age or age > max_age:
+                    # File must be older than max_age (past retention period)
+                    # AND at least min_age old (safety floor)
+                    if age >= max_age and age >= min_age:
                         eligible_files.append(file_path)
 
                 except OSError:

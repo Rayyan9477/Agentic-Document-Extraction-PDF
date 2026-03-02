@@ -114,8 +114,9 @@ class ResultStore:
             return None
 
         try:
-            with open(result_path, encoding="utf-8") as f:
-                result = json.load(f)
+            with self._lock:
+                with open(result_path, encoding="utf-8") as f:
+                    result = json.load(f)
 
             self._logger.debug(
                 "result_retrieved",
@@ -162,6 +163,8 @@ class ResultStore:
         try:
             with self._lock:
                 result_path.unlink()
+                if result_path.exists():
+                    return False
 
             self._logger.info(
                 "result_deleted",
@@ -196,31 +199,32 @@ class ResultStore:
         results = []
 
         try:
-            # Gather all result files
-            all_files = list(self._storage_dir.glob("**/*.json"))
+            with self._lock:
+                # Gather all result files
+                all_files = list(self._storage_dir.glob("**/*.json"))
 
-            # Sort by modification time (newest first)
-            all_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                # Sort by modification time (newest first)
+                all_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-            # Apply pagination
-            for file_path in all_files[offset : offset + limit]:
-                try:
-                    with open(file_path, encoding="utf-8") as f:
-                        data = json.load(f)
+                # Apply pagination
+                for file_path in all_files[offset : offset + limit]:
+                    try:
+                        with open(file_path, encoding="utf-8") as f:
+                            data = json.load(f)
 
-                    results.append(
-                        {
-                            "processing_id": data.get("processing_id", file_path.stem),
-                            "document_type": data.get("document_type", "unknown"),
-                            "status": data.get("status", "unknown"),
-                            "stored_at": data.get("_storage_metadata", {}).get("stored_at"),
-                            "overall_confidence": data.get("overall_confidence", 0.0),
-                        }
-                    )
+                        results.append(
+                            {
+                                "processing_id": data.get("processing_id", file_path.stem),
+                                "document_type": data.get("document_type", "unknown"),
+                                "status": data.get("status", "unknown"),
+                                "stored_at": data.get("_storage_metadata", {}).get("stored_at"),
+                                "overall_confidence": data.get("overall_confidence", 0.0),
+                            }
+                        )
 
-                except Exception:
-                    # Skip invalid files
-                    continue
+                    except Exception:
+                        # Skip invalid files
+                        continue
 
             return results
 

@@ -149,7 +149,7 @@ class AlertConditionEvaluator:
         ):
             return expr[1:-1]
 
-        # Check for arithmetic expression
+        # Check for arithmetic expression (supports chained operations left-to-right)
         arith_match = self.ARITHMETIC_PATTERN.match(expr)
         if arith_match:
             var_name = arith_match.group("var")
@@ -168,19 +168,45 @@ class AlertConditionEvaluator:
 
             # Perform arithmetic
             try:
-                var_value = float(var_value)
+                result = float(var_value)
                 arith_operand = float(arith_operand)
 
                 if arith_op == "+":
-                    return var_value + arith_operand
-                if arith_op == "-":
-                    return var_value - arith_operand
-                if arith_op == "*":
-                    return var_value * arith_operand
-                if arith_op == "/":
+                    result = result + arith_operand
+                elif arith_op == "-":
+                    result = result - arith_operand
+                elif arith_op == "*":
+                    result = result * arith_operand
+                elif arith_op == "/":
                     if arith_operand == 0:
                         return None
-                    return var_value / arith_operand
+                    result = result / arith_operand
+
+                # Handle remaining chained operations (e.g. "a + b - c * d")
+                remaining = expr[arith_match.end():]
+                while remaining.strip():
+                    remaining = remaining.strip()
+                    chain_match = re.match(r"(?P<op>[+\-*/])\s*(?P<val>[\w.]+)", remaining)
+                    if not chain_match:
+                        break
+                    chain_op = chain_match.group("op")
+                    chain_val = self._get_value(chain_match.group("val"))
+                    if chain_val is None:
+                        return None
+                    chain_val = float(chain_val)
+                    if chain_op == "+":
+                        result += chain_val
+                    elif chain_op == "-":
+                        result -= chain_val
+                    elif chain_op == "*":
+                        result *= chain_val
+                    elif chain_op == "/":
+                        if chain_val == 0:
+                            return None
+                        result /= chain_val
+                    remaining = remaining[chain_match.end():]
+
+                return result
             except (ValueError, TypeError):
                 return None
 

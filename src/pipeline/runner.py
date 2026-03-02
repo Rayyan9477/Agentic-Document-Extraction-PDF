@@ -83,7 +83,7 @@ class PipelineRunner:
         self._enable_enhancement = (
             enable_image_enhancement
             if enable_image_enhancement is not None
-            else getattr(self._settings, "image", None) is not None
+            else getattr(getattr(self._settings, "pdf", None), "enable_enhancement", False)
         )
         self._enhancer = None  # Lazy initialized
 
@@ -827,7 +827,7 @@ class PipelineRunner:
         )
 
         # Load and convert PDF pages using existing infrastructure
-        page_images = self._load_and_convert_pdf(str(pdf_path))
+        page_images = self._load_and_convert_file(str(pdf_path))
 
         # Run multi-record extraction with Phase 2 + Phase 3 options
         extractor = MultiRecordExtractor(

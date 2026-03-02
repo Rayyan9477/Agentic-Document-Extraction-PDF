@@ -19,6 +19,7 @@ from typing import Any, TypeVar
 import structlog
 from prometheus_client import (
     CONTENT_TYPE_LATEST,
+    REGISTRY,
     Counter,
     Gauge,
     Histogram,
@@ -122,6 +123,18 @@ class MetricsRegistry:
     def reset_instance(cls) -> None:
         """Reset singleton instance (for testing)."""
         with cls._lock:
+            if cls._instance is not None:
+                # Unregister all Prometheus collectors to avoid duplicate timeseries
+                collectors_to_remove = []
+                for attr_name in dir(cls._instance):
+                    attr = getattr(cls._instance, attr_name, None)
+                    if isinstance(attr, (Counter, Gauge, Histogram, Info, Summary)):
+                        collectors_to_remove.append(attr)
+                for collector in collectors_to_remove:
+                    try:
+                        REGISTRY.unregister(collector)
+                    except Exception:
+                        pass
             cls._instance = None
 
     def _init_system_metrics(self) -> None:

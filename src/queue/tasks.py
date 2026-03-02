@@ -420,8 +420,9 @@ def process_document_task(
         if not pdf_file.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
-        if not pdf_file.suffix.lower() == ".pdf":
-            raise ValueError(f"Invalid file type: {pdf_file.suffix}")
+        supported_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp"}
+        if pdf_file.suffix.lower() not in supported_extensions:
+            raise ValueError(f"Unsupported file type: {pdf_file.suffix}. Supported: {supported_extensions}")
 
         _update_task_state("PROCESSING", {"status": TaskStatus.PROCESSING.value})
 
@@ -676,7 +677,17 @@ def batch_process_task(
 
     # Wait for all tasks to complete with progress updates
     total_tasks = len(pdf_paths)
-    while not async_results.ready():
+    # Calculate a polling deadline based on batch size
+    import time as _time
+
+    if result_timeout is None:
+        calculated_timeout = len(pdf_paths) * DEFAULT_RESULT_TIMEOUT_PER_DOC
+        result_timeout = max(
+            MIN_BATCH_RESULT_TIMEOUT, min(calculated_timeout, MAX_BATCH_RESULT_TIMEOUT)
+        )
+
+    poll_deadline = _time.time() + result_timeout
+    while not async_results.ready() and _time.time() < poll_deadline:
         completed_count = sum(1 for r in async_results.results if r.ready())
         _update_task_state(
             "PROCESSING",
@@ -686,17 +697,15 @@ def batch_process_task(
                 "status": "processing_batch",
             },
         )
-        import time
+        _time.sleep(1)  # Check every second
 
-        time.sleep(1)  # Check every second
-
-    # Calculate result collection timeout if not provided
-    if result_timeout is None:
-        # Scale timeout based on batch size: 30 seconds per document
-        calculated_timeout = len(pdf_paths) * DEFAULT_RESULT_TIMEOUT_PER_DOC
-        # Apply min/max bounds
-        result_timeout = max(
-            MIN_BATCH_RESULT_TIMEOUT, min(calculated_timeout, MAX_BATCH_RESULT_TIMEOUT)
+    if not async_results.ready():
+        logger.warning(
+            "batch_poll_timeout",
+            task_id=task_id,
+            timeout=result_timeout,
+            completed=sum(1 for r in async_results.results if r.ready()),
+            total=total_tasks,
         )
 
     logger.debug(
@@ -826,8 +835,9 @@ def reprocess_failed_task(
         if not pdf_file.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
-        if not pdf_file.suffix.lower() == ".pdf":
-            raise ValueError(f"Invalid file type: {pdf_file.suffix}")
+        supported_extensions = {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp"}
+        if pdf_file.suffix.lower() not in supported_extensions:
+            raise ValueError(f"Unsupported file type: {pdf_file.suffix}. Supported: {supported_extensions}")
 
         _update_task_state("PROCESSING", {"status": TaskStatus.PROCESSING.value})
 

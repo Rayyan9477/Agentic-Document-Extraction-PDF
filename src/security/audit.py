@@ -218,8 +218,8 @@ class PHIMasker:
         (r"\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b", "[CC-REDACTED]"),
         # NPI numbers
         (r"\b(npi|NPI)[:\s]*\d{10}\b", "[NPI-REDACTED]"),
-        # IP addresses (for extra privacy)
-        (r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP-REDACTED]"),
+        # IP addresses (for extra privacy) — validate octet ranges 0-255
+        (r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b", "[IP-REDACTED]"),
     ]
 
     # Compiled patterns

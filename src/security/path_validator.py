@@ -213,6 +213,10 @@ class SecurePathValidator:
             if self._resolve_symlinks:
                 resolved = resolved.resolve()
 
+        # Always compute fully resolved path for security checks,
+        # even when resolve_symlinks=False (prevents symlink bypass)
+        security_resolved = resolved.resolve()
+
         # Check filename length
         if resolved.name and len(resolved.name) > self._max_filename_length:
             raise PathValidationError(
@@ -228,12 +232,12 @@ class SecurePathValidator:
                     f"Allowed: {', '.join(sorted(self._allowed_extensions))}"
                 )
 
-        # Check allowed directories
+        # Check allowed directories (use security_resolved to prevent symlink bypass)
         if self._allowed_dirs:
             is_within_allowed = False
             for allowed_dir in self._allowed_dirs:
                 try:
-                    resolved.relative_to(allowed_dir)
+                    security_resolved.relative_to(allowed_dir.resolve())
                     is_within_allowed = True
                     break
                 except ValueError:
@@ -242,7 +246,7 @@ class SecurePathValidator:
             if not is_within_allowed:
                 logger.warning(
                     "path_outside_allowed_directory",
-                    path=str(resolved)[:100],
+                    path=str(security_resolved)[:100],
                     allowed=str(self._allowed_dirs),
                 )
                 raise PathTraversalError("Path is outside allowed directories")
@@ -254,12 +258,12 @@ class SecurePathValidator:
         # Final safety check: ensure resolved path doesn't escape base
         if not self._allow_absolute and self._base_dir:
             try:
-                resolved.relative_to(self._base_dir)
+                security_resolved.relative_to(self._base_dir.resolve())
             except ValueError:
                 # Path escaped base directory through symlink or other means
                 logger.warning(
                     "path_escaped_base",
-                    path=str(resolved)[:100],
+                    path=str(security_resolved)[:100],
                     base=str(self._base_dir),
                 )
                 raise PathTraversalError("Resolved path escapes base directory")

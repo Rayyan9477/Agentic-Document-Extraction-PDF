@@ -498,6 +498,18 @@ class TokenManager:
         Returns:
             TokenPair with both tokens.
         """
+
+    def encode_payload(self, payload: dict) -> str:
+        """
+        Encode a JWT payload using the manager's secret key and algorithm.
+
+        Args:
+            payload: Dictionary payload to encode.
+
+        Returns:
+            Encoded JWT string.
+        """
+        return jwt.encode(payload, self._secret_key, algorithm=self._algorithm)
         access_token, access_expires = self.create_access_token(user)
         refresh_token, refresh_expires = self.create_refresh_token(user)
 
@@ -691,8 +703,10 @@ class UserStore:
                          Defaults to ./data/users.json
         """
         import os
+        import threading
         from pathlib import Path
 
+        self._lock = threading.Lock()
         self._users: dict[str, User] = {}
         self._username_index: dict[str, str] = {}
         self._email_index: dict[str, str] = {}
@@ -748,6 +762,14 @@ class UserStore:
                         else datetime.now(UTC)
                     ),
                     metadata=user_data.get("metadata", {}),
+                    password_changed_at=(
+                        datetime.fromisoformat(user_data["password_changed_at"])
+                        if user_data.get("password_changed_at")
+                        else None
+                    ),
+                    password_expires_days=user_data.get("password_expires_days", 90),
+                    max_concurrent_sessions=user_data.get("max_concurrent_sessions", 3),
+                    active_session_count=user_data.get("active_session_count", 0),
                 )
                 self._users[user.user_id] = user
                 self._username_index[user.username.lower()] = user.user_id
@@ -779,6 +801,10 @@ class UserStore:
                         "created_at": user.created_at.isoformat() if user.created_at else None,
                         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
                         "metadata": user.metadata,
+                        "password_changed_at": user.password_changed_at.isoformat() if user.password_changed_at else None,
+                        "password_expires_days": user.password_expires_days,
+                        "max_concurrent_sessions": user.max_concurrent_sessions,
+                        "active_session_count": user.active_session_count,
                     }
                 )
 
@@ -829,12 +855,13 @@ class UserStore:
             permissions=permissions or set(),
         )
 
-        self._users[user_id] = user
-        self._username_index[username.lower()] = user_id
-        self._email_index[email.lower()] = user_id
+        with self._lock:
+            self._users[user_id] = user
+            self._username_index[username.lower()] = user_id
+            self._email_index[email.lower()] = user_id
 
-        # Persist to file
-        self._save_users()
+            # Persist to file
+            self._save_users()
 
         logger.info("user_created", user_id=user_id, username=username)
 
@@ -857,22 +884,24 @@ class UserStore:
     def update_user(self, user: User) -> None:
         """Update user in store."""
         user.updated_at = datetime.now(UTC)
-        self._users[user.user_id] = user
-        # Persist to file
-        self._save_users()
+        with self._lock:
+            self._users[user.user_id] = user
+            # Persist to file
+            self._save_users()
 
     def delete_user(self, user_id: str) -> bool:
         """Delete user from store."""
-        user = self._users.get(user_id)
-        if user:
-            del self._users[user_id]
-            self._username_index.pop(user.username.lower(), None)
-            self._email_index.pop(user.email.lower(), None)
-            # Persist to file
-            self._save_users()
-            logger.info("user_deleted", user_id=user_id)
-            return True
-        return False
+        with self._lock:
+            user = self._users.get(user_id)
+            if user:
+                del self._users[user_id]
+                self._username_index.pop(user.username.lower(), None)
+                self._email_index.pop(user.email.lower(), None)
+                # Persist to file
+                self._save_users()
+                logger.info("user_deleted", user_id=user_id)
+                return True
+            return False
 
     def list_users(
         self,
@@ -1164,7 +1193,7 @@ class RBACManager:
 
         payload = {
             "sub": user.user_id,
-            "type": "api_key",
+            "token_type": "api_key",
             "name": name,
             "permissions": [p.value for p in user.get_all_permissions()],
             "exp": int(expires.timestamp()),
@@ -1172,11 +1201,7 @@ class RBACManager:
             "jti": secrets.token_urlsafe(32),
         }
 
-        return jwt.encode(
-            payload,
-            self._token_manager._secret_key,
-            algorithm=self._token_manager._algorithm,
-        )
+        return self._token_manager.encode_payload(payload)
 
 
 # Decorators for permission checking
