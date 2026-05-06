@@ -207,6 +207,13 @@ class ValidatorAgent(BaseAgent):
                 },
             )
 
+            # WS-6: opt-in PHI redaction. Runs *after* validation so the
+            # validator can still see un-redacted values (e.g. for medical
+            # code regex checks against a name-prefixed code), but *before*
+            # routing so storage / exports / audit logs only ever see the
+            # redacted form.
+            state = self._maybe_redact_phi(state)
+
             # Determine routing based on confidence
             state = self._route_based_on_confidence(state, validation_result)
 
@@ -221,6 +228,68 @@ class ValidatorAgent(BaseAgent):
                 agent_name=self.name,
                 recoverable=True,
             ) from e
+
+    def _maybe_redact_phi(self, state: ExtractionState) -> ExtractionState:
+        """WS-6: opt-in PHI redaction for extracted field values.
+
+        Activation rules (most-specific wins):
+            * Per-request ``state["phi_mode"]`` is True → redact.
+            * Otherwise, ``settings.phi.enabled`` is True → redact.
+            * Otherwise, no-op.
+
+        Redaction scope: every string leaf inside ``merged_extraction``.
+        The redactor preserves the dict structure (envelope keys like
+        ``value`` / ``confidence`` / ``human_corrected`` are walked into,
+        and only the ``value`` string is rewritten). The original is not
+        retained in state — the audit trail captures *which* fields had
+        PHI without exposing the values themselves.
+        """
+        per_request = state.get("phi_mode")
+        try:
+            from src.config import get_settings
+
+            settings_enabled = bool(getattr(get_settings().phi, "enabled", False))
+        except Exception:  # pragma: no cover - settings path
+            settings_enabled = False
+
+        if per_request is False:
+            return state
+        if not per_request and not settings_enabled:
+            return state
+
+        try:
+            from src.security.phi_redactor import PHIRedactor
+        except ImportError:  # pragma: no cover - module always shipped
+            self._logger.warning("phi_redactor_not_importable")
+            return state
+
+        redactor = PHIRedactor.from_settings()
+        merged = state.get("merged_extraction", {}) or {}
+        redacted = redactor.redact_record(merged)
+
+        # Compare per-field to record which fields actually changed —
+        # the audit trail wants this even though we never store the
+        # original PHI string here.
+        redacted_fields: list[str] = []
+        for field_name, original_value in merged.items():
+            new_value = redacted.get(field_name)
+            if new_value != original_value:
+                redacted_fields.append(field_name)
+
+        self._logger.info(
+            "phi_redaction_applied",
+            processing_id=state.get("processing_id"),
+            field_count=len(redacted_fields),
+            layer=getattr(redactor, "_layer", "unknown"),
+        )
+
+        return update_state(
+            state,
+            {
+                "merged_extraction": redacted,
+                "phi_redacted_fields": redacted_fields,
+            },
+        )
 
     def _get_schema(self, state: ExtractionState) -> DocumentSchema | None:
         """

@@ -13,11 +13,13 @@ import sys
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import PlainTextResponse
 
+from src.api.middleware import require_permission
 from src.api.models import HealthResponse
 from src.config import get_logger
+from src.security.rbac import Permission
 
 
 logger = get_logger(__name__)
@@ -299,17 +301,20 @@ def _check_monitoring_components() -> dict[str, Any]:
 )
 async def health_check(
     http_request: Request,
-    deep: bool = False,
 ) -> HealthResponse:
     """
-    Health check endpoint.
+    Public liveness/version endpoint. Returns minimal information.
+
+    For diagnostic detail (component-level status, system metrics, security
+    posture), authenticated callers with the `system:metrics` permission
+    should use `/health/detailed`, `/health/security`, `/health/alerts`,
+    or `/health/dependencies`.
 
     Args:
         http_request: HTTP request object.
-        deep: Whether to perform deep health checks.
 
     Returns:
-        Health status of the API and dependencies.
+        Minimal health status of the API.
     """
     timestamp = datetime.now(UTC).isoformat()
 
@@ -320,23 +325,8 @@ async def health_check(
         },
     }
 
-    if deep:
-        components["redis"] = _check_redis_health()
-        components["workers"] = _check_worker_health()
-        components["vlm"] = _check_vlm_health()
-        components["system"] = _get_system_info()
-        components["security"] = _check_security_components()
-        components["monitoring"] = _check_monitoring_components()
-
-    # Determine overall status ("disabled" and "not_configured" are acceptable in dev mode)
-    all_healthy = all(
-        c.get("status") in ("healthy", "disabled", "not_configured")
-        for c in components.values()
-        if isinstance(c, dict) and "status" in c
-    )
-
     return HealthResponse(
-        status="healthy" if all_healthy else "degraded",
+        status="healthy",
         version=API_VERSION,
         timestamp=timestamp,
         components=components,
@@ -346,8 +336,9 @@ async def health_check(
 @router.get(
     "/health/detailed",
     response_model=HealthResponse,
-    summary="Detailed health check",
-    description="Get detailed health status of all components.",
+    summary="Detailed health check (admin only)",
+    description="Get detailed health status of all components. Requires system:metrics permission.",
+    dependencies=[Depends(require_permission(Permission.SYSTEM_METRICS))],
 )
 async def detailed_health_check(
     http_request: Request,
@@ -487,8 +478,9 @@ async def metrics() -> Response:
 
 @router.get(
     "/health/security",
-    summary="Security status",
-    description="HIPAA compliance security status endpoint.",
+    summary="Security status (admin only)",
+    description="HIPAA compliance security status endpoint. Requires system:metrics permission.",
+    dependencies=[Depends(require_permission(Permission.SYSTEM_METRICS))],
 )
 async def security_status() -> dict[str, Any]:
     """
@@ -531,8 +523,9 @@ async def security_status() -> dict[str, Any]:
 
 @router.get(
     "/health/alerts",
-    summary="Active alerts",
-    description="Get active alerts from the alerting system.",
+    summary="Active alerts (admin only)",
+    description="Get active alerts from the alerting system. Requires system:metrics permission.",
+    dependencies=[Depends(require_permission(Permission.SYSTEM_METRICS))],
 )
 async def active_alerts() -> dict[str, Any]:
     """
@@ -590,8 +583,9 @@ async def active_alerts() -> dict[str, Any]:
 
 @router.get(
     "/health/dependencies",
-    summary="Dependency status",
-    description="Check status of all external dependencies.",
+    summary="Dependency status (admin only)",
+    description="Check status of all external dependencies. Requires system:metrics permission.",
+    dependencies=[Depends(require_permission(Permission.SYSTEM_METRICS))],
 )
 async def dependency_status() -> dict[str, Any]:
     """

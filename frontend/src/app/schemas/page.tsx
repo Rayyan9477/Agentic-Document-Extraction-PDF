@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import {
@@ -10,6 +11,7 @@ import {
   Grid3X3,
   CheckCircle,
   AlertCircle,
+  ArrowRight,
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout';
 import {
@@ -18,6 +20,7 @@ import {
   Input,
   Badge,
   Skeleton,
+  Button,
 } from '@/components/ui';
 import { schemaApi } from '@/lib/api';
 import type { SchemaInfo } from '@/types/api';
@@ -170,6 +173,14 @@ interface SchemaCardProps {
 }
 
 function SchemaCard({ schema }: SchemaCardProps) {
+  const router = useRouter();
+
+  // WS-4: deep-link into the upload form with this schema preselected.
+  // The upload page reads ``?schema=`` from the query string on mount.
+  const handleUseSchema = () => {
+    router.push(`/documents/upload?schema=${encodeURIComponent(schema.name)}`);
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -226,12 +237,20 @@ function SchemaCard({ schema }: SchemaCardProps) {
             </div>
           </div>
 
-          {/* Status */}
-          <div className="mt-4 pt-4 border-t border-surface-100">
+          {/* Status + Use-this-schema CTA */}
+          <div className="mt-4 pt-4 border-t border-surface-100 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-sm text-success-600">
               <CheckCircle className="w-4 h-4" />
               <span className="font-medium">Active</span>
             </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={handleUseSchema}
+              rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+            >
+              Use this schema
+            </Button>
           </div>
         </CardContent>
       </Card>

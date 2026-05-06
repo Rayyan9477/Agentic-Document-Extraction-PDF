@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -13,6 +13,7 @@ import { Card, CardHeader, CardContent, Button, StepProgress } from '@/component
 import { documentsApi, schemaApi } from '@/lib/api';
 import { generateId } from '@/lib/utils';
 import type { ExportFormat, ExtractionMode, ProcessingPriority } from '@/types/api';
+import type { Modality } from '@/components/documents/UploadOptions';
 
 const UPLOAD_STEPS = [
   { label: 'Select Files', description: 'Choose PDF documents' },
@@ -23,6 +24,7 @@ const UPLOAD_STEPS = [
 
 export default function DocumentUploadPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [options, setOptions] = useState({
@@ -32,7 +34,24 @@ export default function DocumentUploadPage() {
     extractionMode: 'multi' as ExtractionMode,
     maskPhi: false,
     outputDir: './output',
+    // WS-3: empty list = auto-detect on the backend.
+    modalityOverride: [] as Modality[],
+    // WS-6: null = use server default; true = force redaction; false = bypass.
+    phiMode: null as boolean | null,
   });
+
+  // WS-4: pick up ?schema=NAME query param so the schemas gallery can
+  // deep-link "Use this schema" into a prefilled upload form.
+  useEffect(() => {
+    const fromQuery = searchParams?.get('schema');
+    if (fromQuery && fromQuery !== options.schemaName) {
+      setOptions((prev) => ({ ...prev, schemaName: fromQuery }));
+      toast.success(`Schema preselected: ${fromQuery}`, { id: 'schema-preselect' });
+    }
+    // Run once on mount; we don't want this to re-fire when the user
+    // manually changes the schema.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch available schemas
   const { data: schemas = [] } = useQuery({
@@ -49,6 +68,14 @@ export default function DocumentUploadPage() {
         priority: options.priority,
         mask_phi: options.maskPhi,
         extraction_mode: options.extractionMode,
+        // WS-3 + WS-6: only send when caller has chosen something
+        // explicit. ``modality_override`` empty array = auto-detect;
+        // ``phi_mode`` null = server default.
+        modality_override:
+          options.modalityOverride.length > 0
+            ? options.modalityOverride
+            : undefined,
+        phi_mode: options.phiMode === null ? undefined : options.phiMode,
       });
     },
     onSuccess: (response, variables) => {

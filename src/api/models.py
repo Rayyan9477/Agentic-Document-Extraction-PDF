@@ -104,6 +104,28 @@ class ProcessRequest(BaseModel):
         ExtractionModeEnum.MULTI,
         description="Extraction mode: 'multi' for multi-record (per patient), 'single' for legacy pipeline",
     )
+    # WS-3: caller-supplied modality override. When non-empty, the analyzer
+    # respects this list instead of auto-detecting (falsy values trigger
+    # auto-detection). Valid mode names: printed, handwritten, table,
+    # form, fax, visual. Invalid names are silently dropped.
+    modality_override: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Override the analyzer's auto-detected document modalities. "
+            "Empty list = auto-detect. Valid modes: printed, handwritten, "
+            "table, form, fax, visual."
+        ),
+    )
+    # WS-6: per-request PHI mode opt-in. None = use settings.phi.enabled.
+    # True = redact regardless of settings. False = bypass redaction even
+    # when settings.phi.enabled is True (caller asserts non-PHI input).
+    phi_mode: bool | None = Field(
+        default=None,
+        description=(
+            "Per-request PHI redaction. None = use settings.phi.enabled "
+            "(default off); True = force redaction; False = bypass."
+        ),
+    )
     async_processing: bool = Field(
         False,
         description="Whether to process asynchronously",

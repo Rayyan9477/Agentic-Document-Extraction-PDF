@@ -202,6 +202,17 @@ class BaseAgent(ABC):
         """Get the model router (Phase 3C), if configured."""
         return self._model_router
 
+    def set_model_router(self, router: Any | None) -> None:
+        """
+        Attach (or detach) a ``ModelRouter`` after construction.
+
+        The router is consulted in ``send_vision_request`` to choose a
+        task-appropriate model per call. Use this from the workflow
+        factory so agent subclasses don't have to thread the router
+        through their own ``__init__`` signatures.
+        """
+        self._model_router = router
+
     @abstractmethod
     def process(self, state: ExtractionState) -> ExtractionState:
         """
@@ -254,15 +265,76 @@ class BaseAgent(ABC):
             temperature=temperature,
         )
 
+        # WS-2: consult the model router (Phase 3C) when configured.
+        # The router maps the calling agent's name to a ``ModelTask`` and
+        # returns a ``RoutingDecision`` whose ``model.model_id`` is forwarded
+        # to LMStudioClient as a per-request override. When no router is
+        # configured, behaviour is unchanged: the client's default model is
+        # used.
+        model_override: str | None = None
+        if self._model_router is not None:
+            try:
+                decision = self._model_router.route_for_agent(self._name)
+                model_override = decision.model.model_id
+                self._logger.debug(
+                    "model_routed",
+                    agent=self._name,
+                    selected_model=decision.model.name,
+                    is_fallback=decision.is_fallback,
+                    reason=decision.reason,
+                )
+            except Exception as exc:
+                # Routing is best-effort — never fail the extraction over a
+                # routing decision. Fall through to the default client/model.
+                self._logger.warning(
+                    "model_routing_failed_using_default",
+                    agent=self._name,
+                    error=str(exc),
+                )
+
+        # WS-7: wrap the VLM call in an observability span. The
+        # dispatcher is a no-op when no sinks are configured, so this
+        # is safe in every code path — the span context just yields
+        # None and the call proceeds unchanged.
+        try:
+            from src.monitoring.observability import get_dispatcher
+
+            _dispatcher = get_dispatcher()
+        except Exception:  # pragma: no cover - defensive
+            _dispatcher = None
+
         try:
             self._logger.debug(
                 "sending_vision_request",
                 agent=self._name,
                 request_id=request.request_id,
+                model_override=model_override,
             )
 
-            response = self._client.send_vision_request(request)
+            if _dispatcher is not None and _dispatcher.is_active:
+                with _dispatcher.start_span(
+                    "vlm.request",
+                    agent=self._name,
+                    request_id=request.request_id,
+                    model=model_override,
+                ):
+                    response = self._client.send_vision_request(
+                        request, model=model_override
+                    )
+            else:
+                response = self._client.send_vision_request(
+                    request, model=model_override
+                )
+
             self._total_processing_ms += response.latency_ms
+
+            if _dispatcher is not None and _dispatcher.is_active:
+                _dispatcher.record_llm_call(
+                    agent=self._name,
+                    model=model_override,
+                    latency_ms=response.latency_ms,
+                    request_id=request.request_id,
+                )
 
             self._logger.debug(
                 "vision_request_complete",
@@ -495,14 +567,18 @@ class BaseAgent(ABC):
             norm2 = " ".join(v2.lower().split())
             return norm1 == norm2
 
-        # Numeric comparison with tolerance
+        # Numeric comparison with tolerance.
+        # WS-2: tightened from 0.1% to 0.01% — at 0.1% a billing amount of
+        # $1,000.00 vs $1,000.99 would be treated as a match, which is not
+        # acceptable for medical claim totals. 0.01% is still permissive
+        # enough for legitimate float-rounding ($100.00 vs $100.01 ≈ 0.01%
+        # boundary), while catching cents-level VLM disagreements.
         if isinstance(v1, (int, float)) and isinstance(v2, (int, float)):
             if v1 == 0 and v2 == 0:
                 return True
             if v1 == 0 or v2 == 0:
                 return False
-            # Allow 0.1% tolerance for floating point
-            return abs(v1 - v2) / max(abs(v1), abs(v2)) < 0.001
+            return abs(v1 - v2) / max(abs(v1), abs(v2)) < 0.0001
 
         # List comparison
         if isinstance(v1, list) and isinstance(v2, list):

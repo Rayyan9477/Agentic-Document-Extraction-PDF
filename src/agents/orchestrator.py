@@ -25,6 +25,15 @@ from typing import Any, Literal
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+# WS-5a: LangGraph v3 primitives. ``interrupt`` pauses graph execution so a
+# human reviewer can supply corrections; ``Command(resume=...)`` is the
+# matching client-side resume primitive used in PipelineRunner.
+try:
+    from langgraph.types import Command, interrupt
+except ImportError:  # pragma: no cover - fallback for older langgraph
+    Command = None  # type: ignore[assignment,misc]
+    interrupt = None  # type: ignore[assignment]
+
 from src.agents.base import AgentError, BaseAgent, OrchestrationError
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger
@@ -98,7 +107,7 @@ class OrchestratorAgent(BaseAgent):
         self,
         client: LMStudioClient | None = None,
         enable_checkpointing: bool = True,
-        checkpointer_type: CheckpointerType | str = CheckpointerType.MEMORY,
+        checkpointer_type: CheckpointerType | str = CheckpointerType.SQLITE,
         sqlite_path: str | Path | None = None,
         postgres_conn_string: str | None = None,
         max_retries: int = 2,
@@ -176,33 +185,48 @@ class OrchestratorAgent(BaseAgent):
             OrchestrationError: If configuration is invalid.
         """
         if self._checkpointer_type == CheckpointerType.MEMORY:
-            self._logger.info("using_memory_checkpointer")
+            self._logger.warning(
+                "memory_checkpointer_explicitly_selected",
+                message=(
+                    "MemorySaver is non-durable: in-flight extractions are lost "
+                    "on process crash or restart. Use this only for tests or "
+                    "ad-hoc smoke runs. Production deployments should use "
+                    "CheckpointerType.SQLITE (default) or CheckpointerType.POSTGRES."
+                ),
+            )
             return MemorySaver()
 
         if self._checkpointer_type == CheckpointerType.SQLITE:
             try:
                 from langgraph.checkpoint.sqlite import SqliteSaver
-            except ImportError as e:
-                raise ImportError(
-                    "SQLite checkpointer requires langgraph-checkpoint-sqlite. "
-                    "Install with: pip install langgraph-checkpoint-sqlite"
-                ) from e
-
-            if self._sqlite_path:
-                db_path = self._sqlite_path
-                self._logger.info("using_sqlite_checkpointer", path=str(db_path))
-            else:
-                # IMPORTANT: Warn about non-persistent storage
-                # In-memory SQLite won't survive process restarts
-                db_path = ":memory:"
-                self._logger.warning(
-                    "sqlite_checkpointer_using_memory",
+            except ImportError:
+                # Graceful degradation: SQLite is the new default, but a fresh
+                # checkout that hasn't run `pip install -e .` won't have
+                # langgraph-checkpoint-sqlite yet. Warn loudly and fall back
+                # so the system stays runnable; production installs that pull
+                # the manifest will get durable checkpointing automatically.
+                self._logger.error(
+                    "sqlite_checkpoint_dep_missing_fallback_to_memory",
                     message=(
-                        "No sqlite_path provided - using in-memory database. "
-                        "Checkpoints will NOT persist across restarts. "
-                        "Set sqlite_path for persistent checkpointing."
+                        "SQLite checkpointer requested (current default) but "
+                        "langgraph-checkpoint-sqlite is not installed. Falling "
+                        "back to MemorySaver — checkpoints will NOT survive a "
+                        "process restart. Install with: "
+                        "`pip install langgraph-checkpoint-sqlite` (or "
+                        "`pip install -e .` to pick up the project manifest)."
                     ),
                 )
+                return MemorySaver()
+
+            if self._sqlite_path:
+                db_path = Path(self._sqlite_path)
+            else:
+                # Persistent default: workspace-local checkpoint store.
+                # Survives process restarts; safe to delete to reset state.
+                db_path = Path(".extraction_checkpoints") / "checkpoints.db"
+
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._logger.info("using_sqlite_checkpointer", path=str(db_path))
             return SqliteSaver.from_conn_string(str(db_path))
 
         if self._checkpointer_type == CheckpointerType.POSTGRES:
@@ -642,13 +666,33 @@ class OrchestratorAgent(BaseAgent):
         self,
         thread_id: str,
         updated_state: ExtractionState | None = None,
+        *,
+        human_corrections: dict[str, Any] | None = None,
+        processing_id: str | None = None,
     ) -> ExtractionState:
         """
         Resume a checkpointed extraction workflow.
 
+        Three resume modes (mutually exclusive, evaluated in order):
+
+        1. ``human_corrections`` provided → resume from a human-review
+           ``interrupt()`` (WS-5a). The graph re-enters the human-review
+           node and the corrections are merged into ``merged_extraction``.
+        2. ``updated_state`` provided → re-invoke the graph from the
+           checkpoint with those state overrides.
+        3. Neither → plain checkpoint resume (re-invoke with ``None`` so
+           LangGraph picks up where it left off).
+
         Args:
             thread_id: Thread ID of the checkpointed workflow.
             updated_state: Optional state updates to apply before resuming.
+            human_corrections: Optional dict of reviewer corrections used
+                with the v3 ``Command(resume=...)`` flow. Pass ``{}`` to
+                accept the extraction as-is and continue past the
+                ``interrupt``; pass ``{"field": "value", ...}`` to overlay
+                corrected values.
+            processing_id: Optional processing ID for tenant-isolated
+                ``checkpoint_ns``. Defaults to the thread's namespace.
 
         Returns:
             Final extraction state.
@@ -670,14 +714,40 @@ class OrchestratorAgent(BaseAgent):
                 recoverable=False,
             )
 
-        self._logger.info("resuming_extraction", thread_id=thread_id)
+        self._logger.info(
+            "resuming_extraction",
+            thread_id=thread_id,
+            mode=(
+                "human_corrections"
+                if human_corrections is not None
+                else "state_override"
+                if updated_state
+                else "checkpoint_only"
+            ),
+        )
 
-        config = {"configurable": {"thread_id": thread_id}}
+        config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
+        # WS-5a: per-processing checkpoint namespace gives multi-tenant
+        # isolation when several extractions share a checkpoint database.
+        if processing_id:
+            config["configurable"]["checkpoint_ns"] = f"proc:{processing_id}"
+
+        # Resume from a human-review interrupt (v3 path).
+        if human_corrections is not None:
+            if Command is None:
+                raise OrchestrationError(
+                    "LangGraph v3 Command primitive is not available; "
+                    "cannot resume from interrupt with corrections.",
+                    agent_name=self.name,
+                    recoverable=False,
+                )
+            return self._compiled_workflow.invoke(
+                Command(resume=human_corrections),
+                config,
+            )
 
         if updated_state:
-            # Update state and continue
             return self._compiled_workflow.invoke(updated_state, config)
-        # Resume from last checkpoint
         return self._compiled_workflow.invoke(None, config)
 
     def get_checkpoint_state(self, thread_id: str) -> ExtractionState | None:
@@ -921,63 +991,68 @@ class OrchestratorAgent(BaseAgent):
 
         This is the conditional edge function for LangGraph.
 
+        Every decision emits a structured audit event so HIPAA reviewers can
+        reconstruct *why* a record was auto-accepted vs. retried vs. routed to
+        human review. The audit log is the system of record for those choices.
+
         Args:
             state: Current extraction state.
 
         Returns:
             Route name (complete, retry, or human_review).
         """
+        decision, reason = self._route_with_reason(state)
+        self._logger.info(
+            "routing_decision",
+            decision=decision,
+            reason=reason,
+            processing_id=state.get("processing_id"),
+            confidence=state.get("overall_confidence", 0.0),
+            confidence_level=state.get("confidence_level"),
+            retry_count=state.get("retry_count", 0),
+            validation_is_valid=state.get("validation_is_valid", True),
+        )
+        return decision
+
+    def _route_with_reason(
+        self,
+        state: ExtractionState,
+    ) -> tuple[Literal["complete", "retry", "human_review"], str]:
+        """Compute the route plus a human-readable reason for the audit log."""
         status = state.get("status", "")
 
         # Check for failures
         if status == ExtractionStatus.FAILED.value:
             retry_count = state.get("retry_count", 0)
             if retry_count < self._max_retries:
-                return ROUTE_RETRY
-            return ROUTE_HUMAN_REVIEW
+                return ROUTE_RETRY, f"failed status with retry budget remaining ({retry_count}/{self._max_retries})"
+            return ROUTE_HUMAN_REVIEW, "failed status with retry budget exhausted"
 
-        # Gather routing inputs
         confidence_level = state.get("confidence_level", ConfidenceLevel.LOW.value)
-        overall_confidence = state.get("overall_confidence", 0.0)
         retry_count = state.get("retry_count", 0)
         validation_is_valid = state.get("validation_is_valid", True)
         validator_wants_retry = state.get("validation_requires_retry", False)
         validator_wants_review = state.get("validation_requires_human_review", False)
 
-        self._logger.debug(
-            "determining_route",
-            confidence_level=confidence_level,
-            overall_confidence=overall_confidence,
-            retry_count=retry_count,
-            validation_is_valid=validation_is_valid,
-            validator_wants_retry=validator_wants_retry,
-            validator_wants_review=validator_wants_review,
-        )
-
-        # HIGH confidence + valid: auto-complete
         if confidence_level == ConfidenceLevel.HIGH.value and validation_is_valid:
-            return ROUTE_COMPLETE
+            return ROUTE_COMPLETE, "high confidence + validation passed"
 
-        # Validator explicitly recommends retry and retries remain
         if validator_wants_retry and retry_count < self._max_retries:
-            return ROUTE_RETRY
+            return ROUTE_RETRY, f"validator requested retry ({retry_count}/{self._max_retries})"
 
-        # Validator explicitly recommends human review
         if validator_wants_review:
             if retry_count < self._max_retries:
-                return ROUTE_RETRY  # Try once more before human review
-            return ROUTE_HUMAN_REVIEW
+                return ROUTE_RETRY, f"validator requested review; retrying first ({retry_count}/{self._max_retries})"
+            return ROUTE_HUMAN_REVIEW, "validator requested human review; retry budget exhausted"
 
-        # MEDIUM confidence: retry if possible, else accept
         if confidence_level == ConfidenceLevel.MEDIUM.value:
             if retry_count < self._max_retries:
-                return ROUTE_RETRY
-            return ROUTE_COMPLETE
+                return ROUTE_RETRY, f"medium confidence; retrying ({retry_count}/{self._max_retries})"
+            return ROUTE_COMPLETE, "medium confidence; retry budget exhausted, accepting"
 
-        # LOW confidence: retry up to max, then human review
         if retry_count < self._max_retries:
-            return ROUTE_RETRY
-        return ROUTE_HUMAN_REVIEW
+            return ROUTE_RETRY, f"low confidence; retrying ({retry_count}/{self._max_retries})"
+        return ROUTE_HUMAN_REVIEW, "low confidence; retry budget exhausted"
 
     def _determine_retry_target(
         self,
@@ -1067,9 +1142,19 @@ class OrchestratorAgent(BaseAgent):
 
     def _human_review_node(self, state: ExtractionState) -> ExtractionState:
         """
-        Human review node - marks extraction for human review.
+        Human review node - pauses the graph for human review when a
+        checkpointer is configured (LangGraph v3 ``interrupt`` flow), or
+        marks the run for offline review otherwise.
 
-        Sets final status and prepares state for human review queue.
+        Resume contract (when paused via ``interrupt``):
+            - ``runner.resume_extraction(thread_id)`` with no payload accepts
+              the extraction as-is.
+            - ``runner.resume_extraction(thread_id, corrections={...})``
+              merges the corrections into ``merged_extraction`` and resumes.
+
+        Without a checkpointer (e.g. unit tests with
+        ``enable_checkpointing=False``), the node falls back to the legacy
+        behaviour of marking the extraction as ``HUMAN_REVIEW`` and ending.
         """
         overall_confidence = state.get("overall_confidence", 0.0)
         errors = state.get("errors", [])
@@ -1087,7 +1172,99 @@ class OrchestratorAgent(BaseAgent):
             error_count=len(errors),
         )
 
-        return request_human_review(state, reason)
+        # Mark the state so any external dashboard sees the pending review,
+        # then either pause for resume (v3 path) or end (legacy path).
+        state = request_human_review(state, reason)
+
+        # WS-5a: LangGraph v3 interrupt-resume path. Only available when:
+        #   * a checkpointer is enabled (interrupt() requires durable state)
+        #   * the langgraph.types primitives are importable
+        # Otherwise fall through and return the human-review-marked state as
+        # a terminal node, preserving prior behaviour for unit tests.
+        if self._enable_checkpointing and interrupt is not None:
+            payload = {
+                "reason": reason,
+                "processing_id": state.get("processing_id"),
+                "overall_confidence": overall_confidence,
+                "extracted": state.get("merged_extraction", {}),
+                "validation": state.get("validation", {}),
+            }
+            # interrupt() pauses execution; the value returned here on resume
+            # is whatever the caller passes via Command(resume=value).
+            corrections = interrupt(payload)
+
+            # Single funnel for both "accept as-is" (empty dict / None) and
+            # "apply corrections" cases. _apply_human_corrections handles an
+            # empty dict by overlaying nothing and still finalising via
+            # complete_extraction, so this also moves the run to status
+            # COMPLETED when the reviewer simply approves.
+            state = self._apply_human_corrections(state, corrections or {})
+
+        return state
+
+    def _apply_human_corrections(
+        self,
+        state: ExtractionState,
+        corrections: Any,
+    ) -> ExtractionState:
+        """Merge reviewer corrections into the extraction and complete the run.
+
+        Accepts either:
+            * a ``dict`` of ``{field_name: corrected_value}`` to overlay onto
+              ``merged_extraction``
+            * a ``dict`` containing a ``"fields"`` sub-dict (compatibility
+              with pre-v3 callers that wrap corrections in an envelope)
+
+        Corrected fields are wrapped in the same value/confidence/
+        human_corrected envelope used by ``PipelineRunner._apply_human_corrections``
+        so downstream consumers see consistent shapes regardless of which
+        path applied the corrections. The corrected field names are also
+        recorded in ``state["human_corrections"]`` for the audit trail.
+        """
+        from src.pipeline.state import complete_extraction, update_state
+
+        # Normalise envelope shape.
+        if isinstance(corrections, dict) and "fields" in corrections and isinstance(
+            corrections["fields"], dict
+        ):
+            field_corrections = corrections["fields"]
+        elif isinstance(corrections, dict):
+            field_corrections = corrections
+        else:
+            self._logger.warning(
+                "human_corrections_unexpected_shape",
+                shape=type(corrections).__name__,
+            )
+            field_corrections = {}
+
+        merged_extraction = dict(state.get("merged_extraction", {}) or {})
+        for field_name, corrected_value in field_corrections.items():
+            existing = merged_extraction.get(field_name)
+            if isinstance(existing, dict):
+                existing["value"] = corrected_value
+                existing["confidence"] = 1.0
+                existing["human_corrected"] = True
+            else:
+                merged_extraction[field_name] = {
+                    "value": corrected_value,
+                    "confidence": 1.0,
+                    "human_corrected": True,
+                }
+
+        self._logger.info(
+            "human_corrections_applied",
+            processing_id=state.get("processing_id"),
+            corrected_fields=list(field_corrections.keys()),
+        )
+
+        state = update_state(
+            state,
+            {
+                "merged_extraction": merged_extraction,
+                "human_corrections": field_corrections,
+            },
+        )
+        return complete_extraction(state)
 
     def _complete_node(self, state: ExtractionState) -> ExtractionState:
         """
@@ -1129,6 +1306,8 @@ def create_extraction_workflow(
     enable_checkpointing: bool = True,
     max_retries: int = 2,
     enable_vlm_first: bool = True,
+    enable_splitter: bool = True,
+    enable_table_detection: bool = True,
 ) -> tuple[OrchestratorAgent, Any]:
     """
     Factory function to create a complete extraction workflow.
@@ -1141,6 +1320,12 @@ def create_extraction_workflow(
         enable_checkpointing: Whether to enable state checkpointing.
         max_retries: Maximum retry attempts.
         enable_vlm_first: Whether to enable VLM-first adaptive pipeline (default: True).
+        enable_splitter: Whether to enable the document boundary splitter
+            (Phase 2A). Default ``True``. Disable for single-document PDFs to
+            save one VLM batch per ~5 pages.
+        enable_table_detection: Whether to enable cell-level table detection
+            (Phase 2B). Default ``True``. Disable for documents that are
+            known to contain no tables (free-text reports, etc.).
 
     Returns:
         Tuple of (orchestrator_agent, compiled_workflow).
@@ -1156,6 +1341,56 @@ def create_extraction_workflow(
 
     # Create shared client
     shared_client = client or LMStudioClient()
+
+    # --- Multi-model routing (Phase 3C, opt-in via settings) ---
+    # When enabled, agents consult the router in BaseAgent.send_vision_request
+    # to pick a task-appropriate model. Without a second model registered the
+    # router falls through to the default, so enabling this is a no-op until
+    # operators populate ``settings.model_routing.task_models``.
+    model_router = None
+    if getattr(settings, "model_routing", None) and settings.model_routing.enabled:
+        try:
+            from src.client.model_router import (
+                ModelConfig,
+                ModelRouter,
+                ModelTask,
+                qwen3vl_config,
+            )
+
+            primary = qwen3vl_config(
+                base_url=settings.model_routing.default_base_url,
+                model_id=settings.model_routing.default_model,
+            )
+            extra_models: list[ModelConfig] = []
+            for task_name, model_id in settings.model_routing.task_models.items():
+                # Only register additional models that aren't the primary.
+                if model_id == primary.model_id:
+                    continue
+                try:
+                    task = ModelTask(task_name)
+                except ValueError:
+                    logger.warning("model_routing_unknown_task", task=task_name)
+                    continue
+                extra_models.append(
+                    ModelConfig(
+                        name=model_id,
+                        model_id=model_id,
+                        base_url=settings.model_routing.default_base_url,
+                        capabilities={task},
+                        priority=20,
+                    )
+                )
+
+            model_router = ModelRouter(
+                models=[primary, *extra_models],
+                default_model_name=primary.name,
+            )
+            logger.info(
+                "model_router_created",
+                models=[primary.name] + [m.name for m in extra_models],
+            )
+        except Exception as e:
+            logger.warning("model_router_init_failed", error=str(e))
 
     # --- Confidence calibration (opt-in via settings) ---
     calibrator = None
@@ -1195,6 +1430,14 @@ def create_extraction_workflow(
         calibrator=calibrator,
     )
 
+    # WS-2: attach the model router to every agent that has one. Subclasses
+    # don't need to thread router through their __init__ signatures because
+    # BaseAgent exposes set_model_router for post-init injection.
+    if model_router is not None:
+        analyzer.set_model_router(model_router)
+        extractor.set_model_router(model_router)
+        validator.set_model_router(model_router)
+
     # Create VLM-first pipeline agents if enabled
     layout_agent = None
     component_agent = None
@@ -1210,6 +1453,11 @@ def create_extraction_workflow(
             component_agent = ComponentDetectorAgent(client=shared_client)
             schema_agent = SchemaGeneratorAgent(client=shared_client)
 
+            if model_router is not None:
+                layout_agent.set_model_router(model_router)
+                component_agent.set_model_router(model_router)
+                schema_agent.set_model_router(model_router)
+
             logger.info("vlm_first_agents_created")
         except ImportError as e:
             logger.warning(
@@ -1218,6 +1466,41 @@ def create_extraction_workflow(
                 message="Falling back to legacy pipeline only",
             )
             enable_vlm_first = False
+
+    # WS-2: Default-enable the Splitter (Phase 2A) and TableDetector (Phase 2B)
+    # agents that previously existed but were never wired into the default
+    # workflow. They degrade gracefully if their imports fail.
+    splitter_agent: BaseAgent | None = None
+    if enable_splitter:
+        try:
+            from src.agents.splitter import SplitterAgent
+
+            splitter_agent = SplitterAgent(client=shared_client)
+            if model_router is not None:
+                splitter_agent.set_model_router(model_router)
+            logger.info("splitter_agent_created")
+        except ImportError as e:
+            logger.warning(
+                "splitter_agent_import_failed",
+                error=str(e),
+                message="Document boundary detection disabled for this run.",
+            )
+
+    table_detector_agent: BaseAgent | None = None
+    if enable_table_detection:
+        try:
+            from src.agents.table_detector import TableDetectorAgent
+
+            table_detector_agent = TableDetectorAgent(client=shared_client)
+            if model_router is not None:
+                table_detector_agent.set_model_router(model_router)
+            logger.info("table_detector_agent_created")
+        except ImportError as e:
+            logger.warning(
+                "table_detector_agent_import_failed",
+                error=str(e),
+                message="Table structure detection disabled for this run.",
+            )
 
     # Create orchestrator
     orchestrator = OrchestratorAgent(
@@ -1235,6 +1518,8 @@ def create_extraction_workflow(
         layout_agent=layout_agent,
         component_agent=component_agent,
         schema_agent=schema_agent,
+        splitter_agent=splitter_agent,
+        table_detector_agent=table_detector_agent,
     )
 
     compiled_workflow = orchestrator.compile_workflow()
@@ -1244,6 +1529,8 @@ def create_extraction_workflow(
         checkpointing=enable_checkpointing,
         max_retries=max_retries,
         vlm_first_enabled=enable_vlm_first,
+        splitter_enabled=splitter_agent is not None,
+        table_detection_enabled=table_detector_agent is not None,
         calibration_enabled=calibrator is not None,
         prompt_enhancement_enabled=prompt_enhancer is not None,
     )

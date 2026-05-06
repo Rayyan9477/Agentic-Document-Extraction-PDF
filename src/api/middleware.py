@@ -17,7 +17,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -574,21 +574,6 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get(self._bearer_header)
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:]
-
-            # DEV MODE: Accept dev token for development (skip JWT validation)
-            if token == "dev-token-rayyan":
-                now = datetime.now(UTC)
-                return TokenPayload(
-                    sub="dev-user-rayyan",
-                    username="rayyan",
-                    roles=["admin"],
-                    permissions=["*"],  # All permissions for dev
-                    exp=now + timedelta(days=365),
-                    iat=now,
-                    jti="dev-token-jti",
-                    token_type="access",
-                )
-
             return self._rbac.tokens.validate_token(token)
 
         # Try API key

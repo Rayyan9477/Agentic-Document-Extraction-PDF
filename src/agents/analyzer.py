@@ -201,6 +201,43 @@ class AnalyzerAgent(BaseAgent):
                 "analysis_time_ms": 0,  # Will be updated below
             }
 
+            # WS-3: derive specialized modalities (printed / handwritten /
+            # table / form / fax / visual) from the structure detections plus
+            # per-page image-quality metrics if preprocessing populated them.
+            # User override (state["modality_override"]) wins where present.
+            from src.agents.modality import apply_overrides, derive_modalities
+
+            # Carry table_count + layout_type + text_density into the analysis
+            # if the structure pass surfaced them, so derive_modalities can
+            # consume them without needing the raw structure dict.
+            for extra_key in ("table_count", "layout_type", "text_density"):
+                if extra_key in structure_result:
+                    analysis[extra_key] = structure_result[extra_key]  # type: ignore[literal-required]
+
+            auto_modalities = derive_modalities(
+                analysis=dict(analysis),
+                quality_metrics=state.get("image_quality") or None,
+            )
+            user_override = state.get("modality_override") or []
+            final_modalities = apply_overrides(auto_modalities, user_override)
+
+            analysis["modalities"] = final_modalities
+            analysis["modalities_source"] = (
+                "auto"
+                if not user_override
+                else "user_override"
+                if set(user_override) >= set(auto_modalities)
+                else "auto_with_override"
+            )
+
+            self._logger.info(
+                "modalities_derived",
+                auto=auto_modalities,
+                override=user_override,
+                final=final_modalities,
+                source=analysis["modalities_source"],
+            )
+
             # Calculate processing time
             duration_ms = self.log_operation_complete(
                 "document_analysis",
@@ -219,6 +256,10 @@ class AnalyzerAgent(BaseAgent):
                     "analysis": analysis,
                     "document_type": analysis["document_type"],
                     "selected_schema_name": analysis["schema_name"],
+                    # WS-3: surface derived modalities at top-level so the
+                    # extractor / image enhancer / prompt builder can read
+                    # them without walking into analysis.
+                    "modalities": final_modalities,
                     "status": ExtractionStatus.ANALYZING.value,
                     "current_step": "analysis_complete",
                     "total_vlm_calls": state.get("total_vlm_calls", 0) + self._vlm_calls,
