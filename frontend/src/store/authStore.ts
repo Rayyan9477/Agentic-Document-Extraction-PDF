@@ -6,29 +6,6 @@ import type { User } from '@/types/api';
 const ACCESS_TOKEN_KEY = 'access_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 
-// DEV MODE: Auto-login as rayyan (skip login/signup for development)
-const DEV_AUTO_LOGIN = true;
-const DEV_USER: User = {
-  user_id: 'dev-user-rayyan',
-  username: 'rayyan',
-  email: 'rayyan.a@nobilityrcm.com',
-  roles: ['admin'],
-  permissions: ['read', 'write', 'admin'],
-};
-
-// Set dev tokens on load (for API calls to work)
-if (typeof window !== 'undefined' && DEV_AUTO_LOGIN) {
-  // Use a placeholder token - backend should be configured to accept it or skip auth
-  localStorage.setItem(ACCESS_TOKEN_KEY, 'dev-token-rayyan');
-  localStorage.setItem(REFRESH_TOKEN_KEY, 'dev-refresh-token-rayyan');
-}
-
-/**
- * Clear all auth tokens from localStorage.
- *
- * SECURITY: This is called synchronously with store state clearing
- * to prevent race conditions where tokens exist but user state is null.
- */
 const clearAllAuthTokens = (): void => {
   if (typeof window !== 'undefined') {
     localStorage.removeItem(ACCESS_TOKEN_KEY);
@@ -48,9 +25,8 @@ interface AuthState {
 export const useAuthStore = create<AuthState>()(
   persist(
     (set) => ({
-      // DEV MODE: Auto-login as rayyan
-      user: DEV_AUTO_LOGIN ? DEV_USER : null,
-      isAuthenticated: DEV_AUTO_LOGIN,
+      user: null,
+      isAuthenticated: false,
       isLoading: false,
 
       setUser: (user) =>

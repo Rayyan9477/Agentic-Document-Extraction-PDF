@@ -85,26 +85,21 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["version"] == API_VERSION
 
-    def test_health_deep_check_includes_more_components(self):
-        shallow = client.get("/health").json()
-        deep = client.get("/health", params={"deep": "true"}).json()
-
-        # A deep check should populate the components mapping with at least
-        # as many keys as the shallow one (typically more).
-        shallow_keys = set(shallow.get("components", {}).keys())
-        deep_keys = set(deep.get("components", {}).keys())
-        assert deep_keys >= shallow_keys
+    # WS-1: the public /health endpoint no longer accepts a `deep` flag — it
+    # returns minimal info so unauthenticated callers cannot enumerate Redis,
+    # workers, VLM, or HIPAA security state. Detailed information now lives on
+    # /health/detailed (admin-only).
 
 
 class TestHealthDetailed:
-    """Tests for GET /health/detailed."""
+    """Tests for GET /health/detailed (admin-protected after WS-1)."""
 
-    def test_detailed_returns_components(self):
+    def test_detailed_requires_admin(self):
+        # Without auth, the endpoint must reject with 401 (no token) or 403
+        # (token without system:metrics). The TestClient sends no headers, so
+        # the AuthorizationMiddleware's missing-auth path applies.
         response = client.get("/health/detailed")
-        assert response.status_code == 200
-        data = response.json()
-        assert "components" in data
-        assert isinstance(data["components"], dict)
+        assert response.status_code in (401, 403)
 
 
 class TestHealthReady:
@@ -118,24 +113,19 @@ class TestHealthReady:
 
 
 class TestHealthSecurity:
-    """Tests for GET /health/security."""
+    """Tests for GET /health/security (admin-protected after WS-1)."""
 
-    def test_security_endpoint_returns_success(self):
+    def test_security_endpoint_requires_admin(self):
         response = client.get("/health/security")
-        assert response.status_code == 200
-        data = response.json()
-        # Response should be a dict (exact schema varies)
-        assert isinstance(data, dict)
+        assert response.status_code in (401, 403)
 
 
 class TestHealthDependencies:
-    """Tests for GET /health/dependencies."""
+    """Tests for GET /health/dependencies (admin-protected after WS-1)."""
 
-    def test_dependencies_endpoint_returns_success(self):
+    def test_dependencies_endpoint_requires_admin(self):
         response = client.get("/health/dependencies")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, dict)
+        assert response.status_code in (401, 403)
 
 
 class TestMetrics:

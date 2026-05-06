@@ -154,6 +154,9 @@ class DualPassComparator:
             print(f"Fields needing review: {result.mismatch_fields}")
     """
 
+    # Class-level defaults — used as fallbacks when a document type has no
+    # tighter override registered. Instance attributes (set in ``__init__``)
+    # override these on a per-comparator basis.
     EXACT_MATCH_THRESHOLD: float = 0.99
     FUZZY_MATCH_THRESHOLD: float = 0.85
     PARTIAL_MATCH_THRESHOLD: float = 0.50
@@ -162,11 +165,35 @@ class DualPassComparator:
     AGREEMENT_RATE_FOR_RETRY: float = 0.70
     AGREEMENT_RATE_FOR_HUMAN_REVIEW: float = 0.50
 
+    # WS-2: per-document-type threshold overrides. Documents that drive
+    # billing (CMS-1500, UB-04) get tighter thresholds because a 0.85
+    # similarity on a CPT code or claim total is not "agreement enough"
+    # for healthcare RCM. EOBs and Superbills keep the default 0.85 to
+    # avoid spurious retries on receipt-style layouts where minor OCR
+    # noise is normal.
+    DOC_TYPE_THRESHOLDS: dict[str, dict[str, float]] = {
+        "cms1500": {
+            "EXACT_MATCH_THRESHOLD": 0.99,
+            "FUZZY_MATCH_THRESHOLD": 0.92,
+            "PARTIAL_MATCH_THRESHOLD": 0.60,
+            "HIGH_CONFIDENCE_THRESHOLD": 0.88,
+            "LOW_CONFIDENCE_THRESHOLD": 0.55,
+        },
+        "ub04": {
+            "EXACT_MATCH_THRESHOLD": 0.99,
+            "FUZZY_MATCH_THRESHOLD": 0.93,
+            "PARTIAL_MATCH_THRESHOLD": 0.65,
+            "HIGH_CONFIDENCE_THRESHOLD": 0.90,
+            "LOW_CONFIDENCE_THRESHOLD": 0.60,
+        },
+    }
+
     def __init__(
         self,
         default_strategy: MergeStrategy = MergeStrategy.PREFER_HIGHER_CONFIDENCE,
         field_strategies: dict[str, MergeStrategy] | None = None,
         required_fields: list[str] | None = None,
+        document_type: str | None = None,
     ) -> None:
         """
         Initialize the dual-pass comparator.
@@ -175,10 +202,21 @@ class DualPassComparator:
             default_strategy: Default merge strategy for fields.
             field_strategies: Per-field merge strategy overrides.
             required_fields: Fields that must have values.
+            document_type: Optional schema name (e.g. ``"cms1500"``,
+                ``"ub04"``) used to look up tighter per-doc-type thresholds
+                from ``DOC_TYPE_THRESHOLDS``. Unknown types fall back to
+                the class-level defaults.
         """
         self.default_strategy = default_strategy
         self.field_strategies = field_strategies or {}
         self.required_fields = set(required_fields or [])
+        self.document_type = (document_type or "").lower()
+
+        # Apply per-doc-type overrides. Instance attributes shadow class
+        # attributes used by the comparison logic at lines ~301-309.
+        overrides = self.DOC_TYPE_THRESHOLDS.get(self.document_type, {})
+        for name, value in overrides.items():
+            setattr(self, name, value)
 
     def compare(
         self,

@@ -429,8 +429,16 @@ class TestValuesMatch:
         assert self.agent._values_match(100.0, 100.0) is True
 
     def test_numeric_tolerance(self) -> None:
-        # Within 0.1% tolerance
-        assert self.agent._values_match(1000.0, 1000.5) is True
+        # WS-2: tightened tolerance to 0.01% (was 0.1%). $1000.00 vs $1000.05
+        # is 0.005% — still within tolerance.
+        assert self.agent._values_match(1000.00, 1000.05) is True
+
+    def test_numeric_beyond_tightened_tolerance(self) -> None:
+        # $1000.00 vs $1000.50 (0.05%) used to match under the old 0.1%
+        # tolerance; under the new 0.01% tolerance it correctly does not.
+        # This covers the "billing-grade discrepancies must not be hidden"
+        # requirement that motivated WS-2's tolerance tightening.
+        assert self.agent._values_match(1000.0, 1000.5) is False
 
     def test_numeric_beyond_tolerance(self) -> None:
         assert self.agent._values_match(100.0, 200.0) is False

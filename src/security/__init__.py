@@ -31,6 +31,12 @@ from src.security.data_cleanup import (
     SecureOverwriter,
     TempFileManager,
 )
+from src.security.phi_mask import (
+    PHI_FIELD_PATTERNS,
+    PHI_VALUE_PATTERNS,
+    REDACTED_TOKEN,
+    enforce_mask_phi,
+)
 from src.security.encryption import (
     AESEncryptor,
     DecryptionError,
@@ -102,6 +108,11 @@ __all__ = [
     "SecureDeletionError",
     "SecureOverwriter",
     "TempFileManager",
+    # PHI masking primitive (export-time)
+    "PHI_FIELD_PATTERNS",
+    "PHI_VALUE_PATTERNS",
+    "REDACTED_TOKEN",
+    "enforce_mask_phi",
     # RBAC
     "AuthenticationError",
     "AuthorizationError",

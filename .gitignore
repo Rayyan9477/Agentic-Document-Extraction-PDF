@@ -27,7 +27,7 @@ nul
 .next
 .ruff_cache/
 medical/
-
+medical_outputs/
 
 # Virtual environment
 venv/
@@ -60,6 +60,9 @@ logs/
 uploads/
 extracted_data/
 temp_images/
+
+# LangGraph durable checkpoints (may contain in-flight PHI)
+.extraction_checkpoints/
 
 
 # SEC-MED-004: User data with password hashes should not be in repository

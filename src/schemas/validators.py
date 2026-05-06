@@ -497,24 +497,37 @@ def validate_taxonomy_code(code: str) -> ValidationInfo:
 
 def _luhn_checksum(number: str) -> bool:
     """
-    Validate NPI using Luhn algorithm.
+    Validate a 10-digit NPI using the modified Luhn algorithm specified by
+    CMS in the NPI Final Rule (45 CFR Part 162).
 
-    The NPI uses a modified Luhn algorithm with a prefix of 80840.
+    The NPI prepends the ISO/IEC 7812 issuer prefix ``80840`` (denoting
+    "healthcare") before applying the standard Luhn check, so the digit
+    string fed to Luhn is 15 characters: ``80840`` + 10-digit NPI.
+
+    Standard Luhn (RFC-style):
+      1. Reverse the digits.
+      2. Index 0 is the check digit (rightmost) — keep as-is.
+      3. Every second digit walking left (indices 1, 3, 5, ...) is doubled;
+         if the doubled value exceeds 9, subtract 9 (equivalent to summing
+         its decimal digits).
+      4. The sum of the resulting digits must be divisible by 10.
+
+    Args:
+        number: A 10-digit NPI string with no separators.
+
+    Returns:
+        ``True`` iff ``80840`` + ``number`` passes Luhn.
     """
-    # Prepend 80840 for healthcare provider identifier
     full_number = "80840" + number
+    digits = [int(c) for c in reversed(full_number)]
 
-    total = 0
-    for i, digit in enumerate(reversed(full_number)):
-        d = int(digit)
-        if i % 2 == 0:  # Even position (from right, 0-indexed)
-            pass  # Add as-is
-        else:  # Odd position - double it
-            d *= 2
-            if d > 9:
-                d -= 9
-        total += d
+    def _luhn_digit(idx: int, value: int) -> int:
+        if idx % 2 == 0:
+            return value
+        doubled = value * 2
+        return doubled - 9 if doubled > 9 else doubled
 
+    total = sum(_luhn_digit(i, d) for i, d in enumerate(digits))
     return total % 10 == 0
 
 
