@@ -335,6 +335,13 @@ class DocumentAnalysis(TypedDict, total=False):
     regions_of_interest: list[dict[str, Any]]
     analysis_time_ms: int
 
+    # WS-3: specialized medical modes derived from the structure detections
+    # above plus per-page image-quality metrics. Multiple modes can apply
+    # simultaneously (e.g. a fax of a handwritten form). See
+    # ``src/agents/modality.py`` for the derivation rules.
+    modalities: list[str]
+    modalities_source: str  # "auto" | "user_override" | "auto_with_override"
+
 
 class ExtractionState(TypedDict, total=False):
     """
@@ -414,6 +421,39 @@ class ExtractionState(TypedDict, total=False):
     similar_docs: list[str]  # IDs of similar previously processed documents
     provider_patterns: dict[str, Any] | None  # Provider-specific extraction patterns
     correction_hints: dict[str, Any] | None  # Hints from past corrections
+
+    # === Human-in-the-Loop Fields (WS-5a) ===
+    # Reviewer corrections applied via Command(resume=...) at the
+    # human-review interrupt. Maps field_name -> corrected_value. The
+    # corrected values are also folded into ``merged_extraction`` with the
+    # ``{value, confidence: 1.0, human_corrected: True}`` envelope; this
+    # field is the audit trail of *what changed*.
+    human_corrections: dict[str, Any]
+
+    # === Specialized Modality Fields (WS-3) ===
+    # Derived modes (printed / handwritten / table / form / fax / visual)
+    # consumed by the image enhancer and prompt builder. Top-level mirror
+    # of ``analysis.modalities`` so downstream nodes can read it without
+    # walking into the analysis dict.
+    modalities: list[str]
+    # Optional caller-supplied override; when non-empty the analyzer
+    # respects the user's choice instead of (or alongside) auto-detection.
+    modality_override: list[str]
+    # Per-page image-quality metrics from ``ImageEnhancer.analyze_quality``;
+    # populated during preprocessing and consumed by ``derive_modalities``.
+    image_quality: list[dict[str, Any]]
+
+    # === PHI Mode Fields (WS-6) ===
+    # Per-request PHI redaction opt-in. When True, the validator routes
+    # every string field in ``merged_extraction`` through
+    # ``src.security.phi_redactor.PHIRedactor`` after validation. When
+    # absent / None, ``settings.phi.enabled`` controls. When False,
+    # explicitly disables PHI redaction even if the global setting is
+    # on (caller is asserting "this is non-sensitive synthetic data").
+    phi_mode: bool
+    # Audit trail of fields that were modified by PHI redaction. The
+    # original (un-redacted) values are NOT kept in state.
+    phi_redacted_fields: list[str]
 
 
 def create_initial_state(

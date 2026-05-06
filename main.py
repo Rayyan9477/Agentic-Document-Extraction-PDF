@@ -131,6 +131,13 @@ class ExtractionConfig:
     # ─── Thresholds & Parameters ───
     validation_confidence_threshold: float = 0.85
 
+    # ─── Privacy ───
+    # When True, all exported records are routed through
+    # src.security.phi_mask.enforce_mask_phi so PHI field names and
+    # PHI-shaped values become "[REDACTED]" before serialisation.
+    # Defence-in-depth on top of the (opt-in) PHI mode redactor.
+    mask_phi: bool = False
+
     def __post_init__(self):
         """Initialize default values for mutable fields."""
         if self.critical_field_keywords is None:
@@ -748,17 +755,17 @@ def extract_pdf_cli(
             # Export
             if config.export_json:
                 json_file = out / f"{pdf_file.stem}_results.json"
-                export_json(result, json_file)
+                export_json(result, json_file, mask_phi=config.mask_phi)
                 logger.info(f"JSON export: {json_file}")
 
             if config.export_excel:
                 excel_file = out / f"{pdf_file.stem}_consolidated.xlsx"
-                export_excel(result, excel_file)
+                export_excel(result, excel_file, mask_phi=config.mask_phi)
                 logger.info(f"Excel export: {excel_file}")
 
             if config.export_markdown:
                 md_file = out / f"{pdf_file.stem}_report.md"
-                export_markdown(result, md_file)
+                export_markdown(result, md_file, mask_phi=config.mask_phi)
                 logger.info(f"Markdown export: {md_file}")
 
             # Print summary
@@ -1030,6 +1037,11 @@ Examples:
     extract_parser.add_argument("--dpi", type=int, help="DPI for image conversion")
     extract_parser.add_argument("--no-excel", action="store_true", help="Skip Excel export")
     extract_parser.add_argument("--no-markdown", action="store_true", help="Skip Markdown export")
+    extract_parser.add_argument(
+        "--mask-phi",
+        action="store_true",
+        help="Redact PHI fields/values in all exported formats (defence-in-depth).",
+    )
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Batch process PDFs in directory")
@@ -1077,6 +1089,8 @@ Examples:
                 config.export_excel = False
             if args.no_markdown:
                 config.export_markdown = False
+            if args.mask_phi:
+                config.mask_phi = True
 
             result = extract_pdf_cli(args.pdf_file, args.output, args.pages, config)
             return 0 if result["status"] == "success" else 1

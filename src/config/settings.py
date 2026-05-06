@@ -578,8 +578,13 @@ class CalibrationSettings(BaseSettings):
         extra="ignore",
     )
 
+    # WS-2: enabled by default. Calibrator gracefully degrades to a pass-through
+    # (returns raw confidence) until at least 3 calibration samples are
+    # collected, so flipping this on has no behavioural impact for fresh
+    # deployments but produces meaningful calibrated scores once a golden
+    # dataset has been processed.
     enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable confidence score calibration",
     )
     method: str = Field(
@@ -598,6 +603,97 @@ class CalibrationSettings(BaseSettings):
         path = Path(v) if isinstance(v, str) else v
         path.mkdir(parents=True, exist_ok=True)
         return path
+
+
+class ObservabilitySettings(BaseSettings):
+    """WS-7: AI observability sinks (Phoenix + PostHog).
+
+    Both sinks are off by default. When enabled, the
+    ``ObservabilityDispatcher`` fans out spans / events to whichever
+    sinks are both flagged on AND have their SDK installed (via the
+    ``[observability]`` extra). Failure to load a sink degrades to no-op
+    gracefully — observability never blocks extraction.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="OBSERVABILITY_",
+        extra="ignore",
+    )
+
+    phoenix_enabled: bool = Field(
+        default=False,
+        description="Enable Arize Phoenix (OpenInference) LLM tracing.",
+    )
+    phoenix_endpoint: str = Field(
+        default="http://localhost:6006",
+        description="Phoenix collector endpoint. Self-hosted by default.",
+    )
+    phoenix_project_name: str = Field(
+        default="doc-extraction",
+        description="Project name shown in the Phoenix UI.",
+    )
+
+    posthog_enabled: bool = Field(
+        default=False,
+        description="Enable PostHog product-analytics event capture.",
+    )
+    posthog_api_key: str = Field(
+        default="",
+        description="PostHog project API key. Required when enabled.",
+    )
+    posthog_host: str = Field(
+        default="https://us.posthog.com",
+        description="PostHog instance URL (override for self-hosted).",
+    )
+
+
+class PHISettings(BaseSettings):
+    """WS-6: opt-in PHI redaction configuration.
+
+    PHI mode is **off by default**. When enabled, every string field in
+    extracted records is routed through ``src.security.phi_redactor.PHIRedactor``
+    after extraction completes. The redactor uses
+    ``openai/privacy-filter`` (HuggingFace, Apache 2.0) for ML-grade
+    BIOES-tagged token classification, with a regex fallback for
+    air-gapped deployments where the model is not vendored.
+
+    Environment variables (``PHI_*`` prefix) override the defaults below.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="PHI_",
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Master flag. When False, PHI redaction never runs even if a "
+            "request sets phi_mode=True (callers must opt in via settings "
+            "AND request)."
+        ),
+    )
+    model_id: str = Field(
+        default="openai/privacy-filter",
+        description="HuggingFace model identifier for ML-layer redaction.",
+    )
+    local_only: bool = Field(
+        default=True,
+        description=(
+            "When True, the transformers loader is forced to use only "
+            "locally-cached weights (no network call). Required for "
+            "HIPAA-style air-gapped deployments."
+        ),
+    )
+    fallback_to_regex: bool = Field(
+        default=True,
+        description=(
+            "When the ML layer cannot be loaded (air-gapped without "
+            "pre-vendored weights, missing optional [phi] extra), fall "
+            "back to the regex redactor in src/security/phi_mask.py "
+            "rather than passing PHI through unchanged."
+        ),
+    )
 
 
 class ModelRoutingSettings(BaseSettings):
@@ -746,6 +842,8 @@ class Settings(BaseSettings):
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
     model_routing: ModelRoutingSettings = Field(default_factory=ModelRoutingSettings)
+    phi: PHISettings = Field(default_factory=PHISettings)
+    observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
     webhook: WebhookSettings = Field(default_factory=WebhookSettings)
 
     @staticmethod

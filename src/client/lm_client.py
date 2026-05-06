@@ -399,12 +399,20 @@ class LMStudioClient:
     def send_vision_request(
         self,
         request: VisionRequest,
+        *,
+        model: str | None = None,
     ) -> VisionResponse:
         """
         Send a vision request with retry logic.
 
         Args:
             request: VisionRequest to send.
+            model: Optional per-request model override. When provided, the
+                LM Studio API call uses this model name instead of the
+                client's default ``self._model``. Used by the WS-2 model
+                router (``BaseAgent.send_vision_request`` consults
+                ``ModelRouter.route_for_agent`` and passes the chosen model
+                here). Pass ``None`` to use the configured default.
 
         Returns:
             VisionResponse with model output.
@@ -417,7 +425,7 @@ class LMStudioClient:
         start_time = time.perf_counter()
 
         try:
-            response = self._send_with_retry(request)
+            response = self._send_with_retry(request, model=model)
             latency_ms = int((time.perf_counter() - start_time) * 1000)
 
             # Extract content
@@ -468,16 +476,16 @@ class LMStudioClient:
                 f"Request failed after {self._max_retries} retries: {last_exception}"
             ) from e
 
-    def _send_with_retry(self, request: VisionRequest) -> Any:
+    def _send_with_retry(self, request: VisionRequest, *, model: str | None = None) -> Any:
         """
         Send request with tenacity retry logic.
 
         Uses configurable exponential backoff for transient failures.
         The retry count is read from settings at runtime, not hardcoded.
         """
-        return self._retryer(self._send_single_request, request)
+        return self._retryer(self._send_single_request, request, model=model)
 
-    def _send_single_request(self, request: VisionRequest) -> Any:
+    def _send_single_request(self, request: VisionRequest, *, model: str | None = None) -> Any:
         """Execute a single VLM request (called by the retryer)."""
         # Build messages
         messages: list[dict[str, Any]] = []
@@ -516,9 +524,10 @@ class LMStudioClient:
         # Send request using thread-local client for thread safety
         client = self._get_client()
 
-        # Build API kwargs
+        # Build API kwargs. Per-request `model` override (if provided by the
+        # caller via WS-2 model routing) takes precedence over the client default.
         api_kwargs: dict[str, Any] = {
-            "model": self._model,
+            "model": model or self._model,
             "messages": messages,
             "max_tokens": request.max_tokens,
             "temperature": request.temperature,

@@ -787,16 +787,6 @@ async def get_current_user(
             detail="Not authenticated",
         )
 
-    # DEV MODE: Accept dev token for development (skip JWT validation)
-    if token == "dev-token-rayyan":
-        return UserResponse(
-            user_id="dev-user-rayyan",
-            username="rayyan",
-            email="rayyan.a@nobilityrcm.com",
-            roles=["admin"],
-            permissions=["*"],
-        )
-
     try:
         payload = rbac.tokens.validate_token(token)
 

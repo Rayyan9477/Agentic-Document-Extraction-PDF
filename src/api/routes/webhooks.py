@@ -12,12 +12,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field, HttpUrl
 
+from src.queue.webhook_dlq import WebhookDLQ
 from src.queue.webhook_store import WebhookStore
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 # Module-level store instance (can be replaced at startup)
 _store: WebhookStore | None = None
+_dlq: WebhookDLQ | None = None
 
 
 def get_store() -> WebhookStore:
@@ -32,6 +34,25 @@ def set_store(store: WebhookStore) -> None:
     """Set the global WebhookStore (for testing or custom configuration)."""
     global _store
     _store = store
+
+
+def get_dlq() -> WebhookDLQ:
+    """Get or create the global WebhookDLQ.
+
+    WS-9: persistent dead-letter queue. Defaults to a SQLite database
+    under ``.webhook_dlq/`` in the working directory; override at
+    startup by calling ``set_dlq``.
+    """
+    global _dlq
+    if _dlq is None:
+        _dlq = WebhookDLQ()
+    return _dlq
+
+
+def set_dlq(dlq: WebhookDLQ) -> None:
+    """Set the global WebhookDLQ (for testing or custom configuration)."""
+    global _dlq
+    _dlq = dlq
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -170,3 +191,71 @@ def get_delivery_log(
         "entries": [e.to_dict() for e in entries],
         "count": len(entries),
     }
+
+
+# ──────────────────────────────────────────────────────────────────
+# WS-9: Dead-Letter Queue admin
+# ──────────────────────────────────────────────────────────────────
+
+
+@router.get("/{subscription_id}/dlq")
+def list_dlq(
+    subscription_id: str,
+    status: str | None = Query(
+        None,
+        description="Filter by entry status: 'pending' | 'delivered' | 'dead'",
+    ),
+    limit: int = Query(100, ge=1, le=500),
+) -> dict[str, Any]:
+    """List dead-lettered webhook deliveries for a subscription.
+
+    Returns entries that exhausted the in-line retry budget. Operators
+    can inspect the ``last_error`` and ``next_retry_at`` to triage,
+    then call ``POST /{id}/dlq/{entry_id}/redeliver`` to force an
+    immediate re-attempt.
+    """
+    store = get_store()
+    if store.get_subscription(subscription_id) is None:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    dlq = get_dlq()
+    entries = dlq.list_for_subscription(subscription_id, status=status, limit=limit)
+    return {
+        "subscription_id": subscription_id,
+        "entries": [e.to_dict() for e in entries],
+        "count": len(entries),
+    }
+
+
+@router.post("/{subscription_id}/dlq/{entry_id}/redeliver", status_code=200)
+def redeliver_dlq_entry(
+    subscription_id: str,
+    entry_id: int,
+) -> dict[str, Any]:
+    """Force-mark a DLQ entry as due-now so the redeliver task picks it up.
+
+    Operator escape hatch: bumps ``next_retry_at`` to the current
+    timestamp without resetting ``attempts``, so the entry will be
+    claimed on the next sweep of ``redeliver_failed_webhooks``. The
+    delivery itself is still subject to the same SSRF / HMAC /
+    retry-budget rules as the original send.
+    """
+    from datetime import UTC, datetime
+
+    dlq = get_dlq()
+    entry = dlq.get(entry_id)
+    if entry is None or entry.subscription_id != subscription_id:
+        raise HTTPException(status_code=404, detail="DLQ entry not found")
+    if entry.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Entry is in '{entry.status}' state and cannot be redelivered.",
+        )
+    # Reschedule for immediate pickup. We don't bump attempts here —
+    # only the redeliver task itself increments on actual failure.
+    with dlq._connect() as conn:  # noqa: SLF001 — admin escape hatch
+        conn.execute(
+            "UPDATE webhook_dlq SET next_retry_at=? WHERE id=?",
+            (datetime.now(UTC).isoformat(), entry_id),
+        )
+        conn.commit()
+    return {"status": "scheduled", "entry_id": entry_id}

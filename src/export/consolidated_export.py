@@ -9,6 +9,7 @@ Provides:
 - Record completeness validation
 """
 
+import copy
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -20,8 +21,32 @@ from openpyxl.utils import get_column_letter
 
 from src.config import get_logger
 from src.extraction.multi_record import DocumentExtractionResult, ExtractedRecord
+from src.security.phi_mask import enforce_mask_phi
 
 logger = get_logger(__name__)
+
+
+def _apply_mask_phi(
+    result: DocumentExtractionResult,
+    *,
+    mask_phi: bool,
+) -> DocumentExtractionResult:
+    """Return a deep-copied result with PHI fields redacted if requested.
+
+    Single chokepoint for export-time PHI masking. Defers to
+    ``src.security.phi_mask.enforce_mask_phi`` so all formats stay
+    consistent. The input is never mutated.
+    """
+    if not mask_phi:
+        return result
+
+    masked = copy.deepcopy(result)
+    for rec in masked.records:
+        # ExtractedRecord.fields is a dict[str, Any].
+        rec.fields = enforce_mask_phi(rec.fields)
+        # primary_identifier is often a patient-name-like string.
+        rec.primary_identifier = "[REDACTED]"
+    return masked
 
 
 def detect_duplicates(
@@ -93,6 +118,8 @@ def validate_record_completeness(
 def export_excel(
     result: DocumentExtractionResult,
     output_path: str | Path,
+    *,
+    mask_phi: bool = False,
 ) -> None:
     """
     Export extraction results to a consolidated Excel workbook.
@@ -102,9 +129,15 @@ def export_excel(
     - Duplicates: Cross-page duplicate analysis
     - Page Summary: Per-page statistics
     - Processing Summary: Overall extraction metrics
+
+    Args:
+        mask_phi: If True, route records through
+            ``src.security.phi_mask.enforce_mask_phi`` before rendering.
+            PHI field names and PHI-shaped values become ``[REDACTED]``.
     """
     output_path = Path(output_path)
-    logger.info("exporting_excel", output_path=str(output_path))
+    logger.info("exporting_excel", output_path=str(output_path), mask_phi=mask_phi)
+    result = _apply_mask_phi(result, mask_phi=mask_phi)
 
     wb = Workbook()
     if wb.active:
@@ -293,6 +326,8 @@ def export_excel(
 def export_markdown(
     result: DocumentExtractionResult,
     output_path: str | Path,
+    *,
+    mask_phi: bool = False,
 ) -> None:
     """
     Export extraction results to a consolidated Markdown report.
@@ -302,9 +337,13 @@ def export_markdown(
     - Duplicate warnings
     - Page-level summary table
     - Per-record detail sections
+
+    Args:
+        mask_phi: If True, redact PHI fields/values before rendering.
     """
     output_path = Path(output_path)
-    logger.info("exporting_markdown", output_path=str(output_path))
+    logger.info("exporting_markdown", output_path=str(output_path), mask_phi=mask_phi)
+    result = _apply_mask_phi(result, mask_phi=mask_phi)
 
     records = result.records
     schema = result.schema
@@ -397,11 +436,18 @@ def export_markdown(
 def export_json(
     result: DocumentExtractionResult,
     output_path: str | Path,
+    *,
+    mask_phi: bool = False,
 ) -> None:
-    """Export extraction results to JSON."""
+    """Export extraction results to JSON.
+
+    Args:
+        mask_phi: If True, redact PHI fields/values before serialisation.
+    """
     output_path = Path(output_path)
+    result = _apply_mask_phi(result, mask_phi=mask_phi)
     data = result.to_dict()
     output_path.write_text(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
-    logger.info("json_exported", path=str(output_path))
+    logger.info("json_exported", path=str(output_path), mask_phi=mask_phi)

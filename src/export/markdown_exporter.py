@@ -257,6 +257,13 @@ class MarkdownExporter:
             sections.append(self._h(2, "Audit Trail"))
             sections.append(self._format_audit_trail(state))
 
+        # WS-8: Decision Trail — routing decisions + PHI redaction list.
+        # Always included when present; small enough to be free.
+        decision_trail = self._format_decision_trail(state)
+        if decision_trail:
+            sections.append(self._h(2, "Decision Trail"))
+            sections.append(decision_trail)
+
         # Pipeline intelligence
         pipeline_section = self._format_pipeline_intelligence(state)
         if pipeline_section:
@@ -529,6 +536,69 @@ class MarkdownExporter:
                 lines.append(f"- {self._format_field_name(field_name)}: {display_value}")
 
         return "\n".join(lines)
+
+    def _format_decision_trail(self, state: ExtractionState) -> str:
+        """WS-8: Decision Trail section — routing decisions + PHI redactions.
+
+        Surfaces:
+            * The final routing decision (complete / retry / human_review)
+              with the reason from ``_route_with_reason``.
+            * Any reviewer corrections applied at the human-review
+              ``interrupt`` (WS-5a) — field names only, never the
+              corrected values themselves (those are in the data section).
+            * The list of fields whose values were rewritten by PHI
+              redaction (WS-6) — names only.
+            * Specialised modalities applied at extraction time (WS-3).
+
+        Returns an empty string when none of the above are present so
+        the calling builder can omit the heading entirely.
+        """
+        bullets: list[str] = []
+
+        # Routing decision
+        status = state.get("status")
+        confidence = state.get("overall_confidence")
+        retry_count = state.get("retry_count", 0)
+        if status:
+            line = f"- **Final status**: `{status}`"
+            if confidence is not None:
+                line += f" (confidence {float(confidence):.0%}"
+                if retry_count:
+                    line += f", after {int(retry_count)} retr{'y' if retry_count == 1 else 'ies'}"
+                line += ")"
+            bullets.append(line)
+
+        # Specialised modalities
+        modalities = state.get("modalities") or []
+        if modalities:
+            bullets.append(
+                "- **Modalities applied**: "
+                + ", ".join(f"`{m}`" for m in modalities)
+            )
+
+        # PHI redaction
+        redacted = state.get("phi_redacted_fields") or []
+        if redacted:
+            bullets.append(
+                f"- **PHI redaction**: {len(redacted)} field"
+                f"{'s' if len(redacted) != 1 else ''} rewritten "
+                + f"({', '.join(f'`{f}`' for f in redacted[:8])}"
+                + (", …" if len(redacted) > 8 else "")
+                + ")"
+            )
+
+        # Human-review corrections
+        corrections = state.get("human_corrections") or {}
+        if corrections:
+            bullets.append(
+                f"- **Reviewer corrections**: {len(corrections)} field"
+                f"{'s' if len(corrections) != 1 else ''} corrected "
+                + f"({', '.join(f'`{f}`' for f in list(corrections)[:8])}"
+                + (", …" if len(corrections) > 8 else "")
+                + ")"
+            )
+
+        return "\n".join(bullets) if bullets else ""
 
     def _format_pipeline_intelligence(self, state: ExtractionState) -> str:
         """Format pipeline intelligence section with Phase 2A-3C metadata."""

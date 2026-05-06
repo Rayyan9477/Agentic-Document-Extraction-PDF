@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmd.exe /c \"dir /b D:\\\\Repo\\\\PDF\")",
+      "WebFetch(domain:langchain-ai.github.io)",
+      "WebFetch(domain:posthog.com)",
+      "WebFetch(domain:docs.arize.com)",
+      "WebFetch(domain:arize.com)",
+      "Bash(cmd.exe /c \"dir /b D:\\\\Repo\\\\PDF\\\\frontend\\\\src\")",
+      "Bash(cmd.exe /c \"find /n \\\\\"schemaApi\\\\\" D:\\\\Repo\\\\PDF\\\\frontend\\\\src\\\\lib\\\\api.ts\")",
+      "Bash(cmd.exe /c \"type D:\\\\Repo\\\\PDF\\\\frontend\\\\package.json | findstr scripts -A 12\")"
+    ]
+  }
+}

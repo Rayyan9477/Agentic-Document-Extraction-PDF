@@ -33,6 +33,12 @@ class ExportFormat(str, Enum):
     STANDARD = "standard"  # Values + confidence + basic metadata
     DETAILED = "detailed"  # Full extraction details + audit trail
     FHIR_COMPATIBLE = "fhir_compatible"  # FHIR-style resource format
+    # WS-8: one row per (record × field) for direct ``pandas.read_json``
+    # ingestion. Columns: record_id, field, value, confidence, page,
+    # bbox_*, redacted_value. The result is a JSON list, not a dict, so
+    # callers with ``pandas`` can do ``df = pd.read_json(path)``
+    # without further reshaping.
+    DATAFRAME_FLAT = "dataframe_flat"
 
 
 @dataclass(slots=True)
@@ -126,6 +132,8 @@ class JSONExporter:
             result = self._build_detailed_export(state)
         elif self.config.format == ExportFormat.FHIR_COMPATIBLE:
             result = self._build_fhir_export(state)
+        elif self.config.format == ExportFormat.DATAFRAME_FLAT:
+            result = self._build_dataframe_flat_export(state)
         else:
             result = self._build_standard_export(state)
 
@@ -204,6 +212,94 @@ class JSONExporter:
             result["raw_passes"] = self._build_raw_passes(state)
 
         return result
+
+    def _build_dataframe_flat_export(self, state: ExtractionState) -> dict[str, Any]:
+        """WS-8: emit one row per (record × field) for direct pandas ingestion.
+
+        Output shape::
+
+            {
+              "format": "dataframe_flat",
+              "processing_id": "...",
+              "rows": [
+                {
+                  "record_id": "rec_1",
+                  "field": "patient_name",
+                  "value": "John Doe",
+                  "confidence": 0.91,
+                  "page": 1,
+                  "bbox_x": 0.12,  "bbox_y": 0.18,
+                  "bbox_w": 0.34,  "bbox_h": 0.04,
+                  "redacted_value": "[REDACTED]"  # only if PHI mode
+                },
+                ...
+              ]
+            }
+
+        Loadable via ``pandas.json_normalize(json.load(f)["rows"])`` or,
+        for files saved as ``json.dump(result["rows"], f)``,
+        ``pandas.read_json(path)``.
+        """
+        merged = state.get("merged_extraction", {}) or {}
+        field_metadata = state.get("field_metadata", {}) or {}
+        phi_redacted = set(state.get("phi_redacted_fields", []) or [])
+        record_id = state.get("processing_id", "rec")
+
+        rows: list[dict[str, Any]] = []
+        for field_name, field_data in merged.items():
+            if field_name in self.config.exclude_fields:
+                continue
+
+            # Unwrap the {value, confidence, human_corrected, ...} envelope
+            # if present; otherwise treat field_data itself as the value.
+            if isinstance(field_data, dict) and "value" in field_data:
+                value = field_data.get("value")
+                inline_confidence = field_data.get("confidence")
+                human_corrected = bool(field_data.get("human_corrected", False))
+            else:
+                value = field_data
+                inline_confidence = None
+                human_corrected = False
+
+            meta = field_metadata.get(field_name, {})
+            confidence = (
+                meta.get("confidence")
+                if isinstance(meta, dict) and "confidence" in meta
+                else inline_confidence
+            )
+            bbox = meta.get("bbox") if isinstance(meta, dict) else None
+
+            row: dict[str, Any] = {
+                "record_id": record_id,
+                "field": field_name,
+                "value": value,
+                "confidence": confidence,
+                "human_corrected": human_corrected,
+            }
+            if isinstance(bbox, dict):
+                row["page"] = bbox.get("page")
+                row["bbox_x"] = bbox.get("x")
+                row["bbox_y"] = bbox.get("y")
+                row["bbox_w"] = bbox.get("width", bbox.get("w"))
+                row["bbox_h"] = bbox.get("height", bbox.get("h"))
+            else:
+                row["page"] = None
+                row["bbox_x"] = None
+                row["bbox_y"] = None
+                row["bbox_w"] = None
+                row["bbox_h"] = None
+
+            if field_name in phi_redacted:
+                row["redacted_value"] = value
+
+            rows.append(row)
+
+        return {
+            "format": "dataframe_flat",
+            "processing_id": record_id,
+            "row_count": len(rows),
+            "rows": rows,
+        }
 
     def _build_fhir_export(self, state: ExtractionState) -> dict[str, Any]:
         """Build FHIR-compatible resource format."""
