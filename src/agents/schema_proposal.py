@@ -21,7 +21,7 @@ from src.agents.utils import RetryConfig, retry_with_backoff
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger, get_settings
 from src.pipeline.state import ExtractionState, update_state
-from src.schemas.field_types import FieldDefinition, FieldType
+from src.schemas.field_types import FieldType
 
 
 logger = get_logger(__name__)

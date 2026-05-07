@@ -35,12 +35,12 @@ class ComponentDetectorAgent(BaseAgent):
     VLM Utilization: ~20% of total pipeline capability
     Critical for: Structured data, forms, checkboxes, table parsing
     """
-    
+
     def __init__(self, client=None):
         """Initialize component detector agent."""
         super().__init__(name="component_detector", client=client)
         self._settings = get_settings()
-    
+
     def process(self, state: ExtractionState) -> ExtractionState:
         """
         Detect components for all pages.
@@ -52,50 +52,50 @@ class ComponentDetectorAgent(BaseAgent):
             State updated with component_maps list.
         """
         start_time = time.time()
-        
+
         try:
             self._logger.info(
                 "component_detection_started",
                 page_count=len(state.get("page_images", [])),
                 processing_id=state.get("processing_id"),
             )
-            
+
             page_images = state.get("page_images", [])
             layout_analyses = state.get("layout_analyses", [])
-            
+
             if not page_images:
                 raise ComponentDetectionError(
                     "No page images available for component detection",
                     agent_name=self.name,
                     recoverable=False,
                 )
-            
+
             component_maps = []
-            
+
             for idx, page_data in enumerate(page_images):
                 page_number = page_data.get("page_number", idx + 1)
                 image_data_uri = page_data.get("data_uri")
-                
+
                 # Get corresponding layout analysis
                 layout = None
                 for la in layout_analyses:
                     if la.get("page_number") == page_number:
                         layout = la
                         break
-                
+
                 if not image_data_uri:
                     self._logger.warning(
                         "page_missing_image_data",
                         page_number=page_number,
                     )
                     continue
-                
+
                 # Detect components for this page
                 components = self._detect_page_components(
                     image_data_uri, page_number, layout
                 )
                 component_maps.append(components)
-                
+
                 self._logger.info(
                     "page_components_detected",
                     page_number=page_number,
@@ -103,10 +103,10 @@ class ComponentDetectorAgent(BaseAgent):
                     forms=len(components.get("forms", [])),
                     key_value_pairs=len(components.get("key_value_pairs", [])),
                     visual_marks=len(components.get("visual_marks", [])),
-                    checkboxes=sum(1 for f in components.get("forms", []) 
+                    checkboxes=sum(1 for f in components.get("forms", [])
                                   if f.get("field_type") == "checkbox"),
                 )
-            
+
             elapsed_ms = int((time.time() - start_time) * 1000)
 
             self._logger.info(
@@ -121,7 +121,7 @@ class ComponentDetectorAgent(BaseAgent):
                 "total_vlm_calls": state.get("total_vlm_calls", 0) + len(component_maps),
                 "total_processing_time_ms": state.get("total_processing_time_ms", 0) + elapsed_ms,
             })
-        
+
         except Exception as e:
             self._logger.error(
                 "component_detection_failed",
@@ -133,10 +133,10 @@ class ComponentDetectorAgent(BaseAgent):
                 agent_name=self.name,
                 recoverable=True,
             ) from e
-    
+
     def _detect_page_components(
-        self, 
-        image_data_uri: str, 
+        self,
+        image_data_uri: str,
         page_number: int,
         layout: dict[str, Any] | None
     ) -> dict[str, Any]:
@@ -152,7 +152,7 @@ class ComponentDetectorAgent(BaseAgent):
             ComponentMap dict with all detected components.
         """
         start_time = time.time()
-        
+
         system_prompt = build_grounded_system_prompt(
             additional_context=(
                 "You are detecting extractable components in a document. "
@@ -162,16 +162,16 @@ class ComponentDetectorAgent(BaseAgent):
             include_forbidden=True,
             include_confidence_scale=True,
         )
-        
+
         user_prompt = self._build_component_detection_prompt(layout)
-        
+
         # Retry with backoff
         retry_config = RetryConfig(
             max_retries=self._settings.extraction.max_retries,
             base_delay_ms=500,
             max_delay_ms=self._settings.agent.max_retry_delay_ms,
         )
-        
+
         def make_vlm_call() -> dict[str, Any]:
             return self.send_vision_request_with_json(
                 image_data=image_data_uri,
@@ -180,7 +180,7 @@ class ComponentDetectorAgent(BaseAgent):
                 temperature=0.1,
                 max_tokens=4000,  # Component detection needs detailed response
             )
-        
+
         try:
             result = retry_with_backoff(
                 func=make_vlm_call,
@@ -192,12 +192,12 @@ class ComponentDetectorAgent(BaseAgent):
                     error=str(e),
                 ),
             )
-            
+
             elapsed_ms = int((time.time() - start_time) * 1000)
-            
+
             # Convert VLM response to ComponentMap structure
             return self._parse_component_response(result, page_number, elapsed_ms)
-        
+
         except Exception as e:
             self._logger.error(
                 "page_component_detection_failed",
@@ -225,10 +225,10 @@ class ComponentDetectorAgent(BaseAgent):
                 "vlm_notes": f"Detection failed: {e}",
                 "detection_time_ms": 0,
             }
-    
+
     def _build_component_detection_prompt(self, layout: dict[str, Any] | None) -> str:
         """Build component detection prompt with layout context."""
-        
+
         layout_context = ""
         if layout:
             layout_context = f"""
@@ -245,7 +245,7 @@ VLM Observations: {layout.get('vlm_observations', 'none')}
 
 Use this context to focus your component detection.
 """
-        
+
         return f"""# TASK: Component Detection (Extractable Elements)
 
 {layout_context}
@@ -449,7 +449,7 @@ Suggest strategies per component type:
 5. **EXTRACTION HINTS** - Help next stage know how to extract
 
 Begin component detection now."""
-    
+
     def _parse_component_response(
         self,
         vlm_response: dict[str, Any],
@@ -471,7 +471,7 @@ Begin component detection now."""
         components = dict(vlm_response)
         components["page_number"] = page_number
         components["detection_time_ms"] = elapsed_ms
-        
+
         # Ensure required fields with defaults
         components.setdefault("tables", [])
         components.setdefault("forms", [])
@@ -489,7 +489,7 @@ Begin component detection now."""
         components.setdefault("challenging_regions", [])
         components.setdefault("suggested_extraction_strategies", {})
         components.setdefault("vlm_notes", "")
-        
+
         # Calculate component count if not provided
         if components["component_count"] == 0:
             components["component_count"] = (
@@ -497,5 +497,5 @@ Begin component detection now."""
                 len(components["forms"]) +
                 len(components["key_value_pairs"])
             )
-        
+
         return components

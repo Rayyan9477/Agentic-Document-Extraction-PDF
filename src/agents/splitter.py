@@ -8,8 +8,7 @@ splits them into sub-documents for individual extraction.
 Inspired by: LandingAI Parse→Split→Extract pipeline, DocsRay hierarchical TOC.
 """
 
-import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from src.agents.base import BaseAgent

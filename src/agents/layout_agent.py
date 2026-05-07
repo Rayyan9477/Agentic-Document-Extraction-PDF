@@ -12,7 +12,6 @@ from typing import Any
 from src.agents.base import AgentError, BaseAgent
 from src.agents.utils import RetryConfig, retry_with_backoff
 from src.config import get_settings
-from src.pipeline.layout_types import LayoutAnalysis, Region, VisualMark, BoundingBox
 from src.pipeline.state import ExtractionState, update_state
 from src.prompts.grounding_rules import build_grounded_system_prompt
 
@@ -38,12 +37,12 @@ class LayoutAgent(BaseAgent):
     VLM Utilization: ~15% of total pipeline capability
     Critical for: Zero-shot documents, complex layouts, visual annotations
     """
-    
+
     def __init__(self, client=None):
         """Initialize layout agent."""
         super().__init__(name="layout", client=client)
         self._settings = get_settings()
-    
+
     def process(self, state: ExtractionState) -> ExtractionState:
         """
         Analyze visual layout for all pages.
@@ -55,14 +54,14 @@ class LayoutAgent(BaseAgent):
             State updated with layout_analyses list.
         """
         start_time = time.time()
-        
+
         try:
             self._logger.info(
                 "layout_analysis_started",
                 page_count=len(state.get("page_images", [])),
                 processing_id=state.get("processing_id"),
             )
-            
+
             page_images = state.get("page_images", [])
             if not page_images:
                 raise LayoutAnalysisError(
@@ -70,24 +69,24 @@ class LayoutAgent(BaseAgent):
                     agent_name=self.name,
                     recoverable=False,
                 )
-            
+
             layout_analyses = []
-            
+
             for page_data in page_images:
                 page_number = page_data.get("page_number", 1)
                 image_data_uri = page_data.get("data_uri")
-                
+
                 if not image_data_uri:
                     self._logger.warning(
                         "page_missing_image_data",
                         page_number=page_number,
                     )
                     continue
-                
+
                 # Analyze layout for this page
                 layout = self._analyze_page_layout(image_data_uri, page_number)
                 layout_analyses.append(layout)
-                
+
                 self._logger.info(
                     "page_layout_analyzed",
                     page_number=page_number,
@@ -95,7 +94,7 @@ class LayoutAgent(BaseAgent):
                     visual_marks_found=len(layout.get("visual_marks", [])),
                     estimated_fields=layout.get("estimated_field_count", 0),
                 )
-            
+
             elapsed_ms = int((time.time() - start_time) * 1000)
 
             self._logger.info(
@@ -110,7 +109,7 @@ class LayoutAgent(BaseAgent):
                 "total_vlm_calls": state.get("total_vlm_calls", 0) + len(layout_analyses),
                 "total_processing_time_ms": state.get("total_processing_time_ms", 0) + elapsed_ms,
             })
-        
+
         except Exception as e:
             self._logger.error(
                 "layout_analysis_failed",
@@ -122,7 +121,7 @@ class LayoutAgent(BaseAgent):
                 agent_name=self.name,
                 recoverable=True,
             ) from e
-    
+
     def _analyze_page_layout(self, image_data_uri: str, page_number: int) -> dict[str, Any]:
         """
         Analyze visual layout for a single page using VLM.
@@ -135,7 +134,7 @@ class LayoutAgent(BaseAgent):
             LayoutAnalysis dict with structure and visual marks.
         """
         start_time = time.time()
-        
+
         system_prompt = build_grounded_system_prompt(
             additional_context=(
                 "You are analyzing document visual structure. Focus on layout, "
@@ -145,16 +144,16 @@ class LayoutAgent(BaseAgent):
             include_forbidden=True,
             include_confidence_scale=True,
         )
-        
+
         user_prompt = self._build_layout_analysis_prompt()
-        
+
         # Retry with backoff for VLM calls
         retry_config = RetryConfig(
             max_retries=self._settings.extraction.max_retries,
             base_delay_ms=500,
             max_delay_ms=self._settings.agent.max_retry_delay_ms,
         )
-        
+
         def make_vlm_call() -> dict[str, Any]:
             return self.send_vision_request_with_json(
                 image_data=image_data_uri,
@@ -163,7 +162,7 @@ class LayoutAgent(BaseAgent):
                 temperature=0.1,
                 max_tokens=3000,  # Layout analysis needs detailed response
             )
-        
+
         try:
             result = retry_with_backoff(
                 func=make_vlm_call,
@@ -175,12 +174,12 @@ class LayoutAgent(BaseAgent):
                     error=str(e),
                 ),
             )
-            
+
             elapsed_ms = int((time.time() - start_time) * 1000)
-            
+
             # Convert VLM response to LayoutAnalysis structure
             return self._parse_layout_response(result, page_number, elapsed_ms)
-        
+
         except Exception as e:
             self._logger.error(
                 "page_layout_analysis_failed",
@@ -208,7 +207,7 @@ class LayoutAgent(BaseAgent):
                 "visual_marks": [],
                 "analysis_time_ms": 0,
             }
-    
+
     def _build_layout_analysis_prompt(self) -> str:
         """Build comprehensive layout analysis prompt with visual mark detection."""
         return """# TASK: Visual Layout Analysis (No Content Extraction Yet)
@@ -422,7 +421,7 @@ Return JSON with this exact structure:
 5. **DESCRIBE VISUALLY** - What you SEE, not what you interpret
 
 Begin layout analysis now."""
-    
+
     def _parse_layout_response(
         self,
         vlm_response: dict[str, Any],
@@ -444,7 +443,7 @@ Begin layout analysis now."""
         layout = dict(vlm_response)
         layout["page_number"] = page_number
         layout["analysis_time_ms"] = elapsed_ms
-        
+
         # Ensure required fields with defaults
         layout.setdefault("layout_type", "mixed")
         layout.setdefault("layout_confidence", 0.5)
@@ -462,5 +461,5 @@ Begin layout analysis now."""
         layout.setdefault("vlm_observations", "")
         layout.setdefault("extraction_difficulty", "moderate")
         layout.setdefault("recommended_strategy", "adaptive")
-        
+
         return layout

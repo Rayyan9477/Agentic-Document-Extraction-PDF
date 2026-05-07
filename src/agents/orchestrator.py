@@ -25,6 +25,7 @@ from typing import Any, Literal
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+
 # WS-5a: LangGraph v3 primitives. ``interrupt`` pauses graph execution so a
 # human reviewer can supply corrections; ``Command(resume=...)`` is the
 # matching client-side resume primitive used in PipelineRunner.
@@ -489,19 +490,18 @@ class OrchestratorAgent(BaseAgent):
                 )
             else:
                 workflow.add_edge(NODE_SPLIT, NODE_ANALYZE)
+        # No splitter: Preprocess → Pipeline routing (original behavior)
+        elif has_vlm_first:
+            workflow.add_conditional_edges(
+                NODE_PREPROCESS,
+                self._determine_pipeline,
+                {
+                    ROUTE_ADAPTIVE: NODE_LAYOUT,
+                    ROUTE_LEGACY: NODE_ANALYZE,
+                },
+            )
         else:
-            # No splitter: Preprocess → Pipeline routing (original behavior)
-            if has_vlm_first:
-                workflow.add_conditional_edges(
-                    NODE_PREPROCESS,
-                    self._determine_pipeline,
-                    {
-                        ROUTE_ADAPTIVE: NODE_LAYOUT,
-                        ROUTE_LEGACY: NODE_ANALYZE,
-                    },
-                )
-            else:
-                workflow.add_edge(NODE_PREPROCESS, NODE_ANALYZE)
+            workflow.add_edge(NODE_PREPROCESS, NODE_ANALYZE)
 
         # VLM-first pipeline flow
         if has_vlm_first:
@@ -1334,7 +1334,6 @@ def create_extraction_workflow(
     from src.agents.analyzer import AnalyzerAgent
     from src.agents.extractor import ExtractorAgent
     from src.agents.validator import ValidatorAgent
-
     from src.config import get_settings
 
     settings = get_settings()
@@ -1445,8 +1444,8 @@ def create_extraction_workflow(
 
     if enable_vlm_first:
         try:
-            from src.agents.layout_agent import LayoutAgent
             from src.agents.component_detector import ComponentDetectorAgent
+            from src.agents.layout_agent import LayoutAgent
             from src.agents.schema_generator import SchemaGeneratorAgent
 
             layout_agent = LayoutAgent(client=shared_client)

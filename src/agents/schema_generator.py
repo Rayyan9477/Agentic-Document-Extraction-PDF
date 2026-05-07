@@ -40,12 +40,12 @@ class SchemaGeneratorAgent(BaseAgent):
     VLM Utilization: ~20% of total pipeline capability
     Critical for: Zero-shot documents, adaptive extraction, unknown formats
     """
-    
+
     def __init__(self, client=None):
         """Initialize schema generator agent."""
         super().__init__(name="schema_generator", client=client)
         self._settings = get_settings()
-    
+
     def process(self, state: ExtractionState) -> ExtractionState:
         """
         Generate adaptive schema based on document analysis.
@@ -57,23 +57,23 @@ class SchemaGeneratorAgent(BaseAgent):
             State updated with adaptive_schema.
         """
         start_time = time.time()
-        
+
         try:
             self._logger.info(
                 "schema_generation_started",
                 processing_id=state.get("processing_id"),
             )
-            
+
             layout_analyses = state.get("layout_analyses", [])
             component_maps = state.get("component_maps", [])
-            
+
             if not layout_analyses or not component_maps:
                 raise SchemaGenerationError(
                     "Missing layout analyses or component maps for schema generation",
                     agent_name=self.name,
                     recoverable=False,
                 )
-            
+
             # Primary analysis from first page (used for VLM image + detailed context)
             first_page_layout = layout_analyses[0] if layout_analyses else None
             first_page_components = component_maps[0] if component_maps else None
@@ -123,7 +123,7 @@ class SchemaGeneratorAgent(BaseAgent):
                 total_pages=len(page_images),
                 multi_page_summary=multi_page_summary,
             )
-            
+
             elapsed_ms = int((time.time() - start_time) * 1000)
 
             self._logger.info(
@@ -140,7 +140,7 @@ class SchemaGeneratorAgent(BaseAgent):
                 "total_vlm_calls": state.get("total_vlm_calls", 0) + 1,
                 "total_processing_time_ms": state.get("total_processing_time_ms", 0) + elapsed_ms,
             })
-        
+
         except Exception as e:
             self._logger.error(
                 "schema_generation_failed",
@@ -152,7 +152,7 @@ class SchemaGeneratorAgent(BaseAgent):
                 agent_name=self.name,
                 recoverable=True,
             ) from e
-    
+
     def _generate_schema(
         self,
         image_data_uri: str,
@@ -193,14 +193,14 @@ class SchemaGeneratorAgent(BaseAgent):
             total_pages=total_pages,
             multi_page_summary=multi_page_summary,
         )
-        
+
         # Retry with backoff
         retry_config = RetryConfig(
             max_retries=self._settings.extraction.max_retries,
             base_delay_ms=500,
             max_delay_ms=self._settings.agent.max_retry_delay_ms,
         )
-        
+
         def make_vlm_call() -> dict[str, Any]:
             return self.send_vision_request_with_json(
                 image_data=image_data_uri,
@@ -209,7 +209,7 @@ class SchemaGeneratorAgent(BaseAgent):
                 temperature=0.2,  # Slightly higher for creative schema generation
                 max_tokens=5000,  # Schema generation needs detailed response
             )
-        
+
         try:
             result = retry_with_backoff(
                 func=make_vlm_call,
@@ -220,12 +220,12 @@ class SchemaGeneratorAgent(BaseAgent):
                     error=str(e),
                 ),
             )
-            
+
             elapsed_ms = int((time.time() - start_time) * 1000)
-            
+
             # Parse and structure response
             return self._parse_schema_response(result, elapsed_ms)
-        
+
         except Exception as e:
             self._logger.error(
                 "schema_generation_vlm_failed",
@@ -233,7 +233,7 @@ class SchemaGeneratorAgent(BaseAgent):
             )
             # Return minimal fallback schema
             return self._create_fallback_schema(layout, components)
-    
+
     @staticmethod
     def _get_additional_page_fields(
         component_maps: list[dict[str, Any]],
@@ -273,7 +273,7 @@ class SchemaGeneratorAgent(BaseAgent):
         multi_page_summary: dict[str, Any] | None = None,
     ) -> str:
         """Build schema generation prompt with context."""
-        
+
         # Build context sections
         layout_context = ""
         if layout:
@@ -297,14 +297,14 @@ class SchemaGeneratorAgent(BaseAgent):
 
 **Extraction Difficulty:** {layout.get('extraction_difficulty', 'moderate')}
 """
-        
+
         component_context = ""
         if components:
             tables = components.get('tables', [])
             forms = components.get('forms', [])
             kv_pairs = components.get('key_value_pairs', [])
             visual_marks = components.get('visual_marks', [])
-            
+
             component_context = f"""
 ## Component Detection Context
 
@@ -316,7 +316,7 @@ class SchemaGeneratorAgent(BaseAgent):
     - {table.get('description', 'no description')}
     - Column Labels: {table.get('column_labels', [])}
 """
-            
+
             component_context += f"""
 **Form Fields:** {len(forms)}
 """
@@ -325,17 +325,17 @@ class SchemaGeneratorAgent(BaseAgent):
             for form in forms:
                 ftype = form.get('field_type', 'unknown')
                 field_types[ftype] = field_types.get(ftype, 0) + 1
-            
+
             for ftype, count in sorted(field_types.items()):
                 component_context += f"  - {ftype}: {count}\n"
-            
+
             # Show sample form fields
             component_context += "\n  Sample Fields:\n"
             for form in forms[:10]:  # First 10
                 label = form.get('label_text', 'unlabeled')
                 ftype = form.get('field_type', 'unknown')
                 component_context += f"    - \"{label}\" ({ftype})\n"
-            
+
             component_context += f"""
 **Key-Value Pairs:** {len(kv_pairs)}
 """
@@ -343,7 +343,7 @@ class SchemaGeneratorAgent(BaseAgent):
                 key = kv.get('key_text', 'unknown')
                 vtype = kv.get('value_type_hint', 'text')
                 component_context += f"  - \"{key}\" → ({vtype})\n"
-            
+
             component_context += f"""
 **Visual Marks:** {len(visual_marks)}
   (Checkboxes, ticks, crosses, stamps, signatures, etc.)
@@ -360,7 +360,7 @@ class SchemaGeneratorAgent(BaseAgent):
             strategies = components.get('suggested_extraction_strategies', {})
             for comp_type, strategy in strategies.items():
                 component_context += f"  - {comp_type}: {strategy}\n"
-        
+
         # Build multi-page context section if available
         multi_page_context = ""
         if multi_page_summary:
@@ -581,7 +581,7 @@ Return complete schema as JSON:
 5. **PRIORITIZE CRITICAL FIELDS** - Mark important fields as required
 
 Begin schema generation now. Analyze the document image and propose the best extraction schema."""
-    
+
     def _parse_schema_response(
         self,
         vlm_response: dict[str, Any],
@@ -599,12 +599,12 @@ Begin schema generation now. Analyze the document image and propose the best ext
         """
         # Add schema_id and timing
         schema = dict(vlm_response)
-        
+
         if "schema_id" not in schema:
             schema["schema_id"] = f"adaptive_{secrets.token_hex(8)}"
-        
+
         schema["generation_time_ms"] = elapsed_ms
-        
+
         # Ensure required fields with defaults
         schema.setdefault("document_type_description", "unknown")
         schema.setdefault("field_groups", [])
@@ -618,9 +618,9 @@ Begin schema generation now. Analyze the document image and propose the best ext
         schema.setdefault("optional_fields", [])
         schema.setdefault("vlm_reasoning", "")
         schema.setdefault("schema_confidence", 0.5)
-        
+
         return schema
-    
+
     def _create_fallback_schema(
         self,
         layout: dict[str, Any] | None,
@@ -638,7 +638,7 @@ Begin schema generation now. Analyze the document image and propose the best ext
         """
         # Create basic fields from component detection
         fields = []
-        
+
         if components:
             # Add fields from detected forms
             for form in components.get("forms", [])[:20]:  # Limit to first 20
@@ -657,7 +657,7 @@ Begin schema generation now. Analyze the document image and propose the best ext
                         "validation_hints": [],
                         "examples": [],
                     })
-            
+
             # Add fields from key-value pairs
             for kv in components.get("key_value_pairs", [])[:20]:  # Limit to first 20
                 key = kv.get("key_text", "")
@@ -675,7 +675,7 @@ Begin schema generation now. Analyze the document image and propose the best ext
                         "validation_hints": [],
                         "examples": [],
                     })
-        
+
         return {
             "schema_id": f"fallback_{secrets.token_hex(8)}",
             "document_type_description": "Unknown document type (fallback schema)",
