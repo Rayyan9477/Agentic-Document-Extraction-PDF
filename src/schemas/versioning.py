@@ -11,14 +11,13 @@ Provides automatic versioning of document schemas with:
 
 import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
 from src.config import get_logger
-from src.schemas.field_types import FieldDefinition, FieldType
 
 
 logger = get_logger(__name__)

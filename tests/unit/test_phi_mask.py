@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from src.security.phi_mask import (
-    PHI_FIELD_PATTERNS,
     REDACTED_TOKEN,
     _is_phi_field_name,
     enforce_mask_phi,

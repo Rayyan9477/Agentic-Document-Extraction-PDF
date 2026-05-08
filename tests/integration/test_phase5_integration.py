@@ -108,32 +108,25 @@ class TestHealthEndpoints:
         assert "status" in data
 
     def test_security_status_endpoint(self, test_client: TestClient) -> None:
-        """Test HIPAA security status endpoint."""
-        response = test_client.get("/api/v1/health/security")
+        """WS-1: HIPAA security status endpoint is admin-only.
 
-        assert response.status_code == 200
-        data = response.json()
-        assert "status" in data
-        assert "hipaa_compliance" in data
-        assert "compliance_score" in data
+        Originally public; now requires ``Permission.SYSTEM_METRICS`` so
+        an unauthenticated probe can't enumerate the deployment's
+        encryption / RBAC / audit posture. The TestClient sends no auth
+        header, so the AuthorizationMiddleware rejects with 401 / 403.
+        """
+        response = test_client.get("/api/v1/health/security")
+        assert response.status_code in (401, 403)
 
     def test_alerts_endpoint(self, test_client: TestClient) -> None:
-        """Test active alerts endpoint."""
+        """WS-1: active alerts endpoint is admin-only."""
         response = test_client.get("/api/v1/health/alerts")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "total" in data
-        assert "timestamp" in data
+        assert response.status_code in (401, 403)
 
     def test_dependencies_endpoint(self, test_client: TestClient) -> None:
-        """Test dependencies status endpoint."""
+        """WS-1: dependencies status endpoint is admin-only."""
         response = test_client.get("/api/v1/health/dependencies")
-
-        assert response.status_code == 200
-        data = response.json()
-        assert "status" in data
-        assert "dependencies" in data
+        assert response.status_code in (401, 403)
 
 
 class TestMetricsEndpoint:
@@ -462,19 +455,21 @@ class TestEndToEndSecurityFlow:
         """Test complete document security workflow."""
 
     def test_hipaa_compliance_verification(self, test_client: TestClient) -> None:
-        """Test HIPAA compliance verification through API."""
+        """WS-1: HIPAA compliance verification endpoint is admin-only.
+
+        Pre-WS-1 this test invoked the public ``/health/security``
+        endpoint and asserted on the returned ``hipaa_compliance`` block.
+        The endpoint is now admin-only — exposing the deployment's
+        compliance posture to unauthenticated callers was an
+        information-disclosure footgun.
+
+        Test now asserts the gate works. Operators / monitoring
+        systems with a valid token still get the rich response; the
+        ``hipaa_compliance`` schema itself is covered by the unit
+        tests that exercise ``_check_security_components`` directly.
+        """
         response = test_client.get("/api/v1/health/security")
-
-        assert response.status_code == 200
-        data = response.json()
-
-        # Check HIPAA compliance indicators
-        hipaa = data.get("hipaa_compliance", {})
-
-        # At minimum, these should be present
-        assert "encryption_at_rest" in hipaa
-        assert "audit_logging" in hipaa
-        assert "access_control" in hipaa
+        assert response.status_code in (401, 403)
 
     @pytest.mark.skip(reason="Test uses different API than implementation")
     def test_security_event_monitoring(self) -> None:

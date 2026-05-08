@@ -25,6 +25,7 @@ from src.queue.webhook import (
     WebhookPayload,
 )
 
+
 logger = structlog.get_logger(__name__)
 
 

@@ -6,13 +6,11 @@ subscription/delivery with mocked pipeline components.
 """
 
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 
-from src.api.routes.documents import _build_process_response, _map_confidence_level
 from src.api.models import ConfidenceLevelEnum, TaskStatusEnum
+from src.api.routes.documents import _build_process_response, _map_confidence_level
 from src.pipeline.state import ExtractionStatus
 
 

@@ -30,6 +30,17 @@ Usage:
 
 # Dual-pass comparison
 # Confidence scoring
+# Confidence calibration
+from src.validation.calibration import (
+    BaseCalibrator,
+    CalibrationMetrics,
+    CalibrationPoint,
+    CalibrationResult,
+    ConfidenceCalibrator,
+    IsotonicCalibrator,
+    LinearCalibrator,
+    PlattCalibrator,
+)
 from src.validation.confidence import (
     AdaptiveConfidenceScorer,
     ConfidenceAction,
@@ -80,18 +91,6 @@ from src.validation.medical_codes import (
     MedicalCodeValidationEngine,
     MedicalCodeValidationResult,
     validate_medical_codes,
-)
-
-# Confidence calibration
-from src.validation.calibration import (
-    BaseCalibrator,
-    CalibrationMetrics,
-    CalibrationPoint,
-    CalibrationResult,
-    ConfidenceCalibrator,
-    IsotonicCalibrator,
-    LinearCalibrator,
-    PlattCalibrator,
 )
 
 # Hallucination pattern detection

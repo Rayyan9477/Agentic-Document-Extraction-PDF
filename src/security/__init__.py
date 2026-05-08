@@ -31,12 +31,6 @@ from src.security.data_cleanup import (
     SecureOverwriter,
     TempFileManager,
 )
-from src.security.phi_mask import (
-    PHI_FIELD_PATTERNS,
-    PHI_VALUE_PATTERNS,
-    REDACTED_TOKEN,
-    enforce_mask_phi,
-)
 from src.security.encryption import (
     AESEncryptor,
     DecryptionError,
@@ -50,6 +44,17 @@ from src.security.encryption import (
     KeyDerivationError,
     KeyDerivationFunction,
     KeyManager,
+)
+from src.security.phi_mask import (
+    PHI_FIELD_PATTERNS,
+    PHI_VALUE_PATTERNS,
+    REDACTED_TOKEN,
+    enforce_mask_phi,
+)
+from src.security.phi_redactor import (
+    PHIRedactor,
+    RedactionResult,
+    Span,
 )
 from src.security.rbac import (
     ROLE_PERMISSIONS,
@@ -113,6 +118,10 @@ __all__ = [
     "PHI_VALUE_PATTERNS",
     "REDACTED_TOKEN",
     "enforce_mask_phi",
+    # PHI redactor (extraction-time)
+    "PHIRedactor",
+    "RedactionResult",
+    "Span",
     # RBAC
     "AuthenticationError",
     "AuthorizationError",

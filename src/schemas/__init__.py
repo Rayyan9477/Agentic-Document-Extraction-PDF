@@ -5,6 +5,8 @@ Provides schema definitions for various medical document types,
 field type definitions, and validation rules.
 """
 
+# Import finance schemas to auto-register them
+from src.schemas.bank_statement import BANK_STATEMENT_SCHEMA
 from src.schemas.base import (
     DocumentSchema,
     DocumentType,
@@ -23,13 +25,13 @@ from src.schemas.field_types import (
     FieldType,
     RuleOperator,
 )
-
-# Import finance schemas to auto-register them
-from src.schemas.bank_statement import BANK_STATEMENT_SCHEMA
 from src.schemas.form_1099 import FORM_1099_SCHEMA
 
 # Import enhanced generic fallback for unknown documents
 from src.schemas.generic_fallback import ENHANCED_GENERIC_SCHEMA
+
+# Import invoice schema
+from src.schemas.invoice import INVOICE_SCHEMA
 
 # Import nested schemas
 from src.schemas.nested_schemas import (
@@ -55,13 +57,8 @@ from src.schemas.schema_builder import (
     create_schema,
     generate_zero_shot_schema,
 )
-# Import invoice schema
-from src.schemas.invoice import INVOICE_SCHEMA
 from src.schemas.superbill import SUPERBILL_SCHEMA
 from src.schemas.ub04 import UB04_SCHEMA
-
-# Import W-2 schema
-from src.schemas.w2 import W2_SCHEMA
 from src.schemas.validators import (
     MedicalCodeValidator,
     validate_cpt_code,
@@ -73,6 +70,9 @@ from src.schemas.validators import (
     validate_phone,
     validate_ssn,
 )
+
+# Import W-2 schema
+from src.schemas.w2 import W2_SCHEMA
 
 
 def get_schema(document_type: DocumentType) -> DocumentSchema:

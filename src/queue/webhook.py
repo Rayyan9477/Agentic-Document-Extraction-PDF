@@ -143,6 +143,7 @@ class WebhookClient:
         retry_delay: float = 1.0,
         signing_secret: str | None = None,
         user_agent: str = "PDFExtraction-Webhook/1.0",
+        dlq: Any | None = None,
     ) -> None:
         """
         Initialize webhook client.
@@ -153,12 +154,18 @@ class WebhookClient:
             retry_delay: Base delay between retries (exponential backoff).
             signing_secret: Secret key for signing webhooks.
             user_agent: User-Agent header value.
+            dlq: Optional ``WebhookDLQ`` instance (WS-9). When provided,
+                terminal delivery failures are persisted via
+                ``dlq.enqueue_failed`` so a Celery beat task can retry
+                them later. When ``None``, terminal failures are only
+                logged (legacy behaviour).
         """
         self._timeout = timeout
         self._max_retries = max_retries
         self._retry_delay = retry_delay
         self._signing_secret = signing_secret
         self._user_agent = user_agent
+        self._dlq = dlq
         self._logger = logger
 
     def validate_url(self, url: str) -> tuple[bool, str | None]:
@@ -384,11 +391,44 @@ class WebhookClient:
             error=last_error,
         )
 
+        # WS-9: persist the failed delivery so a scheduled task can
+        # retry later. The DLQ is opt-in (set via constructor); when
+        # absent we preserve the legacy "log and drop" semantics.
+        self._enqueue_to_dlq(payload, last_error, attempts)
+
         return WebhookDeliveryResult(
             status=WebhookDeliveryStatus.FAILED,
             attempts=attempts,
             error=last_error,
         )
+
+    def _enqueue_to_dlq(
+        self,
+        payload: Any,
+        last_error: str | None,
+        attempts: int,
+    ) -> None:
+        """Best-effort DLQ enqueue. Never raises — DLQ failure must not
+        cascade into the main delivery path's error reporting."""
+        if self._dlq is None:
+            return
+        try:
+            payload_dict = payload.to_dict() if hasattr(payload, "to_dict") else dict(payload)
+            subscription_id = payload_dict.get("subscription_id") or getattr(
+                payload, "subscription_id", "unknown"
+            )
+            self._dlq.enqueue_failed(
+                subscription_id=str(subscription_id),
+                payload=payload_dict,
+                last_error=last_error,
+                attempts=attempts,
+            )
+        except Exception as exc:  # pragma: no cover - DLQ failure path
+            self._logger.error(
+                "webhook_dlq_enqueue_failed",
+                error=str(exc),
+                error_type=type(exc).__name__,
+            )
 
     async def send_async(
         self,
@@ -509,6 +549,9 @@ class WebhookClient:
             attempts=attempts,
             error=last_error,
         )
+
+        # WS-9: persist failed delivery to the DLQ for later redelivery.
+        self._enqueue_to_dlq(payload, last_error, attempts)
 
         return WebhookDeliveryResult(
             status=WebhookDeliveryStatus.FAILED,
