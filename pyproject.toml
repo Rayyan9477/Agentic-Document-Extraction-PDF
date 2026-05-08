@@ -153,6 +153,15 @@ fhir = [
     "fhir.resources>=7.1.0",
 ]
 
+# V3 Phase 0 — vLLM server-side stack. Optional because LM Studio remains
+# a first-class backend and many deployments will never touch vLLM. The
+# runtime client only needs the OpenAI SDK (already in core deps).
+# Install with: pip install -e ".[dev,vlm-server]" on a GPU host.
+vlm-server = [
+    "vllm>=0.7.0",
+    "xgrammar>=0.1.10",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/rayyanahmed/doc-extraction-system"
 "Bug Tracker" = "https://github.com/rayyanahmed/doc-extraction-system/issues"
@@ -253,7 +262,7 @@ ignore = [
     "PYI036",  # bad exit annotation (common pattern)
     "S110",    # try-except-pass (intentional silent handling)
     "SLF001",  # private member access (internal APIs)
-    "TC003",   # typing-only import (style preference)
+    "TCH003",  # typing-only import (style preference); name is TCH003 in ruff <1.0
     "A002",    # builtin argument shadowing (common names like id, type)
     "DTZ007",  # datetime strptime without zone (handled elsewhere)
     "PLW0603", # global statement (singleton patterns)
@@ -291,7 +300,7 @@ ignore = [
     "UP035",   # deprecated import (compatibility)
     "UP038",   # non-pep604-isinstance (removed in newer ruff, keep for local compatibility)
     "F841",    # unused variable (intentional placeholders)
-    "RUF059",  # unused unpacked variable (preview rule)
+    # "RUF059" removed — preview rule that doesn't exist in ruff <1.0.
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -370,6 +379,18 @@ markers = [
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
     "accuracy: marks tests as accuracy/golden dataset tests",
+    # WS-10: register the markers used by the test backfill streams so
+    # `pytest --strict-markers` doesn't reject them. Files / dirs:
+    #   tests/regression/  → regression: golden-dataset guard rails
+    #   tests/property/    → property:   Hypothesis-driven invariants
+    #   tests/contract/    → contract:   API / export shape snapshots
+    #   tests/performance/ → performance: throughput / memory bounds
+    #   tests/security/    → security:    PHI / SSRF / auth-bypass
+    "regression: marks tests as regression guard tests",
+    "security: marks tests as security tests",
+    "property: marks tests as property-based (hypothesis) tests",
+    "performance: marks tests as performance/load tests",
+    "contract: marks tests as API/export contract tests",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
