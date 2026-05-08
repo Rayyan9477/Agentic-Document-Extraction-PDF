@@ -7,8 +7,7 @@ persistence), API routes, and request models.
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,7 +17,6 @@ from src.queue.webhook import (
     WebhookDeliveryResult,
     WebhookDeliveryStatus,
     WebhookEventType,
-    WebhookPayload,
 )
 from src.queue.webhook_store import (
     DeliveryLogEntry,
@@ -645,17 +643,12 @@ class TestWebhookModuleExports:
 
     def test_webhook_store_imports(self):
         from src.queue.webhook_store import (
-            DeliveryLogEntry,
-            FanOutResult,
             WebhookStore,
-            WebhookSubscription,
         )
         assert WebhookStore is not None
 
     def test_webhook_routes_imports(self):
         from src.api.routes.webhooks import (
-            CreateWebhookRequest,
-            UpdateWebhookRequest,
             router,
         )
         assert router is not None

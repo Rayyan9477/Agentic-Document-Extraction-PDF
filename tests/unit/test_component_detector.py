@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.agents.base import AgentError
 from src.agents.component_detector import (
-    ComponentDetectorAgent,
     ComponentDetectionError,
+    ComponentDetectorAgent,
 )
 
 
@@ -18,8 +19,9 @@ from src.agents.component_detector import (
 
 def _mock_client(parsed_json: dict | None = None):
     """Create a MagicMock LMStudioClient for component detection."""
-    from src.client.lm_client import VisionResponse
     import json
+
+    from src.client.lm_client import VisionResponse
 
     if parsed_json is None:
         parsed_json = {

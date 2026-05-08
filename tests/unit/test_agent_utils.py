@@ -10,8 +10,6 @@ Tests cover:
 - calculate_extraction_quality_score
 """
 
-import time
-from unittest.mock import MagicMock, patch
 
 import pytest
 

@@ -13,11 +13,11 @@ Tests cover:
 - get_supported_document_types / get_available_schemas
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.analyzer import AnalyzerAgent, DOCUMENT_TYPE_MAP
+from src.agents.analyzer import AnalyzerAgent
 from src.agents.base import AnalysisError
 from src.client.lm_client import VisionResponse
 from src.pipeline.state import ExtractionStatus

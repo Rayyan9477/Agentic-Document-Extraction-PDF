@@ -17,10 +17,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.agents.base import AgentError, ExtractionError
+from src.agents.base import ExtractionError
 from src.agents.extractor import ExtractorAgent
 from src.client.lm_client import VisionResponse
-from src.pipeline.state import BoundingBoxCoords, ExtractionStatus, FieldMetadata
+from src.pipeline.state import ExtractionStatus, FieldMetadata
 
 
 # ---------------------------------------------------------------------------

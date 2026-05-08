@@ -15,14 +15,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.agents.orchestrator import (
-    NODE_ANALYZE,
-    NODE_COMPLETE,
-    NODE_EXTRACT,
-    NODE_HUMAN_REVIEW,
-    NODE_PREPROCESS,
-    NODE_RETRY,
-    NODE_ROUTE,
-    NODE_VALIDATE,
     ROUTE_COMPLETE,
     ROUTE_HUMAN_REVIEW,
     ROUTE_RETRY,
@@ -76,7 +68,10 @@ class TestOrchestratorInit:
     """Tests for OrchestratorAgent initialization."""
 
     def test_default_init(self) -> None:
-        orch = OrchestratorAgent()
+        # WS-1: default checkpointer is now SQLite for durability. Pass MEMORY
+        # explicitly so this test stays decoupled from the langgraph-checkpoint-sqlite
+        # install state. (A separate test asserts the SQLite default elsewhere.)
+        orch = OrchestratorAgent(checkpointer_type=CheckpointerType.MEMORY)
         assert orch.name == "orchestrator"
         assert orch._max_retries == 2
         assert orch._enable_checkpointing is True
@@ -88,6 +83,7 @@ class TestOrchestratorInit:
 
     def test_custom_thresholds(self) -> None:
         orch = OrchestratorAgent(
+            checkpointer_type=CheckpointerType.MEMORY,
             high_confidence_threshold=0.90,
             low_confidence_threshold=0.40,
             max_retries=5,
@@ -95,6 +91,11 @@ class TestOrchestratorInit:
         assert orch._high_confidence_threshold == 0.90
         assert orch._low_confidence_threshold == 0.40
         assert orch._max_retries == 5
+
+    def test_default_checkpointer_type_is_sqlite(self) -> None:
+        # WS-1 security default: SQLite (durable) over MemorySaver (lossy).
+        orch = OrchestratorAgent(enable_checkpointing=False)
+        assert orch._checkpointer_type == CheckpointerType.SQLITE
 
     def test_memory_checkpointer_created(self) -> None:
         orch = OrchestratorAgent(

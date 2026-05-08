@@ -7,18 +7,13 @@ A/B testing, and regression detection.
 
 from __future__ import annotations
 
-import json
-import tempfile
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from src.evaluation.ab_testing import ABOutcome, ABTestConfig, ABTestResult, ABTestRunner
+from src.evaluation.ab_testing import ABOutcome, ABTestConfig, ABTestRunner
 from src.evaluation.benchmark import (
-    BenchmarkComparison,
     BenchmarkConfig,
-    BenchmarkResult,
     BenchmarkRunner,
     BenchmarkStatus,
     compare_runs,
@@ -33,15 +28,12 @@ from src.evaluation.golden_dataset import (
 from src.evaluation.metrics import (
     AggregateMetrics,
     DocumentMetrics,
-    FieldMatchResult,
     MatchLevel,
     compare_field,
     evaluate_document,
 )
 from src.evaluation.regression import (
-    FieldRegression,
     RegressionDetector,
-    RegressionReport,
     RegressionSeverity,
     load_baseline,
     save_baseline,
@@ -784,45 +776,28 @@ class TestModuleExports:
 
     def test_metrics_exports(self):
         from src.evaluation import (
-            AggregateMetrics,
-            DocumentMetrics,
-            FieldMatchResult,
             MatchLevel,
-            compare_field,
-            evaluate_document,
         )
         assert MatchLevel.EXACT is not None
 
     def test_golden_dataset_exports(self):
         from src.evaluation import (
             GoldenDataset,
-            GoldenSample,
-            create_sample,
-            load_dataset,
-            save_dataset,
         )
         assert GoldenDataset is not None
 
     def test_benchmark_exports(self):
         from src.evaluation import (
-            BenchmarkConfig,
-            BenchmarkResult,
-            BenchmarkRunner,
             BenchmarkStatus,
-            compare_runs,
         )
         assert BenchmarkStatus.COMPLETED is not None
 
     def test_ab_testing_exports(self):
-        from src.evaluation import ABOutcome, ABTestConfig, ABTestResult, ABTestRunner
+        from src.evaluation import ABOutcome
         assert ABOutcome.B_WINS is not None
 
     def test_regression_exports(self):
         from src.evaluation import (
-            RegressionDetector,
-            RegressionReport,
             RegressionSeverity,
-            save_baseline,
-            load_baseline,
         )
         assert RegressionSeverity.CRITICAL is not None

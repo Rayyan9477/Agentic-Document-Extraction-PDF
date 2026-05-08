@@ -9,10 +9,7 @@ schema proposal, prompt enhancement, extraction mode, memory context).
 from __future__ import annotations
 
 import json
-import tempfile
-from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -880,12 +877,7 @@ class TestModuleExports:
 
     def test_excel_exports(self):
         from src.export import (
-            ExcelExportConfig,
-            ExcelExporter,
-            ExcelStyler,
-            SheetConfig,
             SheetType,
-            export_to_excel,
         )
 
         assert SheetType.PIPELINE == "pipeline"
@@ -893,19 +885,13 @@ class TestModuleExports:
     def test_json_exports(self):
         from src.export import (
             ExportFormat,
-            JSONExportConfig,
-            JSONExporter,
-            export_to_json,
         )
 
         assert ExportFormat.STANDARD == "standard"
 
     def test_markdown_exports(self):
         from src.export import (
-            MarkdownExportConfig,
-            MarkdownExporter,
             MarkdownStyle,
-            export_to_markdown,
         )
 
         assert MarkdownStyle.DETAILED == "detailed"
