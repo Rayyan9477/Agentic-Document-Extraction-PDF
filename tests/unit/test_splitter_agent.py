@@ -5,9 +5,8 @@ Tests SplitterAgent, DocumentSegment, boundary classification,
 segment building, and state integration.
 """
 
-import json
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

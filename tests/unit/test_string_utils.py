@@ -4,8 +4,6 @@ Tests for src/utils/string_utils.py — string manipulation and matching utiliti
 
 from decimal import Decimal
 
-import pytest
-
 from src.utils.string_utils import (
     clean_currency,
     clean_ocr_text,

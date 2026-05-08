@@ -5,7 +5,6 @@ Tests TableDetectorAgent, table type definitions, VLM response parsing,
 orchestrator integration, and state field management.
 """
 
-import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -13,17 +12,11 @@ import pytest
 
 from src.agents.table_detector import (
     TABLE_DETECTION_SYSTEM_PROMPT,
-    TableDetectionError,
     TableDetectorAgent,
     _empty_detection_result,
 )
 from src.pipeline.state import ExtractionState, create_initial_state, update_state
 from src.pipeline.table_types import (
-    DetectedTable,
-    TableCell,
-    TableDetectionResult,
-    TableHeader,
-    TableRow,
     create_empty_detected_table,
     create_empty_table_detection_result,
     table_to_rows_dict,

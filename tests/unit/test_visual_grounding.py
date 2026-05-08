@@ -13,6 +13,11 @@ from typing import Any
 
 import pytest
 
+from src.export.json_exporter import (
+    ExportFormat,
+    JSONExportConfig,
+    JSONExporter,
+)
 from src.pipeline.state import (
     BoundingBoxCoords,
     ConfidenceLevel,
@@ -24,12 +29,6 @@ from src.validation.pattern_detector import (
     HallucinationPattern,
     HallucinationPatternDetector,
     PatternSeverity,
-)
-from src.export.json_exporter import (
-    ExportFormat,
-    JSONExportConfig,
-    JSONExporter,
-    export_to_json,
 )
 
 
@@ -721,8 +720,9 @@ class TestMultiRecordBbox:
 
     def test_extracted_record_to_dict_includes_bboxes(self):
         """ExtractedRecord serialization includes field_bboxes."""
-        from src.extraction.multi_record import ExtractedRecord
         from dataclasses import asdict
+
+        from src.extraction.multi_record import ExtractedRecord
 
         record = ExtractedRecord(
             record_id=3,

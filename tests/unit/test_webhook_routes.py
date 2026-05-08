@@ -2,13 +2,14 @@
 Tests for the webhook management API routes in src/api/routes/webhooks.py.
 """
 
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
-from datetime import datetime, timezone
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.api.routes.webhooks import router, get_store, set_store
+from src.api.routes.webhooks import get_store, router, set_store
 
 
 # ---------------------------------------------------------------------------
@@ -25,7 +26,7 @@ def _make_subscription_dict(
     metadata=None,
 ):
     """Return a dict that mirrors WebhookSubscription.to_dict() output."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     return {
         "id": webhook_id,
         "url": url,
@@ -57,8 +58,8 @@ def _make_mock_subscription(
     sub.secret = secret
     sub.active = active
     sub.metadata = metadata or {}
-    sub.created_at = datetime.now(timezone.utc).isoformat()
-    sub.updated_at = datetime.now(timezone.utc).isoformat()
+    sub.created_at = datetime.now(UTC).isoformat()
+    sub.updated_at = datetime.now(UTC).isoformat()
 
     d = _make_subscription_dict(
         webhook_id=webhook_id, url=url, event_types=sub.event_types,

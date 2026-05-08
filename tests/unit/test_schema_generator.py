@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.agents.base import AgentError
 from src.agents.schema_generator import (
-    SchemaGeneratorAgent,
     SchemaGenerationError,
+    SchemaGeneratorAgent,
 )
 
 
@@ -18,8 +19,9 @@ from src.agents.schema_generator import (
 
 def _mock_client(parsed_json: dict | None = None):
     """Create a MagicMock LMStudioClient for schema generation."""
-    from src.client.lm_client import VisionResponse
     import json
+
+    from src.client.lm_client import VisionResponse
 
     if parsed_json is None:
         parsed_json = {

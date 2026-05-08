@@ -11,12 +11,8 @@ Tests cover:
 """
 
 import base64
-import io
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock
-
-import pytest
 
 from src.preprocessing.pdf_processor import (
     DocumentOrientation,

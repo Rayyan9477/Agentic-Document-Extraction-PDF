@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from src.schemas.field_types import FieldDefinition, FieldType
 from src.schemas.versioning import (
     ChangeType,
     FieldChange,
@@ -18,7 +19,6 @@ from src.schemas.versioning import (
     SchemaVersion,
     SchemaVersionManager,
 )
-from src.schemas.field_types import FieldDefinition, FieldType
 
 
 # ──────────────────────────────────────────────────────────────────

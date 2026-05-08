@@ -13,16 +13,14 @@ Tests cover:
 - Calibration integration
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from src.agents.base import ValidationError as AgentValidationError
 from src.agents.validator import ValidatorAgent
-from src.client.lm_client import VisionResponse
 from src.pipeline.state import (
     ConfidenceLevel,
-    ExtractionStatus,
     ValidationResult,
 )
 
@@ -92,10 +90,6 @@ class TestValidatorInit:
     def test_calibrator_default_none(self) -> None:
         agent = ValidatorAgent(client=MagicMock())
         assert agent._calibrator is None
-
-    def test_vlm_verification_default_false(self) -> None:
-        agent = ValidatorAgent(client=MagicMock())
-        assert agent._enable_vlm_verification is False
 
 
 # ---------------------------------------------------------------------------

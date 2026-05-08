@@ -2,9 +2,11 @@
 Tests for src/schemas/validators.py — medical code, phone, SSN, date, currency validators.
 """
 
-import pytest
 from datetime import datetime
 
+import pytest
+
+from src.schemas.field_types import FieldType
 from src.schemas.validators import (
     MedicalCodeValidator,
     ValidationInfo,
@@ -23,7 +25,6 @@ from src.schemas.validators import (
     validate_ssn,
     validate_taxonomy_code,
 )
-from src.schemas.field_types import FieldType
 
 
 # ---------------------------------------------------------------------------

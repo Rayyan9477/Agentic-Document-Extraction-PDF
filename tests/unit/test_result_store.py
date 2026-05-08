@@ -2,10 +2,7 @@
 Tests for src/storage/result_store.py — file-based extraction result storage.
 """
 
-import json
 import time
-
-import pytest
 
 from src.storage.result_store import ResultStore
 
