@@ -7,6 +7,7 @@ from src.extraction.multi_record import (
     RecordBoundary,
 )
 
+
 __all__ = [
     "DocumentExtractionResult",
     "ExtractedRecord",

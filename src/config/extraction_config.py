@@ -12,6 +12,7 @@ from typing import Any
 
 from src.config.logging_config import get_logger
 
+
 logger = get_logger(__name__)
 
 _CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.json"

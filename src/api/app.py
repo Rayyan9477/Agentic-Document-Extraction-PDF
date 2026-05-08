@@ -116,9 +116,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cleanup temporary files if needed
     try:
-        from src.security.data_cleanup import TempFileManager
-
         import asyncio
+
+        from src.security.data_cleanup import TempFileManager
 
         temp_manager = TempFileManager()
         await asyncio.to_thread(temp_manager.cleanup_all)

@@ -286,9 +286,8 @@ async def process_document(
         if use_multi_record:
             # Multi-record extraction: returns per-record results
             return _run_multi_record_sync(request, request_id)
-        else:
-            # Legacy single-record extraction
-            return _run_single_record_sync(request, request_id)
+        # Legacy single-record extraction
+        return _run_single_record_sync(request, request_id)
 
     except Exception as e:
         logger.error(

@@ -23,6 +23,7 @@ from src.evaluation.benchmark import (
 )
 from src.evaluation.golden_dataset import GoldenDataset
 
+
 logger = structlog.get_logger(__name__)
 
 

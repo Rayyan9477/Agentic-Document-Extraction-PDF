@@ -241,9 +241,22 @@ class PipelineRunner:
         """
         Resume a checkpointed extraction.
 
+        WS-5a: when the workflow paused at the human-review node via
+        LangGraph's ``interrupt()`` primitive, ``human_corrections`` are
+        forwarded to the orchestrator which dispatches them as
+        ``Command(resume=corrections)``. The orchestrator's own
+        ``_apply_human_corrections`` wraps each value in the same
+        ``{value, confidence, human_corrected}`` envelope used by the
+        legacy non-interrupt path, so downstream consumers see a
+        consistent shape regardless of which resume path executed.
+
         Args:
             thread_id: Thread ID of the checkpointed extraction.
-            human_corrections: Optional human-corrected field values.
+            human_corrections: Optional human-corrected field values. Pass
+                ``{}`` (empty dict) to accept the extraction as-is and
+                continue past the interrupt without changes; pass
+                ``{"field": value, ...}`` to overlay corrections; pass
+                ``None`` for a plain checkpoint resume (no interrupt).
 
         Returns:
             Final extraction state.
@@ -254,7 +267,7 @@ class PipelineRunner:
         self._ensure_workflow_initialized()
         assert self._orchestrator is not None
 
-        # Get current checkpoint state
+        # Get current checkpoint state for logging context.
         checkpoint_state = self._orchestrator.get_checkpoint_state(thread_id)
 
         if checkpoint_state is None:
@@ -268,18 +281,13 @@ class PipelineRunner:
             "resuming_extraction",
             thread_id=thread_id,
             current_status=checkpoint_state.get("status"),
+            has_corrections=human_corrections is not None,
         )
-
-        # Apply human corrections if provided
-        if human_corrections:
-            checkpoint_state = self._apply_human_corrections(
-                checkpoint_state,
-                human_corrections,
-            )
 
         return self._orchestrator.resume_extraction(
             thread_id=thread_id,
-            updated_state=checkpoint_state,
+            human_corrections=human_corrections,
+            processing_id=checkpoint_state.get("processing_id"),
         )
 
     def get_checkpoint_status(self, thread_id: str) -> dict[str, Any] | None:
@@ -453,8 +461,8 @@ class PipelineRunner:
         Returns:
             List of page image dictionaries.
         """
-        from src.preprocessing.file_factory import FileProcessorFactory
         from src.preprocessing.base_processor import SUPPORTED_EXTENSIONS
+        from src.preprocessing.file_factory import FileProcessorFactory
 
         path = Path(file_path)
         suffix = path.suffix.lower()
@@ -808,7 +816,6 @@ class PipelineRunner:
             FileNotFoundError: If PDF file not found.
         """
         from src.extraction.multi_record import (
-            DocumentExtractionResult,
             MultiRecordExtractor,
         )
 

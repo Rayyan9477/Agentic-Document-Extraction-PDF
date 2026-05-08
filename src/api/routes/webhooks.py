@@ -10,10 +10,11 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 from src.queue.webhook_dlq import WebhookDLQ
 from src.queue.webhook_store import WebhookStore
+
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -252,7 +253,7 @@ def redeliver_dlq_entry(
         )
     # Reschedule for immediate pickup. We don't bump attempts here —
     # only the redeliver task itself increments on actual failure.
-    with dlq._connect() as conn:  # noqa: SLF001 — admin escape hatch
+    with dlq._connect() as conn:
         conn.execute(
             "UPDATE webhook_dlq SET next_retry_at=? WHERE id=?",
             (datetime.now(UTC).isoformat(), entry_id),

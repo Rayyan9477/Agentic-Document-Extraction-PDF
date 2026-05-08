@@ -24,6 +24,7 @@ from src.evaluation.metrics import (
     evaluate_document,
 )
 
+
 logger = structlog.get_logger(__name__)
 
 

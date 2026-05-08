@@ -280,7 +280,7 @@ def _load_font(*, size: int) -> ImageFont.ImageFont | None:
     for candidate in ("DejaVuSans.ttf", "Arial.ttf", "arial.ttf"):
         try:
             return ImageFont.truetype(candidate, size=size)
-        except (OSError, IOError):
+        except OSError:
             continue
     try:
         return ImageFont.load_default()

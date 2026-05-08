@@ -23,6 +23,7 @@ from src.config import get_logger
 from src.extraction.multi_record import DocumentExtractionResult, ExtractedRecord
 from src.security.phi_mask import enforce_mask_phi
 
+
 logger = get_logger(__name__)
 
 
@@ -186,7 +187,7 @@ def export_excel(
     ws.row_dimensions[1].height = 25
     ws.freeze_panes = "A2"
 
-    for ri, (rec, val) in enumerate(zip(records, validations), 2):
+    for ri, (rec, val) in enumerate(zip(records, validations, strict=False), 2):
         is_dup = (ri - 2) in duplicate_indices
         row = [rec.record_id, rec.page_number, rec.primary_identifier]
 

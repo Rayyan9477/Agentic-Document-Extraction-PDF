@@ -105,7 +105,6 @@ class ValidatorAgent(BaseAgent):
         client: LMStudioClient | None = None,
         high_confidence_threshold: float = 0.85,
         low_confidence_threshold: float = 0.50,
-        enable_vlm_verification: bool = False,
         review_queue_path: str | None = None,
         calibrator: Any | None = None,
     ) -> None:
@@ -116,15 +115,19 @@ class ValidatorAgent(BaseAgent):
             client: Optional pre-configured LM Studio client.
             high_confidence_threshold: Threshold for high confidence (auto-accept).
             low_confidence_threshold: Threshold for low confidence (human review).
-            enable_vlm_verification: Whether to use VLM for additional verification.
             review_queue_path: Optional path for persisting human review queue.
             calibrator: Optional ConfidenceCalibrator for post-scoring calibration.
+
+        Note:
+            The pre-WS-1 ``enable_vlm_verification`` parameter was removed —
+            it was accepted but never consulted (no logic ever read the
+            stored flag). Re-introduce as a real toggle if/when an
+            optional VLM-verification pass is implemented.
         """
         super().__init__(name="validator", client=client)
         self._schema_registry = SchemaRegistry()
         self._high_threshold = high_confidence_threshold
         self._low_threshold = low_confidence_threshold
-        self._enable_vlm_verification = enable_vlm_verification
         self._calibrator = calibrator
 
         # Initialize Phase 3 validation components

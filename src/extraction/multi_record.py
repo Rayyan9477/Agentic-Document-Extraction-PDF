@@ -34,6 +34,7 @@ from src.prompts.synthetic_examples import get_synthetic_example
 from src.utils.date_utils import parse_date
 from src.utils.string_utils import clean_currency
 
+
 logger = get_logger(__name__)
 
 
@@ -995,9 +996,7 @@ CRITICAL RULES:
         # Identify fields needing correction
         fields_needing_correction = []
         for fv in result.get("field_validations", []):
-            if not fv.get("is_correct", True):
-                fields_needing_correction.append(fv["field_name"])
-            elif fv.get("confidence", 1.0) < self._confidence_threshold:
+            if not fv.get("is_correct", True) or fv.get("confidence", 1.0) < self._confidence_threshold:
                 fields_needing_correction.append(fv["field_name"])
 
         result["fields_needing_correction"] = fields_needing_correction
@@ -1161,8 +1160,7 @@ CRITICAL: Read EXTREMELY carefully. This is a second-chance correction pass."""
         new_overall_confidence = correction_summary.get(
             "overall_confidence", record.confidence
         )
-        if new_overall_confidence > record.confidence:
-            record.confidence = new_overall_confidence
+        record.confidence = max(new_overall_confidence, record.confidence)
 
         logger.info(
             "correction_complete",

@@ -53,7 +53,7 @@ def _has_fhir_resources() -> bool:
     Cached behind a module-level flag so repeated exports don't pay
     the import cost on every call.
     """
-    global _FHIR_AVAILABLE  # noqa: PLW0603
+    global _FHIR_AVAILABLE
     if _FHIR_AVAILABLE is not None:
         return _FHIR_AVAILABLE
     try:

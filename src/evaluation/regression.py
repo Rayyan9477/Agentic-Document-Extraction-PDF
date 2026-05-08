@@ -17,6 +17,7 @@ import structlog
 
 from src.evaluation.benchmark import BenchmarkResult
 
+
 logger = structlog.get_logger(__name__)
 
 
