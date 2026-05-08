@@ -23,9 +23,8 @@ from src.preprocessing.base_processor import (
     FileValidationError,
 )
 from src.preprocessing.pdf_processor import (
-    DocumentOrientation,
-    PDFMetadata,
     PageImage,
+    PDFMetadata,
     ProcessingResult,
 )
 
@@ -166,7 +165,6 @@ class DicomProcessor(BaseFileProcessor):
                 warnings.append(f"Could not extract pixel data: {e}")
                 return pages
 
-        import numpy as np
 
         # Handle multi-frame DICOM
         if len(pixel_array.shape) == 3 and pixel_array.shape[2] not in (3, 4):

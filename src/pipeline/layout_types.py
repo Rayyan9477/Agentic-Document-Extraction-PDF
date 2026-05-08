@@ -10,7 +10,7 @@ from typing import Any, Literal, TypedDict
 
 class BoundingBox(TypedDict):
     """Normalized bounding box coordinates (0-1 range)."""
-    
+
     x: float  # Left edge (0 = left side of page, 1 = right side)
     y: float  # Top edge (0 = top of page, 1 = bottom)
     width: float  # Width as fraction of page width
@@ -19,7 +19,7 @@ class BoundingBox(TypedDict):
 
 class Region(TypedDict):
     """Document region with location and description."""
-    
+
     region_id: str
     region_type: Literal["header", "body", "footer", "sidebar", "margin", "table", "form", "signature_area"]
     bounding_box: BoundingBox
@@ -29,7 +29,7 @@ class Region(TypedDict):
 
 class VisualMark(TypedDict):
     """Visual marks like checkboxes, ticks, crosses, circles, etc."""
-    
+
     mark_type: Literal[
         "checkbox_checked", "checkbox_unchecked", "checkbox_partial",
         "tick", "checkmark", "cross", "x_mark",
@@ -53,41 +53,41 @@ class LayoutAnalysis(TypedDict):
     
     First stage output - pure structural analysis without content extraction.
     """
-    
+
     page_number: int
     layout_type: Literal[
         "form", "table", "tabular_form", "narrative", "mixed",
         "invoice", "receipt", "letter", "report", "claim_form"
     ]
     layout_confidence: float
-    
+
     # Spatial structure
     regions: list[Region]
     column_count: int
     reading_order: str  # VLM's description: "top-to-bottom, left-to-right"
     visual_separators: list[str]  # ["horizontal_lines", "boxes", "borders"]
-    
+
     # Information density
     density_estimate: Literal["sparse", "moderate", "dense", "very_dense"]
     estimated_field_count: int
     has_pre_printed_structure: bool
     has_handwritten_content: bool
-    
+
     # Visual characteristics
     alignment_style: str  # "grid-aligned", "flowing", "mixed"
     spacing_quality: Literal["tight", "normal", "spacious"]
-    
+
     # VLM observations
     vlm_observations: str  # Free-form notes from VLM
     extraction_difficulty: Literal["easy", "moderate", "challenging", "very_difficult"]
     recommended_strategy: str  # VLM's suggestion for extraction approach
-    
+
     analysis_time_ms: int
 
 
 class TableStructure(TypedDict):
     """VLM-detected table with structure information."""
-    
+
     table_id: str
     location: BoundingBox
     row_count: int
@@ -104,7 +104,7 @@ class TableStructure(TypedDict):
 
 class FormField(TypedDict):
     """VLM-detected form field with metadata."""
-    
+
     field_id: str
     field_type: Literal[
         "text_input", "text_filled", "text_empty",
@@ -124,7 +124,7 @@ class FormField(TypedDict):
 
 class KeyValuePair(TypedDict):
     """VLM-detected key-value pair (label: value format)."""
-    
+
     pair_id: str
     key_text: str
     key_location: BoundingBox
@@ -136,7 +136,7 @@ class KeyValuePair(TypedDict):
 
 class SpecialElement(TypedDict):
     """Special visual elements like logos, stamps, barcodes."""
-    
+
     element_id: str
     element_type: Literal[
         "logo", "stamp", "seal", "barcode", "qr_code",
@@ -154,20 +154,20 @@ class ComponentMap(TypedDict):
     
     Second stage output - identifies what can be extracted and how.
     """
-    
+
     page_number: int
-    
+
     # Structural components
     tables: list[TableStructure]
     forms: list[FormField]
     key_value_pairs: list[KeyValuePair]
-    
+
     # Visual marks (human annotations)
     visual_marks: list[VisualMark]
-    
+
     # Special elements
     special_elements: list[SpecialElement]
-    
+
     # Content categorization
     has_tabular_data: bool
     has_form_fields: bool
@@ -175,22 +175,22 @@ class ComponentMap(TypedDict):
     has_checkboxes: bool
     has_signatures: bool
     has_handwriting: bool
-    
+
     # Extraction guidance
     component_count: int
     extraction_order: list[str]  # Recommended extraction sequence
     challenging_regions: list[dict[str, Any]]  # Regions that may be hard to extract
-    
+
     # VLM recommendations
     suggested_extraction_strategies: dict[str, str]  # component_type -> strategy
     vlm_notes: str
-    
+
     detection_time_ms: int
 
 
 class FieldGroup(TypedDict):
     """Logical grouping of related fields."""
-    
+
     group_name: str
     field_names: list[str]
     group_type: Literal["patient_demographics", "insurance", "diagnosis", "billing", "provider", "custom"]
@@ -200,7 +200,7 @@ class FieldGroup(TypedDict):
 
 class AdaptiveField(TypedDict):
     """VLM-proposed field for adaptive schema."""
-    
+
     field_name: str
     display_name: str
     field_type: Literal["text", "number", "date", "boolean", "currency", "code", "list", "table", "object"]
@@ -219,31 +219,31 @@ class AdaptiveSchema(TypedDict):
     
     Third stage output - what to extract based on visual analysis.
     """
-    
+
     schema_id: str
     document_type_description: str  # Descriptive, not prescriptive
-    
+
     # Field definitions
     field_groups: list[FieldGroup]
     fields: list[AdaptiveField]
     total_field_count: int
-    
+
     # Extraction strategy
     overall_strategy: Literal["form_extraction", "table_extraction", "hybrid", "document_parsing", "adaptive"]
     component_strategies: dict[str, str]  # component_id -> specific strategy
-    
+
     # Validation guidance
     suggested_validations: dict[str, list[str]]  # field_name -> validation rules
     cross_field_relationships: list[dict[str, Any]]
-    
+
     # Confidence requirements
     high_confidence_fields: list[str]  # Fields that MUST be accurate
     optional_fields: list[str]  # Fields that can be null
-    
+
     # VLM reasoning
     vlm_reasoning: str  # Why VLM proposed this schema
     schema_confidence: float
-    
+
     generation_time_ms: int
 
 
@@ -253,31 +253,31 @@ class StructuredExtraction(TypedDict):
     
     Fourth stage output - extracted data with full spatial context.
     """
-    
+
     page_number: int
-    
+
     # Extracted data with spatial context
     extracted_fields: dict[str, Any]  # field_name -> value
     field_locations: dict[str, BoundingBox]  # field_name -> location
     field_confidences: dict[str, float]  # field_name -> confidence
-    
+
     # Component-level results
     table_data: list[dict[str, Any]]  # Extracted table rows
     checkbox_states: dict[str, bool]  # checkbox_id -> checked/unchecked
     visual_mark_states: dict[str, str]  # mark_id -> state description
-    
+
     # Extraction metadata
     extraction_strategy_used: str
     component_extraction_order: list[str]
-    
+
     # Validation hints
     spatial_validation_passed: bool  # Values in expected locations?
     component_validation_passed: bool  # Match component types?
-    
+
     # VLM observations
     extraction_notes: str
     uncertain_regions: list[str]  # Regions where VLM wasn't confident
-    
+
     extraction_time_ms: int
 
 
@@ -333,7 +333,7 @@ def create_empty_component_map(page_number: int) -> ComponentMap:
 def create_empty_adaptive_schema() -> AdaptiveSchema:
     """Create empty adaptive schema for initialization."""
     import secrets
-    
+
     return AdaptiveSchema(
         schema_id=f"adaptive_{secrets.token_hex(8)}",
         document_type_description="unknown",

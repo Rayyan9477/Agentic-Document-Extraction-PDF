@@ -8,11 +8,11 @@ Supported formats: PDF, PNG, JPG, TIFF, BMP, DOCX, XLSX, CSV, DICOM, EDI X12
 """
 
 from src.preprocessing.base_processor import (
+    SUPPORTED_EXTENSIONS,
     BaseFileProcessor,
     FileFormat,
     FileProcessingError,
     FileValidationError,
-    SUPPORTED_EXTENSIONS,
     UnsupportedFormatError,
 )
 from src.preprocessing.batch_manager import BatchManager, BatchResult

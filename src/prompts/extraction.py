@@ -95,6 +95,77 @@ EXTRACTION_ANTI_PATTERNS = """
 """
 
 
+_MODALITY_PROMPT_FRAGMENTS: dict[str, str] = {
+    # WS-3: per-modality prompt fragments concatenated into the EXTRACTION
+    # RULES section. Multiple fragments can apply at once. Order matters
+    # only insofar as the prompt is read top-to-bottom; we keep the most
+    # restrictive guidance (fax / handwritten) last so it's the freshest
+    # context the VLM sees before extracting.
+    "table": (
+        "TABLE-AWARE EXTRACTION: This page contains a table. When extracting "
+        "row-level fields (line-items, charges, codes), respect the table's "
+        "column boundaries. Do not pull data across rows, even when a cell "
+        "appears empty — record the empty cell as null."
+    ),
+    "form": (
+        "FORM-AWARE EXTRACTION: Treat each labelled box / numbered section "
+        "as an independent label-value pair. Respect the form's spatial "
+        "groupings; do not read across box boundaries even if the eye flows "
+        "naturally. Use box numbers (e.g. \"Box 12\") as location hints."
+    ),
+    "handwritten": (
+        "HANDWRITING CAUTION: This page contains handwritten content. Treat "
+        "all handwritten values as LOW-CONFIDENCE by default. Only commit a "
+        "value if you can read every character clearly; if any glyph is "
+        "ambiguous, return null. Cap confidence on handwritten fields at "
+        "0.75 even when reading feels confident — handwriting consistently "
+        "fools VLMs in subtle ways."
+    ),
+    "visual": (
+        "VISUAL / IMAGE-FIRST PAGE: This page is image-dominant (a "
+        "radiograph, ultrasound, photograph, or schematic). DO NOT invent "
+        "structured fields from purely visual content. Only extract values "
+        "that appear as printed captions, legends, or annotations on the "
+        "image. If a field's value would require interpreting the image "
+        "itself (e.g. \"diagnosis\" from an X-ray), return null."
+    ),
+    "fax": (
+        "FAX-GRADE INPUT: This page is a 1-bit fax scan. Strokes will be "
+        "thin and broken; speckle noise around glyphs is normal. Read each "
+        "character carefully — do NOT auto-complete partial digits or "
+        "letters. Numeric fields (CPT codes, NPIs, amounts) are the most "
+        "common fax-OCR failure mode; verify each digit individually before "
+        "committing the value, and prefer null over a guess."
+    ),
+}
+
+
+def _build_modality_section(modalities: list[str] | None) -> str:
+    """Compose the modality-specific guidance block from active modes.
+
+    Returns an empty string when no specialised modes apply (or only
+    ``printed`` is active), so the default prompt is unchanged for the
+    common case.
+    """
+    if not modalities:
+        return ""
+    fragments: list[str] = []
+    # printed is the baseline; emitting its fragment is redundant.
+    for mode in modalities:
+        if mode == "printed":
+            continue
+        text = _MODALITY_PROMPT_FRAGMENTS.get(mode)
+        if text:
+            fragments.append(f"- {text}")
+    if not fragments:
+        return ""
+    return (
+        "\n### MODALITY-SPECIFIC RULES\n"
+        + "\n".join(fragments)
+        + "\n"
+    )
+
+
 def build_extraction_prompt(
     schema_fields: list[dict[str, Any]],
     document_type: str,
@@ -103,6 +174,7 @@ def build_extraction_prompt(
     is_first_pass: bool = True,
     include_reasoning: bool = True,
     include_anti_patterns: bool = True,
+    modalities: list[str] | None = None,
 ) -> str:
     """
     Build the main extraction prompt for a document page.
@@ -115,6 +187,11 @@ def build_extraction_prompt(
         is_first_pass: Whether this is the first or second extraction pass.
         include_reasoning: Whether to include chain-of-thought reasoning protocol.
         include_anti_patterns: Whether to include negative examples.
+        modalities: WS-3 active mode tags (``"fax"``, ``"handwritten"``,
+            ``"visual"``, ``"table"``, ``"form"``). When provided, a
+            ``MODALITY-SPECIFIC RULES`` block is appended to the prompt
+            with one bullet per active non-printed mode. Pass ``None`` or
+            ``["printed"]`` for the default prompt.
 
     Returns:
         Complete extraction prompt for the VLM.
@@ -129,6 +206,8 @@ def build_extraction_prompt(
     anti_patterns = ""
     if include_anti_patterns and is_first_pass:  # Only on first pass to save tokens
         anti_patterns = EXTRACTION_ANTI_PATTERNS
+
+    modality_section = _build_modality_section(modalities)
 
     prompt = f"""
 ## DOCUMENT EXTRACTION TASK - {document_type}
@@ -155,7 +234,7 @@ def build_extraction_prompt(
 
 3. If a field appears multiple times, extract the most prominent instance
 4. For multi-value fields (lists), extract all visible values
-{anti_patterns}
+{modality_section}{anti_patterns}
 
 ### REQUIRED OUTPUT FORMAT
 
@@ -366,6 +445,30 @@ def _build_field_instructions(schema_fields: list[dict[str, Any]]) -> str:
     return "\n\n".join(instructions)
 
 
+def _sanitize_schema_text(value: Any, *, max_length: int = 500, allow_newlines: bool = False) -> str:
+    """
+    Sanitize text that flows from a (potentially user-supplied) schema
+    definition into a prompt template. Defends against prompt-injection
+    via Schema Wizard / custom-schema endpoints.
+
+    Steps:
+      1. Coerce to str.
+      2. Drop triple-backtick fences and stray quote-trios that could close
+         the surrounding markdown context.
+      3. Replace control characters; optionally collapse newlines.
+      4. Truncate to ``max_length``.
+    """
+    text = "" if value is None else str(value)
+    text = text.replace("```", "''' ").replace('"""', "''' ")
+    if not allow_newlines:
+        text = text.replace("\r", " ").replace("\n", " ")
+    # Strip non-printable control chars (keep \t and, if allowed, \n).
+    text = "".join(ch for ch in text if ch == "\t" or (allow_newlines and ch == "\n") or ch.isprintable())
+    if len(text) > max_length:
+        text = text[: max_length - 1] + "…"
+    return text
+
+
 def build_field_prompt(
     field_definition: dict[str, Any],
     document_type: str,
@@ -383,18 +486,29 @@ def build_field_prompt(
 
     Returns:
         Single-field extraction prompt.
+
+    Note:
+        All schema-supplied strings are sanitized via ``_sanitize_schema_text``
+        before being interpolated into the prompt. Custom-schema endpoints
+        (``/api/v1/schemas/save``) accept user input, so this is the
+        prompt-injection containment boundary.
     """
-    name = field_definition.get("name", "unknown")
-    display = field_definition.get("display_name", name)
-    field_type = field_definition.get("field_type", "string")
-    description = field_definition.get("description", "")
-    examples = field_definition.get("examples", [])
-    pattern = field_definition.get("pattern", "")
-    location_hint = field_definition.get("location_hint", "")
+    name = _sanitize_schema_text(field_definition.get("name", "unknown"), max_length=64)
+    display = _sanitize_schema_text(field_definition.get("display_name", name), max_length=128)
+    field_type = _sanitize_schema_text(field_definition.get("field_type", "string"), max_length=32)
+    description = _sanitize_schema_text(
+        field_definition.get("description", ""), max_length=500, allow_newlines=True,
+    )
+    examples_raw = field_definition.get("examples", []) or []
+    examples = [_sanitize_schema_text(e, max_length=64) for e in examples_raw[:5]]
+    pattern = _sanitize_schema_text(field_definition.get("pattern", ""), max_length=200)
+    location_hint = _sanitize_schema_text(field_definition.get("location_hint", ""), max_length=200)
+    document_type = _sanitize_schema_text(document_type, max_length=64)
+    additional_context = _sanitize_schema_text(additional_context, max_length=500, allow_newlines=True)
 
     example_str = ""
     if examples:
-        example_str = f"\nExamples of valid values: {', '.join(str(e) for e in examples[:5])}"
+        example_str = f"\nExamples of valid values: {', '.join(examples)}"
 
     pattern_str = ""
     if pattern:

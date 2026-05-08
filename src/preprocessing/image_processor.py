@@ -5,25 +5,22 @@ Converts standalone image files into PageImage objects for
 uniform downstream processing through the extraction pipeline.
 """
 
-import base64
 import io
 import secrets
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from PIL import Image
 
-from src.config import get_logger, get_settings
+from src.config import get_logger
 from src.preprocessing.base_processor import (
     BaseFileProcessor,
     FileValidationError,
 )
 from src.preprocessing.pdf_processor import (
-    DocumentOrientation,
-    PDFMetadata,
     PageImage,
+    PDFMetadata,
     ProcessingResult,
 )
 

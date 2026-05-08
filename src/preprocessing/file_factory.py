@@ -9,13 +9,13 @@ from pathlib import Path
 
 from src.config import get_logger
 from src.preprocessing.base_processor import (
-    BaseFileProcessor,
     DICOM_FORMATS,
     EDI_FORMATS,
-    FileFormat,
     IMAGE_FORMATS,
     SPREADSHEET_FORMATS,
     SUPPORTED_EXTENSIONS,
+    BaseFileProcessor,
+    FileFormat,
     UnsupportedFormatError,
 )
 from src.preprocessing.pdf_processor import ProcessingResult
@@ -144,7 +144,6 @@ class FileProcessorFactory:
 
     def _create_pdf_processor(self) -> BaseFileProcessor:
         """Create PDF processor wrapped as BaseFileProcessor."""
-        from src.preprocessing.pdf_processor import PDFProcessor as _PDFProcessor
 
         # PDFProcessor doesn't extend BaseFileProcessor but has the same interface.
         # We use a lightweight adapter.

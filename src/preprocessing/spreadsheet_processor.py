@@ -11,7 +11,6 @@ import secrets
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -22,9 +21,8 @@ from src.preprocessing.base_processor import (
     FileValidationError,
 )
 from src.preprocessing.pdf_processor import (
-    DocumentOrientation,
-    PDFMetadata,
     PageImage,
+    PDFMetadata,
     ProcessingResult,
 )
 

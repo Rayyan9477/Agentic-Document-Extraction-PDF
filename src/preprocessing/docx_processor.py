@@ -23,9 +23,8 @@ from src.preprocessing.base_processor import (
     FileValidationError,
 )
 from src.preprocessing.pdf_processor import (
-    DocumentOrientation,
-    PDFMetadata,
     PageImage,
+    PDFMetadata,
     ProcessingResult,
 )
 
@@ -149,7 +148,6 @@ class DocxProcessor(BaseFileProcessor):
                     if child.tail:
                         text += child.tail
                 # Use the paragraph's full text via python-docx API
-                pass
 
             elif tag == "tbl":
                 # Table — render as text grid

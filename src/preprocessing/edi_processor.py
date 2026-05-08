@@ -7,25 +7,21 @@ representation as PageImage for the VLM pipeline.
 """
 
 import io
-import re
 import secrets
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
 from src.config import get_logger
 from src.preprocessing.base_processor import (
     BaseFileProcessor,
-    FileProcessingError,
     FileValidationError,
 )
 from src.preprocessing.pdf_processor import (
-    DocumentOrientation,
-    PDFMetadata,
     PageImage,
+    PDFMetadata,
     ProcessingResult,
 )
 

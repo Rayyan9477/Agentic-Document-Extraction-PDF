@@ -190,12 +190,34 @@ class ImageEnhancer:
             denoise_strength=self._denoise_strength,
         )
 
-    def enhance(self, page_image: PageImage) -> EnhancementResult:
+    def enhance(
+        self,
+        page_image: PageImage,
+        *,
+        modes: list[str] | None = None,
+    ) -> EnhancementResult:
         """
-        Apply all enabled enhancements to a page image.
+        Apply enhancements to a page image, optionally specialised per modality.
 
         Args:
             page_image: PageImage to enhance.
+            modes: WS-3 modality hints (``"fax"``, ``"handwritten"``,
+                ``"printed"``, ``"table"``, ``"form"``, ``"visual"``).
+                Multiple modes may be active simultaneously. When omitted
+                or empty, the default deskew + denoise + CLAHE pipeline
+                runs (legacy behaviour). Mode-specific overrides:
+
+                * ``"fax"`` → deskew + Otsu binarization + morphological
+                  opening; CLAHE and Non-Local-Means denoise are skipped
+                  (they over-process 1-bit fax artefacts).
+                * ``"handwritten"`` → deskew + light denoise; CLAHE is
+                  skipped (it distorts pen-stroke gradients).
+                * ``"visual"`` → deskew only; preserves natural gradients
+                  for radiology / ultrasound / photo content.
+
+                Modes are not mutually exclusive: a fax-of-handwritten
+                form will get binarized (the ``fax`` rule wins because
+                ``fax`` implies a 1-bit transport channel).
 
         Returns:
             EnhancementResult with enhanced image and metrics.
@@ -207,6 +229,13 @@ class ImageEnhancer:
 
         start_time = time.perf_counter()
         enhancements_applied: list[EnhancementType] = []
+        active_modes = set(modes or [])
+
+        # Mode flag fan-out. ``fax`` dominates because once a document is
+        # 1-bit/CCITT-compressed, the gentler handwritten path is moot.
+        is_fax = "fax" in active_modes
+        is_handwritten = "handwritten" in active_modes and not is_fax
+        is_visual = "visual" in active_modes and not is_fax and not is_handwritten
 
         try:
             # Convert to OpenCV format
@@ -230,21 +259,36 @@ class ImageEnhancer:
                     skew_corrected = True
                     enhancements_applied.append(EnhancementType.DESKEW)
 
-            # Apply denoising
+            # Apply denoising. Fax mode skips Non-Local-Means entirely
+            # (binarization will collapse gradient noise anyway). Handwritten
+            # mode runs a *light* denoise because aggressive denoising eats
+            # pen strokes; the default path keeps the legacy behaviour.
             noise_reduction_ratio = 1.0
-            if self._enable_denoise:
+            if self._enable_denoise and not is_fax:
                 img_before_denoise = img.copy()
-                img = self._denoise(img)
+                if is_handwritten:
+                    img = self._denoise(img, h=3.0, h_color=3.0)  # gentler
+                else:
+                    img = self._denoise(img)
                 noise_reduction_ratio = self._calculate_noise_reduction(img_before_denoise, img)
                 enhancements_applied.append(EnhancementType.DENOISE)
 
-            # Apply CLAHE contrast enhancement
+            # CLAHE: skip for fax (1-bit), handwritten (stroke-distorting),
+            # and visual (preserves natural gradients).
             contrast_improvement = 1.0
-            if self._enable_contrast:
+            if self._enable_contrast and not (is_fax or is_handwritten or is_visual):
                 img_before_clahe = img.copy()
                 img = self._apply_clahe(img)
                 contrast_improvement = self._calculate_contrast_improvement(img_before_clahe, img)
                 enhancements_applied.append(EnhancementType.CLAHE)
+
+            # Fax-specific path: Otsu threshold + morphological opening to
+            # clean speckle noise typical of CCITT-compressed fax scans.
+            if is_fax:
+                img = self._apply_binarization(img)
+                enhancements_applied.append(EnhancementType.BINARIZATION)
+                img = self._apply_morphology(img)
+                enhancements_applied.append(EnhancementType.MORPHOLOGICAL)
 
             # Calculate enhanced metrics
             enhanced_variance = self._calculate_variance(img)
@@ -465,12 +509,22 @@ class ImageEnhancer:
         except Exception as e:
             raise DeskewError(f"Deskewing failed: {e}") from e
 
-    def _denoise(self, img: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    def _denoise(
+        self,
+        img: NDArray[np.uint8],
+        *,
+        h: float | None = None,
+        h_color: float | None = None,
+    ) -> NDArray[np.uint8]:
         """
         Apply noise reduction using Non-Local Means Denoising.
 
         Args:
             img: Input image in BGR format.
+            h: Optional luminance denoise strength override; defaults to
+                ``self._denoise_strength``. Mode-specific callers (WS-3
+                handwritten mode) lower this to avoid eating pen strokes.
+            h_color: Optional chrominance denoise strength override.
 
         Returns:
             Denoised image.
@@ -478,31 +532,66 @@ class ImageEnhancer:
         Raises:
             DenoiseError: If denoising fails.
         """
+        h_lum = h if h is not None else self._denoise_strength
+        h_chr = h_color if h_color is not None else self._denoise_strength
         try:
             if len(img.shape) == 3:
-                # Color image - use fastNlMeansDenoisingColored
+                # OpenCV's Python binding for fastNlMeansDenoisingColored uses
+                # positional args: (src, dst, h, hColor, templateWindowSize,
+                # searchWindowSize). The keyword names exposed (e.g. ``hColor``,
+                # not ``hForColorComponents``) vary across OpenCV builds, so
+                # we pass positionally to stay portable.
                 denoised = cv2.fastNlMeansDenoisingColored(
                     img,
                     None,
-                    h=self._denoise_strength,
-                    hForColorComponents=self._denoise_strength,
-                    templateWindowSize=7,
-                    searchWindowSize=21,
+                    float(h_lum),
+                    float(h_chr),
+                    7,
+                    21,
                 )
             else:
-                # Grayscale image
+                # Grayscale image — fastNlMeansDenoising has a stable kw API.
                 denoised = cv2.fastNlMeansDenoising(
                     img,
                     None,
-                    h=self._denoise_strength,
-                    templateWindowSize=7,
-                    searchWindowSize=21,
+                    float(h_lum),
+                    7,
+                    21,
                 )
 
             return denoised
 
         except Exception as e:
             raise DenoiseError(f"Denoising failed: {e}") from e
+
+    def _apply_binarization(self, img: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        """
+        Otsu binarization (WS-3 fax mode).
+
+        Faxes are typically 1-bit CCITT-compressed at the source; running
+        them through CLAHE / colour preservation pipelines wastes cycles
+        and amplifies aliasing. Otsu finds the optimal global threshold
+        for the bimodal histogram fax scans produce, then converts the
+        image to true binary. Output is BGR-shaped (single channel
+        replicated to 3) so the rest of the enhancement chain stays
+        type-compatible.
+        """
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+
+    def _apply_morphology(self, img: NDArray[np.uint8]) -> NDArray[np.uint8]:
+        """
+        Morphological opening (WS-3 fax mode).
+
+        Pairs with ``_apply_binarization``. Opening = erosion then
+        dilation; cleans up isolated speckle pixels that survive Otsu
+        thresholding without thinning the actual character strokes. A
+        2×2 kernel is small enough to preserve thin glyphs from fax-grade
+        ~200 DPI scans.
+        """
+        kernel = np.ones((2, 2), np.uint8)
+        return cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
 
     def _apply_clahe(self, img: NDArray[np.uint8]) -> NDArray[np.uint8]:
         """

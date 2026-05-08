@@ -6,16 +6,12 @@ enabling the FileProcessorFactory to route files to the correct processor.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 from src.config import get_logger
 from src.preprocessing.pdf_processor import (
     DocumentOrientation,
-    PageImage,
-    PDFMetadata,
     ProcessingResult,
 )
 

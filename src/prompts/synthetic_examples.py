@@ -11,6 +11,7 @@ Each example is ~100-150 tokens to stay within the 8B model's attention budget.
 
 from __future__ import annotations
 
+
 SYNTHETIC_EXAMPLES: dict[str, dict[str, str]] = {
     "medical_superbill": {
         "patient": (
