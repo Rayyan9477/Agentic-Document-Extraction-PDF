@@ -8,8 +8,6 @@ schema registry integration, and new FieldType values.
 
 from __future__ import annotations
 
-import pytest
-
 from src.schemas.bank_statement import (
     ACCOUNT_HOLDER_FIELDS,
     ACCOUNT_INFO_FIELDS,
@@ -22,7 +20,7 @@ from src.schemas.bank_statement import (
     TRANSACTION_SUMMARY_FIELDS,
 )
 from src.schemas.base import DocumentSchema, DocumentType, SchemaRegistry
-from src.schemas.field_types import FieldDefinition, FieldType, RuleOperator
+from src.schemas.field_types import FieldType, RuleOperator
 from src.schemas.form_1099 import (
     FORM_1099_CROSS_FIELD_RULES,
     FORM_1099_META_FIELDS,
@@ -45,8 +43,8 @@ from src.schemas.invoice import (
 )
 from src.schemas.w2 import (
     ADDITIONAL_TAX_FIELDS,
-    EMPLOYER_FIELDS,
     EMPLOYEE_FIELDS,
+    EMPLOYER_FIELDS,
     STATE_LOCAL_FIELDS,
     W2_CROSS_FIELD_RULES,
     W2_META_FIELDS,

@@ -2,18 +2,17 @@
 Tests for the health check API routes in src/api/routes/health.py.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.routes.health import (
-    router,
     API_VERSION,
-    _get_system_info,
     _check_redis_health,
     _check_worker_health,
+    _get_system_info,
+    router,
 )
+
 
 app = FastAPI()
 app.include_router(router)

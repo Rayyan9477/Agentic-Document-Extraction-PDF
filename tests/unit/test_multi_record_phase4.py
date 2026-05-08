@@ -8,18 +8,13 @@ Tests cover:
 - Config plumbing: new flags in extraction_config
 """
 
-import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from src.extraction.multi_record import (
-    ExtractedRecord,
     MultiRecordExtractor,
     RecordBoundary,
 )
 from src.prompts.synthetic_examples import (
-    SYNTHETIC_EXAMPLES,
     _DEFAULT_EXAMPLE,
     get_synthetic_example,
 )
@@ -501,7 +496,7 @@ class TestConfigPlumbing:
 
     def test_config_defaults(self):
         """New flags should have sensible defaults if missing from config.json."""
-        from src.config.extraction_config import _load_raw, get_extraction_config
+        from src.config.extraction_config import get_extraction_config
 
         with patch.object(
             __import__("src.config.extraction_config", fromlist=["_load_raw"]),

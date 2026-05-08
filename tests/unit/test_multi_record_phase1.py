@@ -9,8 +9,6 @@ Tests cover:
 - Exponential backoff retry logic
 """
 
-import json
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -363,14 +361,13 @@ class TestExponentialBackoff:
             if call_count[0] == 1:
                 # First call - return invalid JSON
                 return mock_response
-            else:
-                # Second call - check if prompt was reformulated
-                request = args[0]
-                if "CRITICAL: Return ONLY valid JSON" in request.prompt:
-                    reformulated[0] = True
-                # Now return valid JSON
-                mock_response.content = '{"success": true}'
-                return mock_response
+            # Second call - check if prompt was reformulated
+            request = args[0]
+            if "CRITICAL: Return ONLY valid JSON" in request.prompt:
+                reformulated[0] = True
+            # Now return valid JSON
+            mock_response.content = '{"success": true}'
+            return mock_response
 
         mock_client.send_vision_request = check_reformulation
 

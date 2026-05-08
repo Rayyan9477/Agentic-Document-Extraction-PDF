@@ -12,19 +12,17 @@ Tests cover:
 """
 
 import csv
-import hashlib
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 from PIL import Image
 
 from src.preprocessing.base_processor import (
+    SUPPORTED_EXTENSIONS,
     BaseFileProcessor,
     FileFormat,
     FileValidationError,
-    SUPPORTED_EXTENSIONS,
     UnsupportedFormatError,
 )
 from src.preprocessing.file_factory import FileProcessorFactory

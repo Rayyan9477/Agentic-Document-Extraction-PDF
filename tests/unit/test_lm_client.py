@@ -11,11 +11,8 @@ Tests cover:
 - Health check
 """
 
-import base64
-import json
-from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -23,9 +20,9 @@ from src.client.lm_client import (
     LMClientError,
     LMConnectionError,
     LMResponseError,
+    LMStudioClient,
     LMTimeoutError,
     LMValidationError,
-    LMStudioClient,
     MessageRole,
     VisionRequest,
     VisionResponse,

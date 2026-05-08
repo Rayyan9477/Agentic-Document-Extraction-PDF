@@ -201,9 +201,11 @@ class TestImageEnhancerModes:
         Built with the actual PageImage signature from
         ``src/preprocessing/pdf_processor.py`` (no ``mime_type`` kwarg).
         """
-        from src.preprocessing.pdf_processor import PageImage
-        from PIL import Image
         import io
+
+        from PIL import Image
+
+        from src.preprocessing.pdf_processor import PageImage
 
         arr = np.tile(np.linspace(20, 230, 64, dtype=np.uint8), (64, 1))
         img = Image.fromarray(arr, mode="L").convert("RGB")

@@ -7,7 +7,6 @@ pre-built configs (florence2, qwen3vl), and BaseAgent integration.
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -447,10 +446,20 @@ class TestModuleExports:
     def test_imports_from_client(self):
         from src.client import (
             ModelConfig as MC,
+        )
+        from src.client import (
             ModelRouter as MR,
+        )
+        from src.client import (
             ModelTask as MT,
+        )
+        from src.client import (
             RoutingDecision as RD,
+        )
+        from src.client import (
             florence2_config as f2,
+        )
+        from src.client import (
             qwen3vl_config as q3,
         )
         assert MC is ModelConfig

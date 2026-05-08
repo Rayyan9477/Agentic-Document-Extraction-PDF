@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from src.agents.base import AgentError
 from src.agents.layout_agent import LayoutAgent, LayoutAnalysisError
@@ -15,8 +16,9 @@ from src.agents.layout_agent import LayoutAgent, LayoutAnalysisError
 
 def _mock_client(parsed_json: dict | None = None):
     """Create a MagicMock LMStudioClient with configurable VLM response."""
-    from src.client.lm_client import VisionResponse
     import json
+
+    from src.client.lm_client import VisionResponse
 
     if parsed_json is None:
         parsed_json = {
