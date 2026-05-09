@@ -11,6 +11,8 @@ Responsible for:
 import time
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from src.agents.base import AgentResult, BaseAgent, ExtractionError
 from src.agents.utils import (
     RetryConfig,
@@ -34,6 +36,30 @@ from src.prompts.extraction import (
     build_extraction_prompt,
     build_verification_prompt,
 )
+
+
+# ---------------------------------------------------------------------------
+# V3 Phase 1 — permissive extraction-result schema for constrained decoding
+# ---------------------------------------------------------------------------
+
+
+class _ExtractionEnvelope(BaseModel):
+    """Permissive JSON-object envelope for extractor VLM calls.
+
+    The extractor's response shape is field-set-dependent (CMS-1500 has
+    different fields from a generic invoice) so a strict per-field
+    schema would couple the constrained-decode wrapper to every active
+    schema in the registry. Instead, Phase 1 binds a permissive
+    "the response must be a JSON object" schema — sufficient to
+    eliminate the malformed-JSON failure class while leaving field
+    shapes for Phase 2's dual-VLM EXTRACTOR / AUDITOR schemas to
+    enumerate strictly.
+
+    ``model_config`` allows arbitrary extra keys so the document-type
+    field set (which we don't redeclare here) survives the round-trip.
+    """
+
+    model_config = ConfigDict(extra="allow")
 from src.prompts.grounding_rules import (
     build_enhanced_system_prompt,
     build_grounded_system_prompt,
@@ -213,6 +239,12 @@ class ExtractorAgent(BaseAgent):
             page_extractions: list[dict[str, Any]] = []
             total_vlm_calls = 0
 
+            # V3 Phase 5: profile flows from analyzer through state.
+            # When unset (legacy callers / pre-Phase-5 checkpoints) we
+            # default to ``None`` and the prompt builder skips the
+            # profile section.
+            profile_name = state.get("profile") or None
+
             for page_data in page_images:
                 page_result = self._extract_page(
                     page_data=page_data,
@@ -220,6 +252,7 @@ class ExtractorAgent(BaseAgent):
                     document_type=state.get("document_type", "OTHER"),
                     total_pages=len(page_images),
                     structure_context=structure_context,
+                    profile=profile_name,
                 )
                 page_extractions.append(serialize_page_extraction(page_result))
                 total_vlm_calls += page_result.vlm_calls
@@ -714,13 +747,19 @@ class ExtractorAgent(BaseAgent):
         )
 
         def make_vlm_call() -> dict[str, Any]:
-            return self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound call. The permissive envelope
+            # eliminates the malformed-JSON class without forcing every
+            # registered DocumentSchema to be re-expressed as a strict
+            # Pydantic model — that's the Phase 2 job.
+            payload, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=user_prompt,
+                schema=_ExtractionEnvelope,
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_tokens=6000,
             )
+            return payload
 
         try:
             return retry_with_backoff(
@@ -1145,6 +1184,8 @@ Begin adaptive extraction now."""
         document_type: str,
         total_pages: int,
         structure_context: dict[str, Any] | None = None,
+        *,
+        profile: str | None = None,
     ) -> PageExtraction:
         """
         Extract data from a single page using dual-pass strategy.
@@ -1188,6 +1229,7 @@ Begin adaptive extraction now."""
                 is_first_pass=True,
                 structure_context=structure_context,
                 ocr_text=ocr_text,
+                profile=profile,
             )
             vlm_calls += 1
 
@@ -1201,6 +1243,7 @@ Begin adaptive extraction now."""
                 is_first_pass=False,
                 structure_context=structure_context,
                 ocr_text=ocr_text,
+                profile=profile,
             )
             vlm_calls += 1
 
@@ -1245,6 +1288,8 @@ Begin adaptive extraction now."""
         is_first_pass: bool,
         structure_context: dict[str, Any] | None = None,
         ocr_text: str = "",
+        *,
+        profile: str | None = None,
     ) -> dict[str, Any]:
         """
         Perform a single extraction pass with enhanced prompts and retry logic.
@@ -1280,6 +1325,7 @@ Begin adaptive extraction now."""
                 is_first_pass=True,
                 include_reasoning=True,
                 include_anti_patterns=True,
+                profile=profile,
             )
         else:
             prompt = build_verification_prompt(
@@ -1335,12 +1381,15 @@ Begin adaptive extraction now."""
         temperature = 0.1 if is_first_pass else 0.3
 
         def make_vlm_call() -> dict[str, Any]:
-            return self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound call (permissive envelope).
+            payload, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=prompt,
+                schema=_ExtractionEnvelope,
                 system_prompt=system_prompt,
                 temperature=temperature,
             )
+            return payload
 
         try:
             return retry_with_backoff(
@@ -1698,9 +1747,11 @@ Begin adaptive extraction now."""
                 document_type=document_type,
             )
 
-            result = self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound single-field call (permissive envelope).
+            result, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=prompt,
+                schema=_ExtractionEnvelope,
                 system_prompt=system_prompt,
             )
 

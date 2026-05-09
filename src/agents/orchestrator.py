@@ -80,6 +80,15 @@ NODE_COMPONENTS = "components"
 NODE_SCHEMA = "schema"
 NODE_TABLE_DETECT = "table_detect"  # Table structure detection (Phase 2B)
 
+# V3 Phase 2 — heterogeneous dual-VLM extraction nodes
+NODE_EXTRACT_PASS1 = "extract_pass1"
+NODE_EXTRACT_PASS2 = "extract_pass2"
+NODE_RECONCILE = "reconcile"
+
+# V3 Phase 3 — Critic + bbox-roundtrip routing nodes
+NODE_CRITIC = "critic"
+NODE_CRITIC_COMBINER = "critic_combiner"
+
 # Routing decisions
 ROUTE_COMPLETE = "complete"
 ROUTE_RETRY = "retry"
@@ -395,6 +404,11 @@ class OrchestratorAgent(BaseAgent):
         schema_agent: BaseAgent | None = None,
         splitter_agent: BaseAgent | None = None,
         table_detector_agent: BaseAgent | None = None,
+        extractor_pass1_agent: BaseAgent | None = None,
+        extractor_pass2_agent: BaseAgent | None = None,
+        reconciler_node: Callable[[ExtractionState], ExtractionState] | None = None,
+        critic_agent: BaseAgent | None = None,
+        critic_combiner_node: Callable[[ExtractionState], ExtractionState] | None = None,
     ) -> StateGraph:
         """
         Build the LangGraph workflow with all agent nodes.
@@ -434,11 +448,28 @@ class OrchestratorAgent(BaseAgent):
         self._layout_agent = layout_agent
         self._component_agent = component_agent
         self._schema_agent = schema_agent
+        self._extractor_pass1 = extractor_pass1_agent
+        self._extractor_pass2 = extractor_pass2_agent
+        self._reconciler_node = reconciler_node
+        self._critic = critic_agent
+        self._critic_combiner_node = critic_combiner_node
 
         # Determine if VLM-first pipeline is available
         has_vlm_first = all([layout_agent, component_agent, schema_agent])
         has_splitter = splitter_agent is not None
         has_table_detector = table_detector_agent is not None
+        # V3 Phase 2 — heterogeneous dual-VLM is available when both Pass
+        # agents AND the reconciler node are wired. Without all three, the
+        # legacy single-VLM extractor handles the EXTRACT node.
+        has_dual_vlm = bool(
+            extractor_pass1_agent
+            and extractor_pass2_agent
+            and reconciler_node
+        )
+        # V3 Phase 3 — Critic runs between validate and route when wired.
+        # The combiner node always pairs with the Critic; without one we
+        # skip the Critic chain entirely.
+        has_critic = bool(critic_agent and critic_combiner_node)
 
         # Create the state graph
         workflow = StateGraph(ExtractionState)
@@ -458,6 +489,26 @@ class OrchestratorAgent(BaseAgent):
         # Add legacy pipeline nodes
         workflow.add_node(NODE_ANALYZE, self._run_analyzer)
         workflow.add_node(NODE_EXTRACT, self._run_extractor)
+
+        # V3 Phase 2 — heterogeneous dual-VLM nodes. ``NODE_EXTRACT`` is
+        # always declared (the legacy extractor) so existing edges that
+        # target it stay valid. When dual-VLM is wired, an additional
+        # 3-node chain (pass1 -> pass2 in parallel -> reconcile) lands in
+        # the graph and ``NODE_EXTRACT`` becomes a no-op for the new
+        # path. Routing decides which chain runs (see edge wiring below).
+        if has_dual_vlm:
+            workflow.add_node(NODE_EXTRACT_PASS1, self._run_extractor_pass1)
+            workflow.add_node(NODE_EXTRACT_PASS2, self._run_extractor_pass2)
+            workflow.add_node(NODE_RECONCILE, self._reconciler_node)
+
+        # V3 Phase 3 — Critic + combiner. Critic runs once per document
+        # between ``validate`` and ``route``; the combiner merges its
+        # signal with dual-pass agreement and modality penalty into
+        # ``confidence_components`` for the calibrator. Both nodes
+        # land together; the combiner has no value without the Critic.
+        if has_critic:
+            workflow.add_node(NODE_CRITIC, self._run_critic)
+            workflow.add_node(NODE_CRITIC_COMBINER, self._critic_combiner_node)
 
         # Add table detector node if available
         if has_table_detector:
@@ -522,9 +573,36 @@ class OrchestratorAgent(BaseAgent):
         else:
             workflow.add_edge(NODE_ANALYZE, NODE_EXTRACT)
 
-        # Both pipelines converge at extract -> validate -> route
-        workflow.add_edge(NODE_EXTRACT, NODE_VALIDATE)
-        workflow.add_edge(NODE_VALIDATE, NODE_ROUTE)
+        # V3 Phase 2 — when dual-VLM is wired AND extraction.engine=dual_vlm,
+        # the EXTRACT node fans out to Pass 1 + Pass 2 then reconciles.
+        # We route via a conditional edge from a "select_extractor" check
+        # baked into the legacy NODE_EXTRACT runner: if dual_vlm is active,
+        # NODE_EXTRACT is a pass-through that hands off to NODE_EXTRACT_PASS1.
+        # See ``_run_extractor`` for the dispatch logic. The graph wiring
+        # below adds the new chain unconditionally when dual-VLM agents
+        # exist; the runtime gate is the engine flag.
+        if has_dual_vlm:
+            # Sequential: pass1 -> pass2 -> reconcile -> validate.
+            # (Phase 2 ships sequential; ``Send(...)`` fanout for true
+            # parallel pass1 || pass2 lands when LangGraph's parallel-
+            # branch story stabilises in the orchestrator's broader
+            # refactor.)
+            workflow.add_edge(NODE_EXTRACT, NODE_EXTRACT_PASS1)
+            workflow.add_edge(NODE_EXTRACT_PASS1, NODE_EXTRACT_PASS2)
+            workflow.add_edge(NODE_EXTRACT_PASS2, NODE_RECONCILE)
+            workflow.add_edge(NODE_RECONCILE, NODE_VALIDATE)
+        else:
+            workflow.add_edge(NODE_EXTRACT, NODE_VALIDATE)
+
+        # V3 Phase 3 — splice the Critic chain between validate and route.
+        # When wired: validate -> critic -> critic_combiner -> route.
+        # When not: validate -> route (legacy / Phase 2 behavior).
+        if has_critic:
+            workflow.add_edge(NODE_VALIDATE, NODE_CRITIC)
+            workflow.add_edge(NODE_CRITIC, NODE_CRITIC_COMBINER)
+            workflow.add_edge(NODE_CRITIC_COMBINER, NODE_ROUTE)
+        else:
+            workflow.add_edge(NODE_VALIDATE, NODE_ROUTE)
 
         # Add conditional edges from route node
         workflow.add_conditional_edges(
@@ -629,11 +707,65 @@ class OrchestratorAgent(BaseAgent):
             thread_id=thread_id,
         )
 
+        # V3 Phase 6 — observability dispatcher for canonical events.
+        # Loaded lazily; failures are non-fatal (defensive sink).
         try:
-            # Prepare config for checkpointing
+            from src.monitoring.observability import (
+                EVENT_EXTRACTION_COMPLETED,
+                EVENT_EXTRACTION_STARTED,
+                EVENT_HUMAN_REVIEW_TRIGGERED,
+                _read_trace_id_from_context,
+                get_dispatcher,
+            )
+
+            _obs = get_dispatcher()
+        except Exception:  # pragma: no cover - defensive
+            _obs = None
+            EVENT_EXTRACTION_STARTED = "extraction_started"  # type: ignore[assignment]
+            EVENT_EXTRACTION_COMPLETED = "extraction_completed"  # type: ignore[assignment]
+            EVENT_HUMAN_REVIEW_TRIGGERED = "human_review_triggered"  # type: ignore[assignment]
+
+            def _read_trace_id_from_context() -> str | None:  # type: ignore[no-redef]
+                return None
+
+        if _obs is not None and _obs.is_active:
+            try:
+                _obs.emit_event(
+                    EVENT_EXTRACTION_STARTED,
+                    {
+                        "processing_id": initial_state.get("processing_id"),
+                        "thread_id": thread_id,
+                        "document_type": initial_state.get("document_type"),
+                        "profile": initial_state.get("profile"),
+                        "page_count": len(initial_state.get("page_images", [])),
+                        "trace_id": _read_trace_id_from_context(),
+                    },
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+        try:
+            # Prepare config for checkpointing.
+            # V3 Phase 7 — checkpoint namespace partitioned by tenant.
+            # When the initial state carries a ``tenant_id`` we scope
+            # the checkpoint to ``tenant:<tenant>:proc:<processing_id>``
+            # so two simultaneous extractions for different tenants
+            # cannot read each other's checkpoints. Falls back to
+            # the legacy single-namespace behaviour when no tenant
+            # is set.
             config: dict[str, Any] = {}
             if thread_id and self._checkpointer:
-                config["configurable"] = {"thread_id": thread_id}
+                configurable: dict[str, Any] = {"thread_id": thread_id}
+                tenant_id = (
+                    initial_state.get("tenant_id")
+                    or initial_state.get("tenant")
+                )
+                proc_id = initial_state.get("processing_id")
+                if tenant_id and proc_id:
+                    configurable["checkpoint_ns"] = (
+                        f"tenant:{tenant_id}:proc:{proc_id}"
+                    )
+                config["configurable"] = configurable
 
             # Run the workflow
             final_state = self._compiled_workflow.invoke(initial_state, config)
@@ -652,10 +784,55 @@ class OrchestratorAgent(BaseAgent):
                 {"total_processing_ms": duration_ms},
             )
 
+            # V3 Phase 6 — emit completion / human-review events.
+            if _obs is not None and _obs.is_active:
+                try:
+                    _obs.emit_event(
+                        EVENT_EXTRACTION_COMPLETED,
+                        {
+                            "processing_id": final_state.get("processing_id"),
+                            "thread_id": thread_id,
+                            "status": final_state.get("status"),
+                            "document_type": final_state.get("document_type"),
+                            "profile": final_state.get("profile"),
+                            "overall_confidence": final_state.get("overall_confidence"),
+                            "duration_ms": duration_ms,
+                            "vlm_calls": final_state.get("total_vlm_calls", 0),
+                            "trace_id": _read_trace_id_from_context(),
+                        },
+                    )
+                    if final_state.get("requires_human_review"):
+                        _obs.emit_event(
+                            EVENT_HUMAN_REVIEW_TRIGGERED,
+                            {
+                                "processing_id": final_state.get("processing_id"),
+                                "thread_id": thread_id,
+                                "reason": final_state.get("human_review_reason"),
+                                "critic_recommendation": final_state.get("critic_recommendation"),
+                                "trace_id": _read_trace_id_from_context(),
+                            },
+                        )
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
             return final_state
 
         except Exception as e:
             self.log_operation_complete("full_extraction", start_time, success=False)
+            if _obs is not None and _obs.is_active:
+                try:
+                    _obs.emit_event(
+                        EVENT_EXTRACTION_COMPLETED,
+                        {
+                            "processing_id": initial_state.get("processing_id"),
+                            "thread_id": thread_id,
+                            "status": "failed",
+                            "error": str(e),
+                            "trace_id": _read_trace_id_from_context(),
+                        },
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    pass
             raise OrchestrationError(
                 f"Workflow execution failed: {e}",
                 agent_name=self.name,
@@ -850,7 +1027,30 @@ class OrchestratorAgent(BaseAgent):
             return state
 
     def _run_extractor(self, state: ExtractionState) -> ExtractionState:
-        """Run the extractor agent node."""
+        """Run the legacy extractor — or pass through when dual-VLM is active.
+
+        When ``settings.extraction.engine == "dual_vlm"`` AND the dual-
+        VLM agents are wired in ``build_workflow``, this node becomes a
+        pass-through and the downstream edges (``NODE_EXTRACT_PASS1`` ->
+        ``NODE_EXTRACT_PASS2`` -> ``NODE_RECONCILE``) do the real work.
+        Otherwise the legacy single-VLM extractor runs as before.
+        """
+        from src.config.settings import ExtractionEngine
+
+        engine = self._settings.extraction.engine
+        if (
+            engine == ExtractionEngine.DUAL_VLM
+            and self._extractor_pass1 is not None
+            and self._extractor_pass2 is not None
+            and self._reconciler_node is not None
+        ):
+            # Pass-through: the next edge dispatches to NODE_EXTRACT_PASS1.
+            self._logger.info(
+                "extractor_dispatching_to_dual_vlm",
+                processing_id=state.get("processing_id"),
+            )
+            return state
+
         if self._extractor is None:
             raise OrchestrationError(
                 "Extractor agent not configured",
@@ -864,6 +1064,86 @@ class OrchestratorAgent(BaseAgent):
             state = add_error(state, f"Extraction failed: {e}")
             state = set_status(state, ExtractionStatus.FAILED, "extraction_failed")
             return state
+
+    # ------------------------------------------------------------------
+    # V3 Phase 2 — heterogeneous dual-VLM runners
+    # ------------------------------------------------------------------
+
+    def _run_extractor_pass1(self, state: ExtractionState) -> ExtractionState:
+        """Run Pass 1 (EXTRACTOR / primary VLM)."""
+        if self._extractor_pass1 is None:
+            raise OrchestrationError(
+                "ExtractorPass1Agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+        try:
+            return self._extractor_pass1.process(state)
+        except AgentError as e:
+            state = add_error(state, f"Pass 1 extraction failed: {e}")
+            state = set_status(state, ExtractionStatus.FAILED, "pass1_failed")
+            return state
+
+    def _run_extractor_pass2(self, state: ExtractionState) -> ExtractionState:
+        """Run Pass 2 (AUDITOR / secondary VLM)."""
+        if self._extractor_pass2 is None:
+            raise OrchestrationError(
+                "ExtractorPass2Agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+        try:
+            return self._extractor_pass2.process(state)
+        except AgentError as e:
+            # Pass 2 failure does not abort the extraction — the
+            # reconciler can still emit a Pass-1-only result with a
+            # confidence penalty. The error surfaces in warnings.
+            state = add_warning(state, f"Pass 2 extraction failed: {e}")
+            return state
+
+    # ------------------------------------------------------------------
+    # V3 Phase 3 — Critic runner
+    # ------------------------------------------------------------------
+
+    def _run_critic(self, state: ExtractionState) -> ExtractionState:
+        """Run the Critic agent (independent verifier).
+
+        Critic failure is non-fatal: ``CriticAgent.process`` already
+        catches its own VLM exceptions and short-circuits to
+        ``recommendation=accept``. We add an outer guard for any other
+        error class so a misbehaving Critic never blocks emission.
+        """
+        if self._critic is None:
+            raise OrchestrationError(
+                "Critic agent not configured",
+                agent_name=self.name,
+                recoverable=False,
+            )
+        try:
+            return self._critic.process(state)
+        except AgentError as e:
+            # Even AgentError is non-fatal here — the Critic is an
+            # auxiliary signal, not a blocker. Log and recommend
+            # ``accept`` so downstream routing proceeds.
+            self._logger.warning(
+                "critic_agent_error_falling_back_accept",
+                error=str(e),
+            )
+            state = add_warning(state, f"Critic failed: {e}")
+            return update_state(
+                state,
+                {
+                    "critic_report": {
+                        "trust_score": 0.5,
+                        "concerns": [],
+                        "recommendation": "accept",
+                        "_short_circuit_reason": "critic_agent_error",
+                    },
+                    "critic_recommendation": "accept",
+                    "critic_model_id": "",
+                    "critic_latency_ms": 0,
+                },
+            )
 
     def _run_validator(self, state: ExtractionState) -> ExtractionState:
         """Run the validator agent node."""
@@ -1027,6 +1307,22 @@ class OrchestratorAgent(BaseAgent):
             if retry_count < self._max_retries:
                 return ROUTE_RETRY, f"failed status with retry budget remaining ({retry_count}/{self._max_retries})"
             return ROUTE_HUMAN_REVIEW, "failed status with retry budget exhausted"
+
+        # V3 Phase 3 — honor the Critic's recommendation when present.
+        # The Critic's verdict is a strong external signal; it overrides
+        # the legacy confidence-based routing only when its recommendation
+        # is more conservative (retry / human_review). ``accept`` and
+        # ``verify_bbox`` fall through so the existing confidence rules
+        # still apply (verify_bbox is handled in-line by the reconciler
+        # / bbox-roundtrip helper, not at the routing layer).
+        critic_rec = state.get("critic_recommendation")
+        retry_count_for_critic = state.get("retry_count", 0)
+        if critic_rec == "human_review":
+            return ROUTE_HUMAN_REVIEW, "critic recommended human_review"
+        if critic_rec == "retry":
+            if retry_count_for_critic < self._max_retries:
+                return ROUTE_RETRY, "critic recommended retry"
+            return ROUTE_HUMAN_REVIEW, "critic recommended retry but budget exhausted"
 
         confidence_level = state.get("confidence_level", ConfidenceLevel.LOW.value)
         retry_count = state.get("retry_count", 0)
@@ -1501,12 +1797,268 @@ def create_extraction_workflow(
                 message="Table structure detection disabled for this run.",
             )
 
+    # V3 Phase 2 — heterogeneous dual-VLM extraction (opt-in via
+    # ``settings.extraction.engine == dual_vlm``). When the flag is
+    # ``legacy`` (default), Pass 1/Pass 2/reconciler stay unwired and
+    # the legacy single-VLM extractor handles everything.
+    extractor_pass1_agent: BaseAgent | None = None
+    extractor_pass2_agent: BaseAgent | None = None
+    reconciler_node: Callable[[ExtractionState], ExtractionState] | None = None
+    from src.config.settings import ExtractionEngine
+
+    if settings.extraction.engine == ExtractionEngine.DUAL_VLM:
+        try:
+            from src.agents.extractor_pass1 import ExtractorPass1Agent
+            from src.agents.extractor_pass2 import ExtractorPass2Agent
+            from src.agents.reconciler import HeterogeneousReconciler
+            from src.validation.bbox_roundtrip import perform_bbox_roundtrip
+
+            extractor_pass1_agent = ExtractorPass1Agent(client=shared_client)
+            extractor_pass2_agent = ExtractorPass2Agent(client=shared_client)
+            if model_router is not None:
+                extractor_pass1_agent.set_model_router(model_router)
+                extractor_pass2_agent.set_model_router(model_router)
+
+            # Build a reconciler node closure that runs the field-level
+            # fusion across all pages and writes ``merged_extraction`` +
+            # ``reconciliation_metadata`` (V2 behaviour) PLUS
+            # ``merged_extraction_v2`` + ``provenance_index`` (V3 Phase 4
+            # provenance threading) into state. The dual-write keeps
+            # legacy exporters working unchanged while new exporters
+            # opt into the FieldValue-shaped path.
+            def _reconcile_state(state: ExtractionState) -> ExtractionState:
+                from src.agents.reconciler import HeterogeneousReconciler  # noqa: F401
+                from src.pipeline.provenance import (
+                    Provenance,
+                    wrap_value,
+                )
+
+                reconciler = HeterogeneousReconciler(
+                    backend=None,
+                    roundtrip_helper=perform_bbox_roundtrip,
+                )
+                pass1 = state.get("pass1_result", {}) or {}
+                pass2 = state.get("pass2_result", {}) or {}
+                page_images = state.get("page_images", []) or []
+                modalities = list(state.get("modalities", []) or [])
+                doc_type = state.get("document_type", "UNKNOWN")
+                pass1_model_id = state.get("pass1_model_id", "") or ""
+                pass2_model_id = state.get("pass2_model_id", "") or ""
+                enforce_wrapper = settings.provenance.enforce_field_value_wrapper
+
+                # Fuse per page, then merge across pages by overwriting
+                # nulls. The legacy extractor uses the same shape.
+                merged: dict[str, Any] = {}
+                field_meta: dict[str, dict[str, Any]] = {}
+                merged_v2: dict[str, dict[str, Any]] = {}
+                provenance_index: dict[str, list[str]] = {}
+                tiebreakers: dict[str, int] = {}
+                disagreements = 0
+                total_fields = 0
+                agreed_fields = 0
+
+                for page in page_images:
+                    page_no = page.get("page_number", 0) or 0
+                    p1_payload = pass1.get(page_no, {}) or {}
+                    p2_payload = pass2.get(page_no, {}) or {}
+                    p1_fields = (
+                        p1_payload.get("fields", {})
+                        if isinstance(p1_payload, dict)
+                        else {}
+                    )
+                    p2_fields = (
+                        p2_payload.get("fields", {})
+                        if isinstance(p2_payload, dict)
+                        else {}
+                    )
+                    if not isinstance(p1_fields, dict) or not isinstance(p2_fields, dict):
+                        continue
+                    image_data = page.get("data_uri") or page.get("base64_encoded", "")
+                    report = reconciler.reconcile(
+                        pass1_fields=p1_fields,
+                        pass2_fields=p2_fields,
+                        page_image_data=image_data,
+                        modalities=modalities,
+                        doc_type=doc_type,
+                    )
+                    total_fields += len(report.fields)
+                    if report.fields:
+                        agreed_fields += sum(
+                            1
+                            for f in report.fields.values()
+                            if f.tiebreaker in (None, "exact_match")
+                        )
+                    disagreements += report.disagreement_count
+                    for tk, count in report.tiebreakers_used.items():
+                        tiebreakers[tk] = tiebreakers.get(tk, 0) + count
+                    for name, rf in report.fields.items():
+                        # Merge: prefer first non-null value seen.
+                        if rf.value is not None and (
+                            name not in merged or merged[name] is None
+                        ):
+                            merged[name] = rf.value
+                            field_meta[name] = {
+                                "value": rf.value,
+                                "confidence": rf.confidence,
+                                "bbox": rf.bbox,
+                                "source_pass": rf.source_pass,
+                                "tiebreaker": rf.tiebreaker,
+                                "page_number": page_no,
+                            }
+
+                            # V3 Phase 4 — build the FieldValue twin.
+                            # Pick the model id according to the winning
+                            # pass; fallback to primary when unknown.
+                            if rf.source_pass == "pass2":
+                                vlm_model_id = pass2_model_id
+                            elif rf.source_pass == "pass1":
+                                vlm_model_id = pass1_model_id
+                            else:
+                                # ``both``, ``roundtrip``, ``history``,
+                                # ``low_confidence`` — primary as default.
+                                vlm_model_id = pass1_model_id
+
+                            extraction_path: list[str] = []
+                            if rf.source_pass in ("pass1", "both"):
+                                extraction_path.append("pass1_vlm")
+                            if rf.source_pass in ("pass2", "both"):
+                                extraction_path.append("pass2_vlm")
+                            extraction_path.append("reconciler")
+                            if rf.tiebreaker and rf.tiebreaker != "exact_match":
+                                extraction_path.append(
+                                    f"reconciler:{rf.tiebreaker}"
+                                )
+
+                            # rf.bbox is a list[float] | None from the
+                            # reconciler; wrap into BoundingBoxCoords for
+                            # Provenance.
+                            from src.pipeline.state import BoundingBoxCoords
+
+                            bbox_obj = None
+                            if rf.bbox is not None and len(rf.bbox) >= 4:
+                                try:
+                                    bbox_obj = BoundingBoxCoords(
+                                        x=float(rf.bbox[0]),
+                                        y=float(rf.bbox[1]),
+                                        width=float(rf.bbox[2] - rf.bbox[0]),
+                                        height=float(rf.bbox[3] - rf.bbox[1]),
+                                        page=page_no,
+                                    )
+                                except (TypeError, ValueError):
+                                    bbox_obj = None
+
+                            prov = Provenance(
+                                page=page_no,
+                                bbox=bbox_obj,
+                                source_block_id="",
+                                extraction_path=extraction_path,
+                                agent_signatures=["extractor", "reconciler"],
+                                confidence=rf.confidence,
+                                vlm_model_id=vlm_model_id,
+                                mem0_match=None,
+                            )
+                            merged_v2[name] = wrap_value(
+                                rf.value, provenance=prov
+                            ).to_serialisable()
+                            provenance_index[name] = list(extraction_path)
+
+                agreement_rate = (
+                    agreed_fields / total_fields if total_fields > 0 else 1.0
+                )
+                metadata = {
+                    "agreement_rate": agreement_rate,
+                    "disagreements": disagreements,
+                    "tiebreakers_used": tiebreakers,
+                    "total_fields": total_fields,
+                }
+                update: dict[str, Any] = {
+                    "merged_extraction_v2": merged_v2,
+                    "provenance_index": provenance_index,
+                    "field_metadata": field_meta,
+                    "reconciliation_metadata": metadata,
+                    "extraction_engine": "dual_vlm",
+                }
+                # Dual-write the legacy ``merged_extraction`` only when
+                # the wrapper-enforce flag is OFF. When it's ON, the
+                # legacy path is empty and downstream consumers must
+                # use ``merged_extraction_v2`` (via ``unwrap_value``).
+                if enforce_wrapper:
+                    update["merged_extraction"] = {}
+                else:
+                    update["merged_extraction"] = merged
+                return update_state(state, update)
+
+            reconciler_node = _reconcile_state
+            logger.info("dual_vlm_engine_wired")
+        except Exception as exc:  # pragma: no cover - opt-in path
+            logger.warning(
+                "dual_vlm_engine_init_failed",
+                error=str(exc),
+                message="Falling back to legacy extractor.",
+            )
+            extractor_pass1_agent = None
+            extractor_pass2_agent = None
+            reconciler_node = None
+
     # Create orchestrator
     orchestrator = OrchestratorAgent(
         client=shared_client,
         enable_checkpointing=enable_checkpointing,
         max_retries=max_retries,
     )
+
+    # V3 Phase 3 — Critic agent + combiner. Independent of dual-VLM:
+    # operators can enable the Critic on legacy (same-model second
+    # opinion) or on dual-VLM (family-rotated independent verifier).
+    critic_agent: BaseAgent | None = None
+    critic_combiner_node: Callable[[ExtractionState], ExtractionState] | None = None
+
+    if settings.extraction.critic_enabled:
+        try:
+            from src.agents.critic import CriticAgent
+            from src.validation.critic_combiner import apply_combiner_to_state
+
+            critic_agent = CriticAgent(client=shared_client)
+            if model_router is not None:
+                critic_agent.set_model_router(model_router)
+
+            def _combiner_node(state: ExtractionState) -> ExtractionState:
+                """Apply the combiner; write ``confidence_components``.
+
+                Also rewrites ``overall_confidence`` to the combiner's
+                ``raw_combined`` so downstream confidence-based routing
+                consumes the calibrator-ready value. Calibration itself
+                runs in the validator (legacy) — a follow-up phase will
+                call the calibrator here explicitly.
+                """
+                components = apply_combiner_to_state(state)
+                merged_update: dict[str, Any] = {
+                    "confidence_components": components,
+                    "overall_confidence": components["raw_combined"],
+                }
+                # Recompute confidence_level so the route node sees a
+                # consistent (level, score) pair.
+                from src.pipeline.state import ConfidenceLevel
+
+                raw = components["raw_combined"]
+                if raw >= settings.extraction.confidence_auto_accept:
+                    merged_update["confidence_level"] = ConfidenceLevel.HIGH.value
+                elif raw >= settings.extraction.confidence_retry:
+                    merged_update["confidence_level"] = ConfidenceLevel.MEDIUM.value
+                else:
+                    merged_update["confidence_level"] = ConfidenceLevel.LOW.value
+                return update_state(state, merged_update)
+
+            critic_combiner_node = _combiner_node
+            logger.info("critic_agent_wired")
+        except Exception as exc:  # pragma: no cover - opt-in path
+            logger.warning(
+                "critic_agent_init_failed",
+                error=str(exc),
+                message="Critic disabled for this run; continuing without it.",
+            )
+            critic_agent = None
+            critic_combiner_node = None
 
     # Build workflow with appropriate agents
     orchestrator.build_workflow(
@@ -1519,6 +2071,11 @@ def create_extraction_workflow(
         schema_agent=schema_agent,
         splitter_agent=splitter_agent,
         table_detector_agent=table_detector_agent,
+        extractor_pass1_agent=extractor_pass1_agent,
+        extractor_pass2_agent=extractor_pass2_agent,
+        reconciler_node=reconciler_node,
+        critic_agent=critic_agent,
+        critic_combiner_node=critic_combiner_node,
     )
 
     compiled_workflow = orchestrator.compile_workflow()

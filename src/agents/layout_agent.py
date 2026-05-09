@@ -155,13 +155,18 @@ class LayoutAgent(BaseAgent):
         )
 
         def make_vlm_call() -> dict[str, Any]:
-            return self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound (permissive envelope).
+            from src.agents._constrained_envelopes import JSONObjectEnvelope
+
+            payload, _trace = self.send_vision_request_with_schema(
                 image_data=image_data_uri,
                 prompt=user_prompt,
+                schema=JSONObjectEnvelope,
                 system_prompt=system_prompt,
                 temperature=0.1,
                 max_tokens=3000,  # Layout analysis needs detailed response
             )
+            return payload
 
         try:
             result = retry_with_backoff(

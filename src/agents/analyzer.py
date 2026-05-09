@@ -10,6 +10,8 @@ Responsible for:
 
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from src.agents.base import AgentResult, AnalysisError, BaseAgent
 from src.agents.utils import RetryConfig, retry_with_backoff
 from src.client.lm_client import LMStudioClient
@@ -22,6 +24,7 @@ from src.pipeline.state import (
     set_status,
     update_state,
 )
+from src.profiles import detect_profile, get_profile
 from src.prompts.classification import (
     DOCUMENT_TYPE_DESCRIPTIONS,
     build_classification_prompt,
@@ -32,6 +35,57 @@ from src.prompts.grounding_rules import (
     build_grounded_system_prompt,
 )
 from src.schemas import DocumentType, SchemaRegistry
+
+
+# ---------------------------------------------------------------------------
+# V3 Phase 1 — schemas for constrained-decode calls
+# ---------------------------------------------------------------------------
+
+
+class DocumentClassification(BaseModel):
+    """Schema bound at decode time for the classification VLM call.
+
+    Field shapes mirror the legacy unconstrained response so the
+    surrounding code in ``_classify_document`` continues to work
+    unchanged. ``document_type`` accepts free-form strings (the
+    downstream ``_normalize_document_type`` mapping handles aliases like
+    ``HCFA-1500`` → ``CMS_1500``); we deliberately do not enum-restrict
+    here because the model occasionally returns a synonym we want to
+    map rather than refuse.
+    """
+
+    document_type: str = Field(
+        description="Detected document type (CMS-1500, UB-04, EOB, Superbill, OTHER)."
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Self-reported classification confidence in [0, 1].",
+    )
+    reasoning: str = Field(
+        default="",
+        description="Brief justification of the classification decision.",
+    )
+    key_features_found: list[str] = Field(
+        default_factory=list,
+        description="Visual or textual features that drove the decision.",
+    )
+    alternate_types: list[str] = Field(
+        default_factory=list,
+        description="Other plausible document types, ordered by likelihood.",
+    )
+
+
+class _AnalyzerEnvelope(BaseModel):
+    """Permissive envelope for the analyzer's secondary calls.
+
+    Structure analysis and page-relationship calls have varied response
+    shapes that are normalized downstream. The envelope guarantees a
+    JSON object back, eliminating malformed-output errors without
+    forcing every shape into a strict Pydantic model.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 logger = get_logger(__name__)
@@ -181,10 +235,56 @@ class AnalyzerAgent(BaseAgent):
                     classification_result.get("document_type", "OTHER"),
                 )
 
-            # Select schema
+            # V3 Phase 5: profile detection. Runs as a pure-text
+            # post-step on the analyzer's already-collected outputs;
+            # adds zero VLM calls. The selected profile drives prompt
+            # fragment injection, schema overlay, and validator
+            # blocking/advisory mode downstream. When detection is
+            # disabled in settings, every doc resolves to the
+            # configured ``default_profile`` (typically generic).
+            settings = get_settings()
+            if settings.profile.detection_enabled:
+                profile_result = detect_profile(
+                    classification_features=classification_result.get(
+                        "key_features", []
+                    ),
+                    page_text=first_page.get("text_content") or "",
+                    document_type=classification_result.get("document_type"),
+                    profile_override=state.get("profile_override"),
+                )
+            else:
+                # Detection disabled — synthesise a deterministic
+                # result naming the configured default. This keeps
+                # downstream code simple (it always reads
+                # ``state["profile"]`` etc.) without a None branch.
+                profile_result = type(
+                    "ProfileDetectionResult",
+                    (),
+                    {
+                        "profile_name": settings.profile.default_profile,
+                        "confidence": 1.0,
+                        "score_by_profile": {settings.profile.default_profile: 1.0},
+                        "matched_signals": {settings.profile.default_profile: ["detection_disabled"]},
+                        "fallback_to_generic": False,
+                    },
+                )()
+
+            self._logger.info(
+                "profile_detected",
+                profile=profile_result.profile_name,
+                confidence=profile_result.confidence,
+                fallback=profile_result.fallback_to_generic,
+                matched=profile_result.matched_signals.get(
+                    profile_result.profile_name, []
+                ),
+            )
+
+            # Select schema (profile-aware: applies overlay if present
+            # and ``settings.profile.apply_overlay`` is True).
             schema_result = self._select_schema(
                 classification_result,
                 state.get("custom_schema"),
+                profile_name=profile_result.profile_name,
             )
 
             # Build analysis result
@@ -260,6 +360,14 @@ class AnalyzerAgent(BaseAgent):
                     # extractor / image enhancer / prompt builder can read
                     # them without walking into analysis.
                     "modalities": final_modalities,
+                    # V3 Phase 5: profile context surfaced top-level
+                    # for downstream prompt/validator/exporter consumers.
+                    "profile": profile_result.profile_name,
+                    "profile_confidence": profile_result.confidence,
+                    "profile_signals_matched": profile_result.matched_signals.get(
+                        profile_result.profile_name, []
+                    ),
+                    "profile_fallback_to_generic": profile_result.fallback_to_generic,
                     "status": ExtractionStatus.ANALYZING.value,
                     "current_step": "analysis_complete",
                     "total_vlm_calls": state.get("total_vlm_calls", 0) + self._vlm_calls,
@@ -325,12 +433,17 @@ class AnalyzerAgent(BaseAgent):
         )
 
         def make_classification_call() -> dict[str, Any]:
-            return self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound call. The decoder cannot emit
+            # JSON outside ``DocumentClassification`` so the legacy
+            # markdown-codeblock + retry-on-malformed dance is gone.
+            payload, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=classification_prompt,
+                schema=DocumentClassification,
                 system_prompt=system_prompt,
                 temperature=0.1,
             )
+            return payload
 
         try:
             result = retry_with_backoff(
@@ -403,9 +516,11 @@ class AnalyzerAgent(BaseAgent):
         structure_prompt = build_structure_analysis_prompt()
 
         try:
-            result = self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound (permissive envelope).
+            result, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=structure_prompt,
+                schema=_AnalyzerEnvelope,
                 system_prompt=system_prompt,
                 temperature=0.1,
             )
@@ -523,10 +638,11 @@ class AnalyzerAgent(BaseAgent):
                 # Add page context to prompt
                 page_prompt = f"This is page {i} of {total_pages}.\n\n" f"{relationship_prompt}"
 
-                # Call VLM to analyze page relationship
-                result = self.send_vision_request_with_json(
+                # V3 Phase 1: schema-bound page-relationship VLM call.
+                result, _trace = self.send_vision_request_with_schema(
                     image_data=image_data,
                     prompt=page_prompt,
+                    schema=_AnalyzerEnvelope,
                     system_prompt=system_prompt,
                     temperature=0.1,
                 )
@@ -591,6 +707,8 @@ class AnalyzerAgent(BaseAgent):
         self,
         classification: dict[str, Any],
         custom_schema: dict[str, Any] | None,
+        *,
+        profile_name: str | None = None,
     ) -> dict[str, Any]:
         """
         Select appropriate extraction schema based on classification.
@@ -598,6 +716,10 @@ class AnalyzerAgent(BaseAgent):
         Args:
             classification: Document classification result.
             custom_schema: Optional user-provided custom schema.
+            profile_name: V3 Phase 5 — selected profile for overlay
+                application. When provided, the profile's
+                ``schema_overlay_fields`` are merged into the resolved
+                schema (de-duplicated by field name) before returning.
 
         Returns:
             Schema selection result.
@@ -608,6 +730,7 @@ class AnalyzerAgent(BaseAgent):
                 "selected_schema": custom_schema.get("name", "custom_schema"),
                 "selection_reason": "Custom schema provided by user",
                 "schema_compatibility": 1.0,
+                "profile_overlay_applied": False,
             }
 
         # Map document type to schema
@@ -615,12 +738,25 @@ class AnalyzerAgent(BaseAgent):
         doc_type = DOCUMENT_TYPE_MAP.get(doc_type_str, DocumentType.UNKNOWN)
 
         # Get schema from registry
+        overlay_applied = False
         try:
             schema = self._schema_registry.get_by_type(doc_type)
+            # Apply profile overlay if configured.
+            if profile_name:
+                from src.schemas.profile_overlays import apply_overlay
+
+                profile_descriptor = get_profile(profile_name)
+                settings = get_settings()
+                if settings.profile.apply_overlay and profile_descriptor.schema_overlay_fields:
+                    overlaid = apply_overlay(schema, profile_descriptor)
+                    overlay_applied = overlaid is not schema
+                    schema = overlaid
+
             return {
                 "selected_schema": schema.name,
                 "selection_reason": f"Matched schema for {doc_type.value}",
                 "schema_compatibility": classification.get("confidence", 0.8),
+                "profile_overlay_applied": overlay_applied,
             }
         except ValueError:
             # No schema found for type
@@ -632,6 +768,7 @@ class AnalyzerAgent(BaseAgent):
                 "selected_schema": "",
                 "selection_reason": f"No schema registered for {doc_type_str}",
                 "schema_compatibility": 0.0,
+                "profile_overlay_applied": False,
             }
 
     def _normalize_document_type(self, raw_type: str) -> str:

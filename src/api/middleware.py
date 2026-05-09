@@ -210,6 +210,12 @@ class RateLimiter:
         self._burst_size = burst_size
         self._clients: dict[str, RateLimitState] = defaultdict(RateLimitState)
         self._endpoint_limits: dict[str, RateLimitConfig] = {}
+        # V3 Phase 7 — per-tenant overrides. Quota is keyed by tenant
+        # id; ``None`` for any tenant not in this map falls back to
+        # ``_default_rpm``. Tenant scope wins over endpoint scope when
+        # both apply (we'd rather deny a paid tenant's expensive call
+        # than over-serve them).
+        self._tenant_limits: dict[str, RateLimitConfig] = {}
         self._lock = threading.Lock()
 
     def set_endpoint_limit(
@@ -224,10 +230,37 @@ class RateLimiter:
             burst_size=burst or max(rpm // 6, 1),
         )
 
+    def set_tenant_limit(
+        self,
+        tenant_id: str,
+        rpm: int,
+        burst: int | None = None,
+    ) -> None:
+        """Set a per-tenant rate limit (V3 Phase 7).
+
+        ``rpm`` requests per minute, with optional burst override.
+        Pass ``rpm=0`` to deny every request from this tenant
+        (useful for emergency disablement); a positive burst still
+        lets the first ``burst`` through. Setting a limit overwrites
+        any previous one for the same tenant.
+        """
+        if rpm < 0:
+            raise ValueError(f"rpm must be >= 0, got {rpm}")
+        self._tenant_limits[tenant_id] = RateLimitConfig(
+            requests_per_minute=rpm,
+            burst_size=burst if burst is not None else max(rpm // 6, 1),
+        )
+
+    def get_tenant_limit(self, tenant_id: str) -> RateLimitConfig | None:
+        """Look up a tenant's configured limit, or ``None`` for default."""
+        return self._tenant_limits.get(tenant_id)
+
     def is_allowed(
         self,
         client_id: str,
         endpoint: str | None = None,
+        *,
+        tenant_id: str | None = None,
     ) -> tuple[bool, dict[str, int]]:
         """
         Check if request is allowed.
@@ -235,6 +268,11 @@ class RateLimiter:
         Args:
             client_id: Client identifier (IP or user ID).
             endpoint: Endpoint path for specific limits.
+            tenant_id: V3 Phase 7 — when supplied, the tenant quota
+                overrides the endpoint / default. Tenants are tracked
+                under a ``"tenant:<id>"`` namespace so a chatty
+                authenticated user from one tenant cannot exhaust
+                another's quota.
 
         Returns:
             Tuple of (allowed, headers_dict).
@@ -242,8 +280,21 @@ class RateLimiter:
         now = time.time()
         window_start = now - 60  # 1 minute window
 
-        # Get config
-        config = self._endpoint_limits.get(endpoint or "", None)
+        # V3 Phase 7 precedence: tenant > endpoint > default. Tenant
+        # config wins because billing/SLA decisions live there; the
+        # endpoint is fine-grained but tenant-agnostic.
+        tenant_config = (
+            self._tenant_limits.get(tenant_id)
+            if tenant_id is not None
+            else None
+        )
+        if tenant_config is not None:
+            config = tenant_config
+            # Bucket the tenant's traffic together regardless of
+            # which user inside the tenant made the request.
+            client_id = f"tenant:{tenant_id}"
+        else:
+            config = self._endpoint_limits.get(endpoint or "", None)
         rpm = config.requests_per_minute if config else self._default_rpm
 
         with self._lock:
@@ -636,7 +687,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_id = self._get_client_id(request)
         path = request.url.path
 
-        allowed, headers = self._limiter.is_allowed(client_id, path)
+        # V3 Phase 7 — pull tenant_id off request state if the
+        # auth middleware (or any upstream component) has bound it.
+        # When present, the limiter scopes the bucket to the tenant
+        # so quota enforcement matches billing / SLA decisions.
+        tenant_id = getattr(request.state, "tenant_id", None)
+
+        allowed, headers = self._limiter.is_allowed(
+            client_id, path, tenant_id=tenant_id,
+        )
 
         if not allowed:
             return JSONResponse(

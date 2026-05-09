@@ -299,13 +299,18 @@ class SchemaProposalAgent(BaseAgent):
         )
 
         def vlm_call() -> dict[str, Any]:
-            return self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound (permissive envelope).
+            from src.agents._constrained_envelopes import JSONObjectEnvelope
+
+            payload, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt="\n".join(prompt_parts),
+                schema=JSONObjectEnvelope,
                 system_prompt=SCHEMA_SUGGEST_SYSTEM_PROMPT,
                 temperature=0.2,
                 max_tokens=4096,
             )
+            return payload
 
         try:
             result = retry_with_backoff(
@@ -511,9 +516,13 @@ class SchemaProposalAgent(BaseAgent):
         )
 
         try:
-            result = self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound (permissive envelope).
+            from src.agents._constrained_envelopes import JSONObjectEnvelope
+
+            result, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=prompt,
+                schema=JSONObjectEnvelope,
                 system_prompt=SCHEMA_REFINE_SYSTEM_PROMPT,
                 temperature=0.15,
                 max_tokens=4096,

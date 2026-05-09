@@ -8,8 +8,9 @@ that all extraction agents share.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from src.client.backends.protocol import VLMRole
 from src.client.lm_client import (
     LMClientError,
     LMStudioClient,
@@ -18,6 +19,10 @@ from src.client.lm_client import (
 )
 from src.config import get_logger, get_settings
 from src.pipeline.state import ExtractionState
+
+
+if TYPE_CHECKING:
+    from src.client.constrained import DecodingTrace
 
 
 logger = get_logger(__name__)
@@ -236,6 +241,8 @@ class BaseAgent(ABC):
         system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.1,
+        *,
+        role: VLMRole = VLMRole.PRIMARY,
     ) -> VisionResponse:
         """
         Send a vision request to the VLM.
@@ -248,6 +255,14 @@ class BaseAgent(ABC):
             system_prompt: Optional system prompt.
             max_tokens: Maximum response tokens.
             temperature: Sampling temperature.
+            role: Logical VLM role for this call. Defaults to ``PRIMARY``
+                so existing call-sites are unchanged. Phase 2 agents
+                (``extractor_pass2``) and Phase 3 agents (``critic``)
+                pass ``SECONDARY``/``CRITIC`` to drive the dual-VLM
+                topology. The role flows through ``ModelRouter`` and is
+                resolved to a backend endpoint at request time. When no
+                ``VLMBackend`` is wired (legacy default), the call falls
+                back to ``self._client`` exactly as before.
 
         Returns:
             VisionResponse from the VLM.
@@ -309,6 +324,7 @@ class BaseAgent(ABC):
                 agent=self._name,
                 request_id=request.request_id,
                 model_override=model_override,
+                role=role.value,
             )
 
             if _dispatcher is not None and _dispatcher.is_active:
@@ -317,6 +333,7 @@ class BaseAgent(ABC):
                     agent=self._name,
                     request_id=request.request_id,
                     model=model_override,
+                    role=role.value,
                 ):
                     response = self._client.send_vision_request(
                         request, model=model_override
@@ -335,6 +352,30 @@ class BaseAgent(ABC):
                     latency_ms=response.latency_ms,
                     request_id=request.request_id,
                 )
+                # V3 Phase 6 — canonical PostHog event for every VLM
+                # call. PostHog's ``capture`` is async/batched in the
+                # SDK, so emit overhead is negligible. Emit only when
+                # the dispatcher has at least one sink configured.
+                try:
+                    from src.monitoring.observability import (
+                        EVENT_VLM_CALLED,
+                        _read_trace_id_from_context,
+                    )
+
+                    _dispatcher.emit_event(
+                        EVENT_VLM_CALLED,
+                        {
+                            "agent": self._name,
+                            "model": model_override,
+                            "role": role.value,
+                            "latency_ms": response.latency_ms,
+                            "has_json": response.has_json,
+                            "request_id": request.request_id,
+                            "trace_id": _read_trace_id_from_context(),
+                        },
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    pass
 
             self._logger.debug(
                 "vision_request_complete",
@@ -358,6 +399,178 @@ class BaseAgent(ABC):
                 recoverable=True,
             ) from e
 
+    def send_vision_request_with_schema(
+        self,
+        image_data: str,
+        prompt: str,
+        schema: type,
+        system_prompt: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.1,
+        *,
+        role: VLMRole = VLMRole.PRIMARY,
+    ) -> tuple[dict[str, Any], "DecodingTrace"]:
+        """V3 Phase 1: schema-bound vision request via constrained decoding.
+
+        The agent supplies a Pydantic ``BaseModel`` subclass; this
+        method converts it to JSON Schema and binds it at decode time
+        through the underlying client. The decoder cannot emit JSON
+        that violates the schema — the entire class of malformed-output
+        failures becomes structurally impossible.
+
+        Implementation routes through ``self._client`` (the
+        constructor-injected ``LMStudioClient``) so existing test
+        injection points continue to work. The schema → ``response_format``
+        translation is the same shape ``LMStudioBackend`` uses; vLLM
+        deployments would substitute ``extra_body`` via a different
+        backend resolution in Phase 2.
+
+        Args:
+            image_data: Base64-encoded image or data URI.
+            prompt: User prompt for extraction.
+            schema: Pydantic ``BaseModel`` subclass describing the
+                expected response shape.
+            system_prompt: Optional system prompt.
+            max_tokens: Maximum response tokens.
+            temperature: Sampling temperature.
+            role: Logical VLM role; see :meth:`send_vision_request`.
+
+        Returns:
+            ``(parsed_json, trace)`` where ``parsed_json`` is the
+            response dict and ``trace`` carries decoding telemetry
+            (consumed by ``ConfidenceCalibrator`` and Phoenix spans).
+
+        Raises:
+            AgentError: When the constrained call fails or returns
+                non-JSON despite the schema constraint.
+        """
+        # Lazy imports to avoid a circular import via observability.
+        from src.client.constrained import DecodingTrace as _DecodingTrace
+
+        self._vlm_calls += 1
+        request = VisionRequest(
+            image_data=image_data,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+        # Build the OpenAI-style response_format from the Pydantic schema.
+        # Same shape LMStudioBackend would build; centralised here so
+        # tests that mock ``self._client.send_vision_request`` directly
+        # observe the schema kwarg without needing the backend factory.
+        schema_dict = schema.model_json_schema()
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": "veridoc", "schema": schema_dict},
+        }
+
+        # Optional model routing — same logic as send_vision_request.
+        model_override: str | None = None
+        if self._model_router is not None:
+            try:
+                decision = self._model_router.route_for_agent(self._name)
+                model_override = decision.model.model_id
+            except Exception as exc:
+                self._logger.warning(
+                    "model_routing_failed_using_default",
+                    agent=self._name,
+                    error=str(exc),
+                )
+
+        try:
+            from src.monitoring.observability import get_dispatcher
+
+            _dispatcher = get_dispatcher()
+        except Exception:  # pragma: no cover - defensive
+            _dispatcher = None
+
+        try:
+            self._logger.debug(
+                "sending_constrained_vision_request",
+                agent=self._name,
+                request_id=request.request_id,
+                schema=schema.__name__,
+                role=role.value,
+                model_override=model_override,
+            )
+            if _dispatcher is not None and _dispatcher.is_active:
+                with _dispatcher.start_span(
+                    "vlm.request_constrained",
+                    agent=self._name,
+                    request_id=request.request_id,
+                    schema=schema.__name__,
+                    role=role.value,
+                ):
+                    response = self._client.send_vision_request(
+                        request,
+                        model=model_override,
+                        response_format=response_format,
+                    )
+            else:
+                response = self._client.send_vision_request(
+                    request,
+                    model=model_override,
+                    response_format=response_format,
+                )
+
+            self._total_processing_ms += response.latency_ms
+
+            if _dispatcher is not None and _dispatcher.is_active:
+                _dispatcher.record_llm_call(
+                    agent=self._name,
+                    model=model_override,
+                    latency_ms=response.latency_ms,
+                    request_id=request.request_id,
+                )
+
+            trace = _DecodingTrace(
+                backend_name="lm_studio",
+                role=role,
+                model_id=model_override or "",
+                schema_name=schema.__name__,
+                latency_ms=response.latency_ms,
+                tokens_in=response.prompt_tokens,
+                tokens_out=response.completion_tokens,
+                schema_enforced=True,
+            )
+
+            self._logger.debug(
+                "constrained_vision_request_complete",
+                agent=self._name,
+                request_id=request.request_id,
+                latency_ms=response.latency_ms,
+                schema=schema.__name__,
+            )
+
+            if response.parsed_json is None:
+                # Constrained decoding makes this branch unreachable on
+                # cooperating backends; surface as an explicit error so
+                # any non-cooperating backend fails loud.
+                raise AgentError(
+                    "Schema-bound VLM request returned non-JSON content",
+                    agent_name=self._name,
+                    recoverable=True,
+                    details={
+                        "schema": schema.__name__,
+                        "content_preview": response.content[:200],
+                    },
+                )
+            return response.parsed_json, trace
+
+        except LMClientError as e:
+            self._logger.error(
+                "constrained_vision_request_failed",
+                agent=self._name,
+                error=str(e),
+            )
+            raise AgentError(
+                f"VLM request failed: {e}",
+                agent_name=self._name,
+                recoverable=True,
+            ) from e
+
     def send_vision_request_with_json(
         self,
         image_data: str,
@@ -365,6 +578,8 @@ class BaseAgent(ABC):
         system_prompt: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.1,
+        *,
+        role: VLMRole = VLMRole.PRIMARY,
     ) -> dict[str, Any]:
         """
         Send a vision request and extract JSON response.
@@ -375,6 +590,7 @@ class BaseAgent(ABC):
             system_prompt: Optional system prompt.
             max_tokens: Maximum response tokens.
             temperature: Sampling temperature.
+            role: Logical VLM role; see :meth:`send_vision_request`.
 
         Returns:
             Parsed JSON from response.
@@ -388,6 +604,7 @@ class BaseAgent(ABC):
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             temperature=temperature,
+            role=role,
         )
 
         if not response.has_json:
