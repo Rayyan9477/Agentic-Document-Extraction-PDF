@@ -404,7 +404,7 @@ class TestTableDetectorProcess:
 
         vlm_response = _make_vlm_table_response(num_tables=1, rows_per_table=2, cols=3)
 
-        with patch.object(detector, "send_vision_request_with_json", return_value=vlm_response):
+        with patch.object(detector, "send_vision_request_with_schema", return_value=(vlm_response, MagicMock())):
             result = detector.process(state)
 
         tables = result["detected_tables"]
@@ -426,9 +426,9 @@ class TestTableDetectorProcess:
         def mock_vlm(*args, **kwargs):
             idx = call_count["i"]
             call_count["i"] += 1
-            return responses[idx]
+            return responses[idx], MagicMock()
 
-        with patch.object(detector, "send_vision_request_with_json", side_effect=mock_vlm):
+        with patch.object(detector, "send_vision_request_with_schema", side_effect=mock_vlm):
             result = detector.process(state)
 
         tables = result["detected_tables"]
@@ -441,7 +441,7 @@ class TestTableDetectorProcess:
         state = _make_state_with_pages(1)
 
         with patch.object(
-            detector, "send_vision_request_with_json",
+            detector, "send_vision_request_with_schema",
             side_effect=Exception("VLM unavailable"),
         ):
             result = detector.process(state)
@@ -455,7 +455,7 @@ class TestTableDetectorProcess:
         state = _make_state_with_pages(2)
         vlm_response = _make_vlm_table_response(num_tables=1)
 
-        with patch.object(detector, "send_vision_request_with_json", return_value=vlm_response):
+        with patch.object(detector, "send_vision_request_with_schema", return_value=(vlm_response, MagicMock())):
             result = detector.process(state)
 
         # VLM calls should be tracked
@@ -470,7 +470,7 @@ class TestTableDetectorProcess:
 
         vlm_response = _make_vlm_table_response(num_tables=1)
 
-        with patch.object(detector, "send_vision_request_with_json", return_value=vlm_response):
+        with patch.object(detector, "send_vision_request_with_schema", return_value=(vlm_response, MagicMock())):
             result = detector.process(state)
 
         assert result["document_type"] == "CMS-1500"
@@ -537,7 +537,7 @@ class TestTableHints:
         })
 
         vlm_response = _make_vlm_table_response(num_tables=1)
-        with patch.object(detector, "send_vision_request_with_json", return_value=vlm_response):
+        with patch.object(detector, "send_vision_request_with_schema", return_value=(vlm_response, MagicMock())):
             result = detector.process(state)
 
         assert result["detected_tables"][0]["has_tables"] is True
