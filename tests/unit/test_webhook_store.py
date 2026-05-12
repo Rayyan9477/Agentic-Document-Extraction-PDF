@@ -3,14 +3,28 @@ Unit tests for Phase 5B: Webhook Delivery System.
 
 Tests webhook subscription store (CRUD, fan-out, delivery log,
 persistence), API routes, and request models.
+
+V3 Phase 8 — set ``WEBHOOK_ALLOW_PRIVATE=1`` via an autouse fixture so
+the SSRF defence (added in Phase 8) doesn't reject the test fixtures
+that use ``example.com`` etc. in CI environments without DNS. Scoped
+per-test so the env var doesn't leak into unrelated test modules in
+the same session.
 """
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _allow_private_webhook_urls(monkeypatch):
+    """Scoped escape hatch for the Phase 8 SSRF gate."""
+    monkeypatch.setenv("WEBHOOK_ALLOW_PRIVATE", "1")
+    yield
 
 from src.queue.webhook import (
     WebhookClient,

@@ -234,8 +234,18 @@ class TestProductionValidation:
             )
         assert "DEBUG" in str(exc.value)
 
-    def test_production_accepts_strong_configuration(self) -> None:
-        """Test production validation accepts properly configured settings."""
+    def test_production_accepts_strong_configuration(self, monkeypatch) -> None:
+        """Test production validation accepts properly configured settings.
+
+        V3 Phase 7: production now also gates PHI mode.
+        V3 Phase 8: production also gates auth_enabled.
+        We acknowledge both bypasses here because this fixture
+        intentionally constructs a non-PHI/non-auth production instance
+        to test the secret/encryption-key validation pathway in
+        isolation.
+        """
+        monkeypatch.setenv("PHI_BYPASS_ACK", "acknowledged")
+        monkeypatch.setenv("AUTH_BYPASS_ACK", "acknowledged")
         # This should not raise any errors
         settings = Settings(
             app_env=Environment.PRODUCTION,

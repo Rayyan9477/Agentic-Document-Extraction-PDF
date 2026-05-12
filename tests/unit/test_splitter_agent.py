@@ -218,7 +218,7 @@ class TestSplitterClassification:
         """VLM returns valid classifications."""
         batch = [_make_page_image(1), _make_page_image(2)]
 
-        splitter.send_vision_request_with_json = MagicMock(return_value={
+        splitter.send_vision_request_with_schema = MagicMock(return_value=({
             "pages": [
                 {
                     "page_number": 1,
@@ -235,7 +235,7 @@ class TestSplitterClassification:
                     "reason": "Continuation of claim form",
                 },
             ]
-        })
+        }, MagicMock()))
 
         result = splitter._classify_batch(batch, offset=0)
 
@@ -248,7 +248,7 @@ class TestSplitterClassification:
         """VLM returns fewer pages than sent — rest default to continuation."""
         batch = [_make_page_image(i + 1) for i in range(3)]
 
-        splitter.send_vision_request_with_json = MagicMock(return_value={
+        splitter.send_vision_request_with_schema = MagicMock(return_value=({
             "pages": [
                 {
                     "page_number": 1,
@@ -257,7 +257,7 @@ class TestSplitterClassification:
                     "confidence": 0.88,
                 },
             ]
-        })
+        }, MagicMock()))
 
         result = splitter._classify_batch(batch, offset=0)
 
@@ -272,7 +272,7 @@ class TestSplitterClassification:
         """VLM failure triggers heuristic fallback."""
         batch = [_make_page_image(i + 1) for i in range(3)]
 
-        splitter.send_vision_request_with_json = MagicMock(
+        splitter.send_vision_request_with_schema = MagicMock(
             side_effect=Exception("VLM unavailable")
         )
 
@@ -290,7 +290,7 @@ class TestSplitterClassification:
         """Non-first batch fallback: all pages are continuation."""
         batch = [_make_page_image(6), _make_page_image(7)]
 
-        splitter.send_vision_request_with_json = MagicMock(
+        splitter.send_vision_request_with_schema = MagicMock(
             side_effect=Exception("VLM timeout")
         )
 
@@ -686,7 +686,7 @@ class TestSplitterEdgeCases:
         """VLM returns empty pages list — defaults should handle it."""
         batch = [_make_page_image(1), _make_page_image(2)]
 
-        splitter.send_vision_request_with_json = MagicMock(return_value={"pages": []})
+        splitter.send_vision_request_with_schema = MagicMock(return_value=({"pages": []}, MagicMock()))
 
         result = splitter._classify_batch(batch, offset=0)
 
