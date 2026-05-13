@@ -1,5 +1,12 @@
 /** @type {import('tailwindcss').Config} */
+// V3 Phase 8 — design tokens with semantic aliases, dark-mode support,
+// and motion / elevation / focus tokens. Documented in
+// frontend/src/lib/design.md. The semantic palette (canvas / surface /
+// text-primary / accent-brand / etc.) maps to CSS custom properties
+// defined in frontend/src/app/globals.css for both :root and .dark.
 module.exports = {
+  // Phase 8: dark mode is `class`-driven so ThemeProvider can flip it.
+  darkMode: 'class',
   content: [
     './src/pages/**/*.{js,ts,jsx,tsx,mdx}',
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
@@ -8,7 +15,42 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Primary brand colors
+        // ─── Semantic tokens (Phase 8) ────────────────────────────
+        // Map to CSS custom properties so dark mode flips entire UI
+        // without touching Tailwind classes.
+        canvas: 'rgb(var(--bg-canvas-rgb) / <alpha-value>)',
+        surface: {
+          DEFAULT: 'rgb(var(--bg-surface-rgb) / <alpha-value>)',
+          raised: 'rgb(var(--bg-surface-raised-rgb) / <alpha-value>)',
+          overlay: 'rgb(var(--bg-overlay-rgb) / <alpha-value>)',
+          // Legacy ramp kept for compat with pre-Phase-8 components.
+          50: '#fafafa',
+          100: '#f4f4f5',
+          200: '#e4e4e7',
+          300: '#d4d4d8',
+          400: '#a1a1aa',
+          500: '#71717a',
+          600: '#52525b',
+          700: '#3f3f46',
+          800: '#27272a',
+          900: '#18181b',
+        },
+        // Semantic text aliases — every component should prefer these.
+        'text-primary': 'rgb(var(--text-primary-rgb) / <alpha-value>)',
+        'text-secondary': 'rgb(var(--text-secondary-rgb) / <alpha-value>)',
+        'text-muted': 'rgb(var(--text-muted-rgb) / <alpha-value>)',
+        // Semantic borders.
+        'border-default': 'rgb(var(--border-default-rgb) / <alpha-value>)',
+        'border-strong': 'rgb(var(--border-strong-rgb) / <alpha-value>)',
+        // Semantic accents — flip-safe across light/dark.
+        'accent-brand': 'rgb(var(--accent-brand-rgb) / <alpha-value>)',
+        'accent-brand-soft': 'rgb(var(--accent-brand-soft-rgb) / <alpha-value>)',
+        'accent-success': 'rgb(var(--accent-success-rgb) / <alpha-value>)',
+        'accent-warning': 'rgb(var(--accent-warning-rgb) / <alpha-value>)',
+        'accent-danger': 'rgb(var(--accent-danger-rgb) / <alpha-value>)',
+        'accent-info': 'rgb(var(--accent-info-rgb) / <alpha-value>)',
+
+        // ─── Legacy ramps (kept; new code prefers semantic above) ──
         primary: {
           50: '#eff6ff',
           100: '#dbeafe',
@@ -22,7 +64,6 @@ module.exports = {
           900: '#1e3a8a',
           950: '#172554',
         },
-        // Secondary accent colors
         accent: {
           50: '#f0fdf4',
           100: '#dcfce7',
@@ -35,7 +76,6 @@ module.exports = {
           800: '#166534',
           900: '#14532d',
         },
-        // Status colors
         success: {
           light: '#dcfce7',
           DEFAULT: '#22c55e',
@@ -56,34 +96,50 @@ module.exports = {
           DEFAULT: '#3b82f6',
           dark: '#1d4ed8',
         },
-        // Neutral grays
-        surface: {
-          50: '#fafafa',
-          100: '#f4f4f5',
-          200: '#e4e4e7',
-          300: '#d4d4d8',
-          400: '#a1a1aa',
-          500: '#71717a',
-          600: '#52525b',
-          700: '#3f3f46',
-          800: '#27272a',
-          900: '#18181b',
-        },
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
       },
+      // Phase 8 — typography scale (see design.md).
+      fontSize: {
+        'display': ['2rem', { lineHeight: '2.5rem', fontWeight: '600' }],
+        'h1': ['1.5rem', { lineHeight: '2rem', fontWeight: '600' }],
+        'h2': ['1.25rem', { lineHeight: '1.75rem', fontWeight: '600' }],
+        'h3': ['1rem', { lineHeight: '1.5rem', fontWeight: '500' }],
+        'body': ['0.875rem', { lineHeight: '1.25rem' }],
+        'small': ['0.75rem', { lineHeight: '1rem' }],
+      },
+      // Phase 8 — elevation tokens. `elev-modal` is the existing
+      // modal shadow; `elev-{0,1,2,3}` are the documented stops.
       boxShadow: {
-        'soft': '0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 10px 20px -2px rgba(0, 0, 0, 0.04)',
-        'glow': '0 0 20px rgba(59, 130, 246, 0.3)',
-        'inner-soft': 'inset 0 2px 4px 0 rgba(0, 0, 0, 0.05)',
+        'elev-0': 'none',
+        'elev-1': '0 1px 2px 0 rgb(0 0 0 / 0.06)',
+        'elev-2':
+          '0 2px 15px -3px rgb(0 0 0 / 0.07), 0 10px 20px -2px rgb(0 0 0 / 0.04)',
+        'elev-3': '0 16px 40px -8px rgb(0 0 0 / 0.10)',
+        'elev-modal': '0 25px 50px -12px rgb(0 0 0 / 0.25)',
+        // Legacy aliases.
+        'soft': '0 2px 15px -3px rgb(0 0 0 / 0.07), 0 10px 20px -2px rgb(0 0 0 / 0.04)',
+        'glow': '0 0 20px rgb(59 130 246 / 0.3)',
+        'inner-soft': 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)',
+      },
+      transitionDuration: {
+        // Phase 8 — motion scale.
+        'instant': '0ms',
+        'fast': '120ms',
+        'base': '200ms',
+        'slow': '320ms',
+        '400': '400ms',
+      },
+      transitionTimingFunction: {
+        'out-expo': 'cubic-bezier(0.16, 1, 0.3, 1)',
       },
       animation: {
-        'fade-in': 'fadeIn 0.3s ease-in-out',
-        'slide-up': 'slideUp 0.3s ease-out',
-        'slide-down': 'slideDown 0.3s ease-out',
-        'slide-in-right': 'slideInRight 0.3s ease-out',
+        'fade-in': 'fadeIn 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+        'slide-up': 'slideUp 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+        'slide-down': 'slideDown 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+        'slide-in-right': 'slideInRight 200ms cubic-bezier(0.16, 1, 0.3, 1)',
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'spin-slow': 'spin 2s linear infinite',
         'bounce-subtle': 'bounceSubtle 2s ease-in-out infinite',
@@ -114,13 +170,9 @@ module.exports = {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
         'mesh-gradient': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        'hero-pattern': "url(\"data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%239C92AC' fill-opacity='0.05'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E\")",
       },
       borderRadius: {
         '4xl': '2rem',
-      },
-      transitionDuration: {
-        '400': '400ms',
       },
     },
   },

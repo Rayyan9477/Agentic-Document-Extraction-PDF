@@ -1,0 +1,365 @@
+{
+  "_metadata": {
+    "title": "CMS CPT/HCPCS Modifiers (Common Subset)",
+    "source": "CMS Medicare Claims Processing Manual + AMA CPT modifiers; ANSI HCPCS Level II modifiers",
+    "version": "2026.01",
+    "description": "Two-character modifiers appended to CPT/HCPCS procedure codes. Used by validate_modifier and modifier-CPT compatibility checks. Lists describe common, commercially-significant modifiers; exotic modifiers are intentionally omitted to keep the validator focused.",
+    "schema": "code: { description, category, applies_to_categories[], blocks_with[], requires_documentation }",
+    "applies_to_categories": "CPT category ranges (E_M, surgery, radiology, pathology, medicine, anesthesia, hcpcs_level_ii) where the modifier is conventionally valid.",
+    "blocks_with": "Modifiers that are mutually exclusive with this one on the same line.",
+    "requires_documentation": "Whether the modifier typically requires supporting documentation."
+  },
+  "modifiers": {
+    "22": {
+      "description": "Increased Procedural Services - When the work required to provide a service is substantially greater than typically required.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine"],
+      "blocks_with": ["52"],
+      "requires_documentation": true
+    },
+    "23": {
+      "description": "Unusual Anesthesia - When a procedure normally not requiring anesthesia must be done under anesthesia.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["anesthesia"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "24": {
+      "description": "Unrelated E/M Service by Same Physician During a Postoperative Period.",
+      "category": "cpt_e_m",
+      "applies_to_categories": ["E_M"],
+      "blocks_with": ["25", "57"],
+      "requires_documentation": true
+    },
+    "25": {
+      "description": "Significant, Separately Identifiable E/M Service by Same Physician on the Same Day of a Procedure.",
+      "category": "cpt_e_m",
+      "applies_to_categories": ["E_M"],
+      "blocks_with": ["24", "57"],
+      "requires_documentation": true
+    },
+    "26": {
+      "description": "Professional Component - Used to bill the professional (physician) interpretation of a procedure (e.g. radiology read).",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["radiology", "pathology", "medicine"],
+      "blocks_with": ["TC"],
+      "requires_documentation": false
+    },
+    "27": {
+      "description": "Multiple Outpatient Hospital E/M Encounters on the Same Date.",
+      "category": "cpt_e_m",
+      "applies_to_categories": ["E_M"],
+      "blocks_with": [],
+      "requires_documentation": false
+    },
+    "32": {
+      "description": "Mandated Services (e.g. third-party payer, governmental, legislative or regulatory requirement).",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["E_M", "surgery", "radiology", "medicine"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "33": {
+      "description": "Preventive Services - Indicates a service that is preventive in nature.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["E_M", "medicine"],
+      "blocks_with": [],
+      "requires_documentation": false
+    },
+    "47": {
+      "description": "Anesthesia by Surgeon - Regional or general anesthesia provided by the surgeon.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "50": {
+      "description": "Bilateral Procedure - A procedure performed on both sides of the body during the same session.",
+      "category": "cpt_anatomic",
+      "applies_to_categories": ["surgery", "radiology"],
+      "blocks_with": ["LT", "RT"],
+      "requires_documentation": false
+    },
+    "51": {
+      "description": "Multiple Procedures - When multiple procedures, other than E/M services, are performed at the same session by the same provider.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine"],
+      "blocks_with": ["59"],
+      "requires_documentation": false
+    },
+    "52": {
+      "description": "Reduced Services - When a service or procedure is partially reduced or eliminated at the physician's election.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine"],
+      "blocks_with": ["22", "53"],
+      "requires_documentation": true
+    },
+    "53": {
+      "description": "Discontinued Procedure - When the physician elects to terminate a surgical or diagnostic procedure due to extenuating circumstances.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology"],
+      "blocks_with": ["52"],
+      "requires_documentation": true
+    },
+    "54": {
+      "description": "Surgical Care Only - One physician performs the surgical procedure but another provides preoperative and/or postoperative care.",
+      "category": "cpt_split_care",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["55", "56"],
+      "requires_documentation": false
+    },
+    "55": {
+      "description": "Postoperative Management Only - One physician performs only the postoperative management.",
+      "category": "cpt_split_care",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["54", "56"],
+      "requires_documentation": false
+    },
+    "56": {
+      "description": "Preoperative Management Only - One physician performs only the preoperative management.",
+      "category": "cpt_split_care",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["54", "55"],
+      "requires_documentation": false
+    },
+    "57": {
+      "description": "Decision for Surgery - An E/M service that resulted in the initial decision to perform a major surgery.",
+      "category": "cpt_e_m",
+      "applies_to_categories": ["E_M"],
+      "blocks_with": ["24", "25"],
+      "requires_documentation": true
+    },
+    "58": {
+      "description": "Staged or Related Procedure or Service by the Same Physician During the Postoperative Period.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["78", "79"],
+      "requires_documentation": true
+    },
+    "59": {
+      "description": "Distinct Procedural Service - Used to identify procedures/services not normally reported together but appropriate under the circumstances.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine", "pathology"],
+      "blocks_with": ["51", "XE", "XS", "XP", "XU"],
+      "requires_documentation": true
+    },
+    "62": {
+      "description": "Two Surgeons - When two surgeons work together as primary surgeons performing distinct parts of a single procedure.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "63": {
+      "description": "Procedure Performed on Infants Less than 4 kg.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "66": {
+      "description": "Surgical Team - For complex procedures requiring concomitant services of several physicians.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "76": {
+      "description": "Repeat Procedure or Service by Same Physician.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine"],
+      "blocks_with": ["77"],
+      "requires_documentation": false
+    },
+    "77": {
+      "description": "Repeat Procedure by Another Physician.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine"],
+      "blocks_with": ["76"],
+      "requires_documentation": false
+    },
+    "78": {
+      "description": "Unplanned Return to the Operating/Procedure Room by the Same Physician Following Initial Procedure for a Related Procedure During the Postoperative Period.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["58", "79"],
+      "requires_documentation": true
+    },
+    "79": {
+      "description": "Unrelated Procedure or Service by the Same Physician During the Postoperative Period.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["58", "78"],
+      "requires_documentation": true
+    },
+    "80": {
+      "description": "Assistant Surgeon - Surgical assistant services.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["81", "82", "AS"],
+      "requires_documentation": false
+    },
+    "81": {
+      "description": "Minimum Assistant Surgeon - Minimum surgical assistant services.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["80", "82", "AS"],
+      "requires_documentation": false
+    },
+    "82": {
+      "description": "Assistant Surgeon (when qualified resident surgeon not available).",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["80", "81", "AS"],
+      "requires_documentation": true
+    },
+    "90": {
+      "description": "Reference (Outside) Laboratory - A laboratory procedure performed by a party other than the treating or reporting physician.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["pathology"],
+      "blocks_with": [],
+      "requires_documentation": false
+    },
+    "91": {
+      "description": "Repeat Clinical Diagnostic Laboratory Test - When subsequent reruns to obtain multiple test results on the same patient on the same day are necessary.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["pathology"],
+      "blocks_with": [],
+      "requires_documentation": true
+    },
+    "95": {
+      "description": "Synchronous Telemedicine Service via Real-Time Interactive Audio and Video Telecommunications System.",
+      "category": "cpt_telehealth",
+      "applies_to_categories": ["E_M", "medicine"],
+      "blocks_with": ["GT"],
+      "requires_documentation": false
+    },
+    "99": {
+      "description": "Multiple Modifiers - When more than two modifiers are needed.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["E_M", "surgery", "radiology", "medicine", "pathology"],
+      "blocks_with": [],
+      "requires_documentation": false
+    },
+    "AS": {
+      "description": "Physician Assistant, Nurse Practitioner, or Clinical Nurse Specialist Services for Assistant at Surgery.",
+      "category": "hcpcs_level_ii",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["80", "81", "82"],
+      "requires_documentation": false
+    },
+    "E1": {
+      "description": "Upper Left Eyelid.",
+      "category": "hcpcs_anatomic",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["E2", "E3", "E4"],
+      "requires_documentation": false
+    },
+    "E2": {
+      "description": "Lower Left Eyelid.",
+      "category": "hcpcs_anatomic",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["E1", "E3", "E4"],
+      "requires_documentation": false
+    },
+    "E3": {
+      "description": "Upper Right Eyelid.",
+      "category": "hcpcs_anatomic",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["E1", "E2", "E4"],
+      "requires_documentation": false
+    },
+    "E4": {
+      "description": "Lower Right Eyelid.",
+      "category": "hcpcs_anatomic",
+      "applies_to_categories": ["surgery"],
+      "blocks_with": ["E1", "E2", "E3"],
+      "requires_documentation": false
+    },
+    "GA": {
+      "description": "Waiver of Liability Statement Issued as Required by Payer Policy, Individual Case.",
+      "category": "hcpcs_level_ii",
+      "applies_to_categories": ["E_M", "surgery", "radiology", "medicine"],
+      "blocks_with": ["GZ"],
+      "requires_documentation": true
+    },
+    "GT": {
+      "description": "Via Interactive Audio and Video Telecommunication Systems (legacy telehealth modifier).",
+      "category": "hcpcs_level_ii",
+      "applies_to_categories": ["E_M", "medicine"],
+      "blocks_with": ["95"],
+      "requires_documentation": false
+    },
+    "GY": {
+      "description": "Item or Service Statutorily Excluded.",
+      "category": "hcpcs_level_ii",
+      "applies_to_categories": ["E_M", "surgery", "radiology", "medicine"],
+      "blocks_with": [],
+      "requires_documentation": false
+    },
+    "GZ": {
+      "description": "Item or Service Expected to Be Denied as Not Reasonable and Necessary.",
+      "category": "hcpcs_level_ii",
+      "applies_to_categories": ["E_M", "surgery", "radiology", "medicine"],
+      "blocks_with": ["GA"],
+      "requires_documentation": false
+    },
+    "LT": {
+      "description": "Left Side - Used to identify procedures performed on the left side of the body.",
+      "category": "hcpcs_anatomic",
+      "applies_to_categories": ["surgery", "radiology"],
+      "blocks_with": ["50", "RT"],
+      "requires_documentation": false
+    },
+    "RT": {
+      "description": "Right Side - Used to identify procedures performed on the right side of the body.",
+      "category": "hcpcs_anatomic",
+      "applies_to_categories": ["surgery", "radiology"],
+      "blocks_with": ["50", "LT"],
+      "requires_documentation": false
+    },
+    "TC": {
+      "description": "Technical Component - Used to bill the technical (equipment, supplies, technician) portion of a procedure.",
+      "category": "hcpcs_level_ii",
+      "applies_to_categories": ["radiology", "pathology", "medicine"],
+      "blocks_with": ["26"],
+      "requires_documentation": false
+    },
+    "XE": {
+      "description": "Separate Encounter - A service that is distinct because it occurred during a separate encounter.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine", "pathology"],
+      "blocks_with": ["59"],
+      "requires_documentation": true
+    },
+    "XS": {
+      "description": "Separate Structure - A service that is distinct because it was performed on a separate organ/structure.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology"],
+      "blocks_with": ["59"],
+      "requires_documentation": true
+    },
+    "XP": {
+      "description": "Separate Practitioner - A service that is distinct because it was performed by a different practitioner.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine", "pathology"],
+      "blocks_with": ["59"],
+      "requires_documentation": true
+    },
+    "XU": {
+      "description": "Unusual Non-Overlapping Service - The use of a service that is distinct because it does not overlap usual components of the main service.",
+      "category": "cpt_pricing",
+      "applies_to_categories": ["surgery", "radiology", "medicine"],
+      "blocks_with": ["59"],
+      "requires_documentation": true
+    }
+  },
+  "category_ranges": {
+    "E_M":         {"low": 99201, "high": 99499, "label": "Evaluation and Management"},
+    "anesthesia":  {"low": "00100", "high": "01999", "label": "Anesthesia"},
+    "surgery":     {"low": 10021, "high": 69990, "label": "Surgery"},
+    "radiology":   {"low": 70010, "high": 79999, "label": "Radiology"},
+    "pathology":   {"low": 80047, "high": 89398, "label": "Pathology and Laboratory"},
+    "medicine":    {"low": 90281, "high": 99607, "label": "Medicine"}
+  }
+}

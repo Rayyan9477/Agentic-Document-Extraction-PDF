@@ -35,6 +35,8 @@ import {
   Skeleton,
 } from '@/components/ui';
 import { documentsApi, previewApi, exportApi } from '@/lib/api';
+// V3 Phase 8 — Source View tab.
+import { SourceViewTab } from '@/components/document/SourceViewTab';
 import {
   formatDuration,
   formatConfidence,
@@ -443,9 +445,18 @@ export default function DocumentDetailPage() {
             <TabsList className="border-b border-surface-200 px-4">
               <TabsTrigger value="fields">Extracted Fields</TabsTrigger>
               <TabsTrigger value="validation">Validation</TabsTrigger>
+              <TabsTrigger value="source">Source</TabsTrigger>
               <TabsTrigger value="preview">Preview</TabsTrigger>
               <TabsTrigger value="metadata">Metadata</TabsTrigger>
             </TabsList>
+
+            <TabsContent value="source" className="p-6">
+              {/* V3 Phase 8 — Source View tab: PDF canvas + bbox
+                  overlay + provenance timeline. Requires V3
+                  dual-VLM extraction; surfaces an empty state for
+                  legacy single-VLM documents. */}
+              <SourceViewTab processingId={document.processing_id} />
+            </TabsContent>
 
             <TabsContent value="fields" className="p-6">
               <div className="space-y-4">

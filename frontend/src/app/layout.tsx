@@ -4,6 +4,8 @@ import './globals.css';
 import { Providers } from '@/components/providers';
 import { Toaster } from 'react-hot-toast';
 import { PageErrorBoundary } from '@/components/ErrorBoundary';
+import { ThemeProvider } from '@/components/ThemeProvider';
+import { BRANDING } from '@/lib/branding';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -11,22 +13,38 @@ const inter = Inter({
   variable: '--font-inter',
 });
 
+// V3 Phase 8 — branding metadata read from src/lib/branding.ts.
+// Renaming the product is a one-file change.
 export const metadata: Metadata = {
   title: {
-    default: 'PDF Document Extraction',
-    template: '%s | PDF Extraction',
+    default: BRANDING.productName,
+    template: `%s · ${BRANDING.productName}`,
   },
-  description: 'Enterprise-grade PDF document extraction with AI-powered field recognition and HIPAA-compliant processing.',
-  keywords: ['PDF extraction', 'document processing', 'OCR', 'AI', 'medical records', 'HIPAA'],
-  authors: [{ name: 'PDF Extraction Team' }],
-  creator: 'PDF Extraction System',
+  description: BRANDING.metaDescription,
+  keywords: [
+    'document extraction',
+    'AI',
+    'OCR',
+    'provenance',
+    'HIPAA',
+    'multi-tenant',
+    'dual-VLM',
+    BRANDING.productName,
+  ],
+  authors: [{ name: BRANDING.companyName }],
+  creator: BRANDING.companyName,
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  themeColor: '#3b82f6',
+  // V3 Phase 8 — theme color uses CSS custom property updated by
+  // ThemeProvider on dark-mode toggle. Static fallback below.
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#3b82f6' },
+    { media: '(prefers-color-scheme: dark)', color: '#1e293b' },
+  ],
 };
 
 export default function RootLayout({
@@ -35,38 +53,40 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.variable}>
-      <body className="min-h-screen bg-surface-50 font-sans antialiased">
-        <Providers>
-          <PageErrorBoundary>
-            {children}
-          </PageErrorBoundary>
-          <Toaster
-            position="top-right"
-            toastOptions={{
-              duration: 4000,
-              style: {
-                background: '#fff',
-                color: '#18181b',
-                padding: '16px',
-                borderRadius: '12px',
-                boxShadow: '0 10px 40px rgba(0, 0, 0, 0.1)',
-              },
-              success: {
-                iconTheme: {
-                  primary: '#22c55e',
-                  secondary: '#fff',
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <body className="min-h-screen bg-canvas font-sans antialiased text-primary">
+        <ThemeProvider>
+          <Providers>
+            <PageErrorBoundary>
+              {children}
+            </PageErrorBoundary>
+            <Toaster
+              position="top-right"
+              toastOptions={{
+                duration: 4000,
+                // V3 Phase 8 — Toast styling uses semantic tokens
+                // so dark-mode flip is automatic.
+                className:
+                  'bg-surface-raised text-primary border border-default rounded-xl shadow-elev-3',
+                style: {
+                  padding: '16px',
                 },
-              },
-              error: {
-                iconTheme: {
-                  primary: '#ef4444',
-                  secondary: '#fff',
+                success: {
+                  iconTheme: {
+                    primary: 'rgb(var(--accent-success-rgb))',
+                    secondary: 'rgb(var(--bg-surface-raised-rgb))',
+                  },
                 },
-              },
-            }}
-          />
-        </Providers>
+                error: {
+                  iconTheme: {
+                    primary: 'rgb(var(--accent-danger-rgb))',
+                    secondary: 'rgb(var(--bg-surface-raised-rgb))',
+                  },
+                },
+              }}
+            />
+          </Providers>
+        </ThemeProvider>
       </body>
     </html>
   );
