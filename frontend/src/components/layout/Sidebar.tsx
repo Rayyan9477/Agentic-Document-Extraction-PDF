@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, Badge } from '@/components/ui';
+import { BRANDING } from '@/lib/branding';
 
 interface NavItem {
   label: string;
@@ -101,26 +102,30 @@ const Sidebar: React.FC<SidebarProps> = ({
       <Link
         href={item.href}
         onClick={() => onClose()}
+        // V3 Phase 8 — aria-current marks the active route for AT.
+        aria-current={isActive ? 'page' : undefined}
+        title={isCollapsed ? item.label : undefined}
         className={cn(
           'flex items-center gap-3 px-3 py-2.5 rounded-xl',
-          'transition-all duration-200',
+          'transition-all duration-base',
           'group relative',
           isActive
-            ? 'bg-primary-50 text-primary-700'
-            : 'text-surface-600 hover:bg-surface-100 hover:text-surface-900'
+            ? 'bg-accent-brand-soft text-accent-brand'
+            : 'text-text-secondary hover:bg-surface hover:text-text-primary'
         )}
       >
         <span
           className={cn(
             'flex-shrink-0 transition-colors',
-            isActive ? 'text-primary-600' : 'text-surface-400 group-hover:text-surface-600'
+            isActive ? 'text-accent-brand' : 'text-text-muted group-hover:text-text-secondary'
           )}
+          aria-hidden="true"
         >
           {item.icon}
         </span>
         {!isCollapsed && (
           <>
-            <span className="flex-1 font-medium text-sm">{item.label}</span>
+            <span className="flex-1 font-medium text-body">{item.label}</span>
             {item.badge && (
               <Badge size="sm" variant={isActive ? 'primary' : 'default'}>
                 {item.badge}
@@ -131,8 +136,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         {isActive && (
           <motion.div
             layoutId="activeNav"
-            className="absolute left-0 w-1 h-8 bg-primary-600 rounded-r-full"
+            className="absolute left-0 w-1 h-8 bg-accent-brand rounded-r-full"
             transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+            aria-hidden="true"
           />
         )}
       </Link>
@@ -142,15 +148,19 @@ const Sidebar: React.FC<SidebarProps> = ({
   const sidebarContent = (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="flex items-center justify-between h-16 px-4 border-b border-surface-100">
-        <Link href="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-md">
-            <FileText className="w-6 h-6 text-white" />
+      <div className="flex items-center justify-between h-16 px-4 border-b border-default">
+        <Link
+          href="/"
+          aria-label={`${BRANDING.productName} home`}
+          className="flex items-center gap-3"
+        >
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-elev-1">
+            <FileText className="w-6 h-6 text-white" aria-hidden="true" />
           </div>
           {!isCollapsed && (
             <div className="flex flex-col">
-              <span className="text-lg font-bold text-surface-900">PDF Extract</span>
-              <span className="text-xs text-surface-500">Enterprise Edition</span>
+              <span className="text-h3 font-bold text-text-primary">{BRANDING.productName}</span>
+              <span className="text-small text-text-muted">{BRANDING.versionLabel}</span>
             </div>
           )}
         </Link>
@@ -158,25 +168,32 @@ const Sidebar: React.FC<SidebarProps> = ({
           variant="ghost"
           size="icon"
           onClick={onClose}
+          aria-label="Close navigation"
           className="lg:hidden"
         >
-          <X className="w-5 h-5" />
+          <X className="w-5 h-5" aria-hidden="true" />
         </Button>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-4 space-y-1">
+      <nav
+        aria-label="Primary navigation"
+        className="flex-1 overflow-y-auto p-4 space-y-1"
+      >
         {navItems.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
       </nav>
 
       {/* Bottom Navigation */}
-      <div className="p-4 border-t border-surface-100 space-y-1">
+      <nav
+        aria-label="Secondary navigation"
+        className="p-4 border-t border-default space-y-1"
+      >
         {bottomNavItems.map((item) => (
           <NavLink key={item.href} item={item} />
         ))}
-      </div>
+      </nav>
 
       {/* Collapse Toggle (Desktop) */}
       {onToggleCollapse && (

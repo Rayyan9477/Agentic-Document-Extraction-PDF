@@ -1,4 +1,10 @@
-# Specialised Medical Input Modes (WS-3)
+# Specialised Medical Input Modes
+
+> **Operator-facing deep-dive.** Canonical taxonomy lives in
+> [VERIDOC_MASTER_PLAN.md → Appendix E](./VERIDOC_MASTER_PLAN.md#e-domain-modes--modality-vs-profile).
+> This file goes one level deeper — detection heuristics, override
+> wiring, and the "adding a new mode" runbook. If the two disagree,
+> the master plan wins.
 
 The system tags every document with one or more *modalities* — string
 tags from a fixed set — and the image enhancer + extraction prompt

@@ -1,5 +1,13 @@
-# AI Observability (WS-7)
+# AI Observability
 
+> **Operator-facing deep-dive.** Canonical observability story is in
+> [VERIDOC_MASTER_PLAN.md → §4](./VERIDOC_MASTER_PLAN.md#4-cross-cutting-concerns)
+> and the event-vocabulary cadence in
+> [Appendix F](./VERIDOC_MASTER_PLAN.md#f-evaluation--calibration-loop).
+> This file goes one level deeper — settings keys, wiring anchors,
+> event table, and how Phoenix/PostHog relate to `audit.py` /
+> `metrics.py` / structlog. If the two disagree, the master plan wins.
+>
 > Opt-in LLM tracing + product analytics behind one dispatcher. Both
 > sinks are off by default; enable via `settings.observability`.
 

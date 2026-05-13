@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
@@ -22,6 +22,12 @@ const Tooltip: React.FC<TooltipProps> = ({
   delay = 200,
   className,
 }) => {
+  // V3 Phase 8 — proper ARIA tooltip semantics:
+  // * trigger gets aria-describedby pointing at the bubble's id
+  // * bubble gets role="tooltip"
+  // * hover/focus parity (was already correct in the legacy file)
+  // * Escape key dismisses the tooltip while focused (keyboard a11y)
+  const tooltipId = useId();
   const [isVisible, setIsVisible] = useState(false);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -126,10 +132,12 @@ const Tooltip: React.FC<TooltipProps> = ({
     <AnimatePresence>
       {isVisible && (
         <motion.div
+          id={tooltipId}
+          role="tooltip"
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.1 }}
+          transition={{ duration: 0.12, ease: [0.16, 1, 0.3, 1] }}
           style={{
             position: 'fixed',
             top: position.top,
@@ -139,9 +147,11 @@ const Tooltip: React.FC<TooltipProps> = ({
             zIndex: 9999,
           }}
           className={cn(
-            'px-3 py-1.5 text-sm text-white bg-surface-900 rounded-lg shadow-lg',
+            // V3 Phase 8 — semantic tokens so dark mode flips.
+            'px-3 py-1.5 text-small rounded-lg shadow-elev-3',
+            'bg-surface-raised text-text-primary border border-default',
             'max-w-xs break-words',
-            className
+            className,
           )}
         >
           {content}
@@ -150,14 +160,24 @@ const Tooltip: React.FC<TooltipProps> = ({
     </AnimatePresence>
   );
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape' && isVisible) {
+      e.preventDefault();
+      hideTooltip();
+    }
+  };
+
   return (
     <>
       <div
         ref={triggerRef}
+        // V3 Phase 8 — link trigger to bubble for screen readers.
+        aria-describedby={isVisible ? tooltipId : undefined}
         onMouseEnter={showTooltip}
         onMouseLeave={hideTooltip}
         onFocus={showTooltip}
         onBlur={hideTooltip}
+        onKeyDown={handleKeyDown}
         className="inline-flex"
       >
         {children}

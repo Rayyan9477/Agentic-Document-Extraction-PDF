@@ -1,11 +1,12 @@
 'use client';
 
-import React, { Fragment, useEffect } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Button from './Button';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 interface ModalProps {
   isOpen: boolean;
@@ -32,6 +33,12 @@ const Modal: React.FC<ModalProps> = ({
   children,
   footer,
 }) => {
+  // V3 Phase 8 — stable ARIA ids + focus trap.
+  const titleId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useFocusTrap(dialogRef, isOpen);
+
   // Handle escape key
   useEffect(() => {
     if (!closeOnEscape) return;
@@ -70,7 +77,7 @@ const Modal: React.FC<ModalProps> = ({
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          {/* Overlay */}
+          {/* Overlay — semantic-token bg so dark mode flips with the rest */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -78,29 +85,47 @@ const Modal: React.FC<ModalProps> = ({
             transition={{ duration: 0.2 }}
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={closeOnOverlayClick ? onClose : undefined}
+            aria-hidden="true"
           />
 
-          {/* Modal Content */}
+          {/* Modal Content — V3 Phase 8 ARIA + focus trap */}
           <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={title ? titleId : undefined}
+            aria-describedby={description ? descriptionId : undefined}
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
-              'relative w-full bg-white rounded-2xl shadow-xl',
+              'relative w-full rounded-2xl shadow-elev-modal',
+              'bg-surface-raised text-text-primary',
+              'border border-default',
               'max-h-[90vh] flex flex-col',
-              sizes[size]
+              sizes[size],
             )}
           >
             {/* Header */}
             {(title || showCloseButton) && (
-              <div className="flex items-start justify-between gap-4 p-6 border-b border-surface-100">
+              <div className="flex items-start justify-between gap-4 p-6 border-b border-default">
                 <div className="flex-1 min-w-0">
                   {title && (
-                    <h2 className="text-lg font-semibold text-surface-900">{title}</h2>
+                    <h2
+                      id={titleId}
+                      className="text-h3 text-text-primary"
+                    >
+                      {title}
+                    </h2>
                   )}
                   {description && (
-                    <p className="mt-1 text-sm text-surface-500">{description}</p>
+                    <p
+                      id={descriptionId}
+                      className="mt-1 text-body text-text-secondary"
+                    >
+                      {description}
+                    </p>
                   )}
                 </div>
                 {showCloseButton && (
@@ -108,9 +133,10 @@ const Modal: React.FC<ModalProps> = ({
                     variant="ghost"
                     size="icon"
                     onClick={onClose}
+                    aria-label="Close dialog"
                     className="flex-shrink-0 -mr-2 -mt-2"
                   >
-                    <X className="h-5 w-5" />
+                    <X className="h-5 w-5" aria-hidden="true" />
                   </Button>
                 )}
               </div>
@@ -121,7 +147,7 @@ const Modal: React.FC<ModalProps> = ({
 
             {/* Footer */}
             {footer && (
-              <div className="flex items-center justify-end gap-3 p-6 border-t border-surface-100 bg-surface-50 rounded-b-2xl">
+              <div className="flex items-center justify-end gap-3 p-6 border-t border-default bg-surface rounded-b-2xl">
                 {footer}
               </div>
             )}
@@ -187,7 +213,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
         </>
       }
     >
-      <p className="text-surface-600">{message}</p>
+      <p className="text-text-secondary">{message}</p>
     </Modal>
   );
 };
