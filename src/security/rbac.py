@@ -419,6 +419,13 @@ class TokenManager:
 
         # Load existing revoked tokens from file
         self._revoked_tokens: dict[str, float] = {}  # jti -> expiration timestamp
+        # V3 Phase 8 — track key→owner mapping so revocation can
+        # enforce ownership. Persisted alongside the revoked-tokens
+        # sidecar in the same JSON file under the ``key_owners``
+        # top-level key. Pre-Phase-8 deployments have no owner data
+        # for existing keys; admins handle them via the documented
+        # legacy fallback.
+        self._key_owners: dict[str, str] = {}  # jti -> user_id
         self._load_revoked_tokens()
 
         # Clean up expired revocations on startup
@@ -555,7 +562,9 @@ class TokenManager:
             raise TokenInvalidError(f"Invalid token: {e}") from e
 
     def _load_revoked_tokens(self) -> None:
-        """Load revoked tokens from persistent storage."""
+        """Load revoked tokens AND key→owner mapping from persistent
+        storage. V3 Phase 8 added the ``key_owners`` field; older
+        files without it load with an empty mapping."""
         import json
 
         if not self._revocation_path.exists():
@@ -566,19 +575,38 @@ class TokenManager:
             with open(self._revocation_path) as f:
                 data = json.load(f)
             self._revoked_tokens = {k: float(v) for k, v in data.get("revoked", {}).items()}
-            logger.info("revoked_tokens_loaded", count=len(self._revoked_tokens))
+            # V3 Phase 8 — owners map. Defaults to empty for legacy files.
+            owners = data.get("key_owners", {})
+            self._key_owners = {str(k): str(v) for k, v in owners.items() if v}
+            logger.info(
+                "revoked_tokens_loaded",
+                revoked=len(self._revoked_tokens),
+                owned=len(self._key_owners),
+            )
         except Exception as e:
             logger.error("revoked_tokens_load_error", error=str(e))
             self._revoked_tokens = {}
+            self._key_owners = {}
 
     def _save_revoked_tokens(self) -> None:
-        """Save revoked tokens to persistent storage."""
+        """Save revoked tokens AND key owners to persistent storage."""
         import json
 
         try:
             with open(self._revocation_path, "w") as f:
-                json.dump({"revoked": self._revoked_tokens}, f, indent=2)
-            logger.debug("revoked_tokens_saved", count=len(self._revoked_tokens))
+                json.dump(
+                    {
+                        "revoked": self._revoked_tokens,
+                        "key_owners": self._key_owners,
+                    },
+                    f,
+                    indent=2,
+                )
+            logger.debug(
+                "revoked_tokens_saved",
+                revoked=len(self._revoked_tokens),
+                owned=len(self._key_owners),
+            )
         except Exception as e:
             logger.error("revoked_tokens_save_error", error=str(e))
 
@@ -645,6 +673,38 @@ class TokenManager:
             return False
 
         return True
+
+    def register_key(self, jti: str, user_id: str) -> None:
+        """V3 Phase 8 — record ``jti -> user_id`` for a freshly issued
+        API key.
+
+        Called from ``RBACManager.create_api_key`` so revocation can
+        verify ownership. Persists to the revoked-tokens sidecar in
+        the same write so we don't open two files.
+        """
+        if not jti or not user_id:
+            logger.warning("register_key_missing_args", jti_set=bool(jti), user_set=bool(user_id))
+            return
+        self._key_owners[jti] = str(user_id)
+        self._save_revoked_tokens()
+
+    def get_key_owner(self, jti: str) -> str | None:
+        """Return the ``user_id`` that owns the given ``jti``, or
+        ``None`` for unknown / unowned keys."""
+        return self._key_owners.get(jti)
+
+    def assert_owner(self, jti: str, user_id: str) -> bool:
+        """V3 Phase 8 — return True iff ``user_id`` owns the key
+        identified by ``jti``.
+
+        Returns False for unknown keys (legacy / pre-Phase-8 keys
+        without owner data) so callers can decide their own legacy
+        policy. The auth route's revoke handler treats unknown owner
+        as "not yours unless you're admin", returning 404 to avoid
+        leaking key existence.
+        """
+        owner = self._key_owners.get(jti)
+        return owner is not None and owner == str(user_id)
 
     def revoke_token_by_jti(
         self,
@@ -1176,9 +1236,19 @@ class RBACManager:
         """
         self._token_manager.revoke_token(token)
 
-    def create_api_key(self, user: User, name: str, expires_days: int = 365) -> str:
+    def create_api_key(
+        self,
+        user: User,
+        name: str,
+        expires_days: int = 365,
+    ) -> tuple[str, str]:
         """
         Create an API key for a user.
+
+        V3 Phase 8 — returns ``(api_key, jti)`` so the caller can
+        report the JTI to the operator and so ownership is registered
+        for the revoke path. Pre-Phase-8 callers that expected a bare
+        string should index `[0]` or migrate to the tuple unpacking.
 
         Args:
             user: User to create key for.
@@ -1186,11 +1256,12 @@ class RBACManager:
             expires_days: Key validity in days.
 
         Returns:
-            API key string.
+            Tuple of (api_key string, jti).
         """
         now = datetime.now(UTC)
         expires = now + timedelta(days=expires_days)
 
+        jti = secrets.token_urlsafe(32)
         payload = {
             "sub": user.user_id,
             "token_type": "api_key",
@@ -1198,10 +1269,13 @@ class RBACManager:
             "permissions": [p.value for p in user.get_all_permissions()],
             "exp": int(expires.timestamp()),
             "iat": int(now.timestamp()),
-            "jti": secrets.token_urlsafe(32),
+            "jti": jti,
         }
 
-        return self._token_manager.encode_payload(payload)
+        # V3 Phase 8 — register ownership so revoke can enforce it.
+        self._token_manager.register_key(jti, user.user_id)
+
+        return self._token_manager.encode_payload(payload), jti
 
 
 # Decorators for permission checking

@@ -312,6 +312,345 @@ def validate_hcpcs_code(code: str | int) -> ValidationInfo:
 
 
 # =============================================================================
+# POS Code Validation (CMS Place of Service) — V3 Phase 5
+# =============================================================================
+
+# Lazy-loaded POS code table. The JSON file is the source of truth so
+# operators can update it without touching code; we cache it after the
+# first successful load.
+_POS_TABLE: dict[str, dict[str, str]] | None = None
+POS_CODE_PATTERN = re.compile(r"^\d{2}$")
+
+
+def _load_pos_table() -> dict[str, dict[str, str]]:
+    """Load and cache the POS code table from data/standards/pos_codes.json."""
+    global _POS_TABLE
+    if _POS_TABLE is not None:
+        return _POS_TABLE
+    import json
+    from pathlib import Path
+
+    # data/standards/pos_codes.json — resolve from the package root.
+    repo_root = Path(__file__).resolve().parents[2]
+    pos_path = repo_root / "data" / "standards" / "pos_codes.json"
+    try:
+        with pos_path.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        codes = payload.get("codes", {})
+        if not isinstance(codes, dict):
+            raise ValueError("pos_codes.json: 'codes' must be an object")
+        _POS_TABLE = {str(k): v for k, v in codes.items()}
+        return _POS_TABLE
+    except FileNotFoundError:
+        logger.warning("pos_codes_table_missing", path=str(pos_path))
+        _POS_TABLE = {}
+        return _POS_TABLE
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("pos_codes_table_invalid", error=str(e))
+        _POS_TABLE = {}
+        return _POS_TABLE
+
+
+def validate_pos_code(code: str | int) -> ValidationInfo:
+    """
+    Validate a CMS Place of Service (POS) code.
+
+    POS codes are exactly 2 digits and identify where a service was
+    rendered (``11`` = office, ``21`` = inpatient hospital, …). Used
+    on CMS-1500 line 24B and 837P EDI loop 2300.
+
+    Args:
+        code: POS code to validate (string or int).
+
+    Returns:
+        ValidationInfo with status and a ``details`` dict carrying the
+        canonical name + facility/non-facility class.
+
+    Example:
+        >>> validate_pos_code("11").is_valid
+        True
+        >>> validate_pos_code("99").details["name"]
+        'Other Place of Service'
+    """
+    if code is None or code == "":
+        return ValidationInfo(
+            result=ValidationResult.INVALID,
+            message="POS code is required",
+        )
+
+    # Coerce: ``int(11)`` → ``"11"`` (zero-padded).
+    if isinstance(code, int):
+        code_str = f"{code:02d}"
+    else:
+        code_str = str(code).strip()
+        # Tolerate single-digit user input (e.g. "1" → "01") only when
+        # it's a pure integer string. Mixed alpha → invalid.
+        if code_str.isdigit() and len(code_str) == 1:
+            code_str = code_str.zfill(2)
+
+    if not POS_CODE_PATTERN.match(code_str):
+        return ValidationInfo(
+            result=ValidationResult.INVALID,
+            message="Invalid POS code format (expected 2 digits)",
+            normalized_value=code_str,
+        )
+
+    table = _load_pos_table()
+    entry = table.get(code_str)
+    if entry is None:
+        # Format passed but the code is not in the published set —
+        # warn rather than reject so a freshly-issued POS code does
+        # not block extraction until the JSON is updated.
+        return ValidationInfo(
+            result=ValidationResult.WARNING,
+            message=f"POS code {code_str} is not in the known CMS POS code set",
+            normalized_value=code_str,
+        )
+
+    return ValidationInfo(
+        result=ValidationResult.VALID,
+        message=f"Valid POS code: {entry.get('name', code_str)}",
+        normalized_value=code_str,
+        details={
+            "name": entry.get("name", ""),
+            "type": entry.get("type", ""),
+        },
+    )
+
+
+# =============================================================================
+# Modifier Validation (CPT/HCPCS Modifier) — V3 Phase 5
+# =============================================================================
+
+
+_MODIFIER_TABLE: dict[str, dict[str, object]] | None = None
+_MODIFIER_CATEGORY_RANGES: dict[str, dict[str, object]] | None = None
+MODIFIER_PATTERN = re.compile(r"^[A-Z0-9]{2}$")
+
+
+def _load_modifier_table() -> tuple[
+    dict[str, dict[str, object]],
+    dict[str, dict[str, object]],
+]:
+    """Load and cache the modifier table from data/standards/cms_modifiers.json."""
+    global _MODIFIER_TABLE, _MODIFIER_CATEGORY_RANGES
+    if _MODIFIER_TABLE is not None and _MODIFIER_CATEGORY_RANGES is not None:
+        return _MODIFIER_TABLE, _MODIFIER_CATEGORY_RANGES
+    import json
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    mod_path = repo_root / "data" / "standards" / "cms_modifiers.json"
+    try:
+        with mod_path.open("r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        modifiers = payload.get("modifiers", {})
+        ranges = payload.get("category_ranges", {})
+        if not isinstance(modifiers, dict):
+            raise ValueError("cms_modifiers.json: 'modifiers' must be an object")
+        _MODIFIER_TABLE = {str(k).upper(): v for k, v in modifiers.items()}
+        _MODIFIER_CATEGORY_RANGES = ranges if isinstance(ranges, dict) else {}
+        return _MODIFIER_TABLE, _MODIFIER_CATEGORY_RANGES
+    except FileNotFoundError:
+        logger.warning("modifier_table_missing", path=str(mod_path))
+        _MODIFIER_TABLE = {}
+        _MODIFIER_CATEGORY_RANGES = {}
+        return _MODIFIER_TABLE, _MODIFIER_CATEGORY_RANGES
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("modifier_table_invalid", error=str(e))
+        _MODIFIER_TABLE = {}
+        _MODIFIER_CATEGORY_RANGES = {}
+        return _MODIFIER_TABLE, _MODIFIER_CATEGORY_RANGES
+
+
+def _resolve_cpt_category(cpt_code: str | int | None) -> str | None:
+    """
+    Map a CPT base code to its category key
+    (``"E_M"`` / ``"surgery"`` / ``"radiology"`` / …).
+
+    Returns ``None`` for codes that don't fall in any published range.
+    HCPCS Level II codes (alpha + 4 digits) get a special return:
+    ``"hcpcs_level_ii"``.
+    """
+    if cpt_code is None:
+        return None
+    code_str = str(cpt_code).strip().upper()
+    # HCPCS Level II?
+    if HCPCS_LEVEL2_PATTERN.match(code_str.split("-")[0]):
+        return "hcpcs_level_ii"
+    # CPT — strip modifier portion and try numeric category lookup.
+    base = code_str.split("-")[0]
+    if not base.isdigit() or len(base) != 5:
+        return None
+    code_num = int(base)
+    _, ranges = _load_modifier_table()
+    for key, entry in ranges.items():
+        if not isinstance(entry, dict):
+            continue
+        low = entry.get("low")
+        high = entry.get("high")
+        try:
+            low_int = int(low) if isinstance(low, (int, str)) else None  # type: ignore[arg-type]
+            high_int = int(high) if isinstance(high, (int, str)) else None  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if low_int is not None and high_int is not None and low_int <= code_num <= high_int:
+            return key
+    return None
+
+
+def validate_modifier(
+    modifier: str,
+    *,
+    cpt_code: str | int | None = None,
+    other_modifiers: list[str] | None = None,
+) -> ValidationInfo:
+    """
+    Validate a CPT/HCPCS modifier, optionally checking compatibility
+    with the procedure code it attaches to and against other modifiers
+    on the same line.
+
+    Args:
+        modifier: 2-character modifier (e.g. ``"25"``, ``"LT"``).
+        cpt_code: Optional CPT/HCPCS code the modifier attaches to.
+            When supplied, we check that the modifier is conventionally
+            valid for that procedure category.
+        other_modifiers: Optional list of other modifiers already
+            applied to the same line. We check the ``blocks_with``
+            list to flag conflicts (e.g. ``50`` and ``LT`` together).
+
+    Returns:
+        ValidationInfo. ``WARNING`` (not ``INVALID``) is returned for
+        format-valid modifiers that are not in the published set or
+        used outside their conventional category — payers vary in how
+        strictly they enforce these rules, so blocking would be too
+        aggressive at this layer.
+    """
+    if modifier is None or modifier == "":
+        return ValidationInfo(
+            result=ValidationResult.INVALID,
+            message="Modifier is required",
+        )
+
+    mod_str = str(modifier).strip().upper().lstrip("-")
+    if not MODIFIER_PATTERN.match(mod_str):
+        return ValidationInfo(
+            result=ValidationResult.INVALID,
+            message="Invalid modifier format (expected 2 alphanumeric characters)",
+            normalized_value=mod_str,
+        )
+
+    table, _ = _load_modifier_table()
+    entry = table.get(mod_str)
+    if entry is None:
+        return ValidationInfo(
+            result=ValidationResult.WARNING,
+            message=f"Modifier {mod_str} is not in the known CMS/AMA modifier set",
+            normalized_value=mod_str,
+        )
+
+    details: dict[str, object] = {
+        "description": entry.get("description", ""),
+        "category": entry.get("category", ""),
+        "applies_to_categories": entry.get("applies_to_categories", []),
+        "blocks_with": entry.get("blocks_with", []),
+        "requires_documentation": entry.get("requires_documentation", False),
+    }
+
+    # Conflict check vs. other modifiers on the same line.
+    if other_modifiers:
+        blocks_with = {m.upper() for m in entry.get("blocks_with", []) or []}
+        peers = {str(m).strip().upper().lstrip("-") for m in other_modifiers if m}
+        conflicts = blocks_with & peers
+        if conflicts:
+            return ValidationInfo(
+                result=ValidationResult.WARNING,
+                message=(
+                    f"Modifier {mod_str} conflicts with: "
+                    f"{', '.join(sorted(conflicts))}"
+                ),
+                normalized_value=mod_str,
+                details=dict(details, conflicts=sorted(conflicts)),
+            )
+
+    # Compatibility check vs. the CPT code it attaches to.
+    if cpt_code is not None:
+        category = _resolve_cpt_category(cpt_code)
+        applies = entry.get("applies_to_categories", []) or []
+        if category and applies and category not in applies:
+            return ValidationInfo(
+                result=ValidationResult.WARNING,
+                message=(
+                    f"Modifier {mod_str} is not conventionally valid for "
+                    f"{category} procedures (typical: {', '.join(applies)})"
+                ),
+                normalized_value=mod_str,
+                details=dict(details, cpt_category=category),
+            )
+        details["cpt_category"] = category
+
+    return ValidationInfo(
+        result=ValidationResult.VALID,
+        message=f"Valid modifier: {entry.get('description', mod_str)}",
+        normalized_value=mod_str,
+        details=details,
+    )
+
+
+def validate_modifier_combination(
+    cpt_code: str | int,
+    modifiers: list[str],
+) -> ValidationInfo:
+    """
+    Validate a full ``CPT + [modifiers...]`` line.
+
+    Walks each modifier through ``validate_modifier`` with the others
+    as ``other_modifiers``. Returns a single rolled-up
+    ``ValidationInfo``: ``INVALID`` if any modifier is format-invalid,
+    ``WARNING`` if any is incompatible or conflicting, ``VALID``
+    otherwise.
+    """
+    if not modifiers:
+        return ValidationInfo(
+            result=ValidationResult.VALID,
+            message="No modifiers to validate",
+            normalized_value=[],
+        )
+
+    per_modifier: list[ValidationInfo] = []
+    for i, mod in enumerate(modifiers):
+        peers = [m for j, m in enumerate(modifiers) if j != i]
+        per_modifier.append(
+            validate_modifier(mod, cpt_code=cpt_code, other_modifiers=peers)
+        )
+
+    # Roll up. INVALID dominates WARNING dominates VALID.
+    if any(r.result == ValidationResult.INVALID for r in per_modifier):
+        first_invalid = next(
+            r for r in per_modifier if r.result == ValidationResult.INVALID
+        )
+        return ValidationInfo(
+            result=ValidationResult.INVALID,
+            message=f"Invalid modifier in line: {first_invalid.message}",
+            normalized_value=[r.normalized_value for r in per_modifier],
+            details={"per_modifier": [r.message for r in per_modifier]},
+        )
+    if any(r.result == ValidationResult.WARNING for r in per_modifier):
+        warnings = [r.message for r in per_modifier if r.result == ValidationResult.WARNING]
+        return ValidationInfo(
+            result=ValidationResult.WARNING,
+            message="; ".join(warnings),
+            normalized_value=[r.normalized_value for r in per_modifier],
+            details={"per_modifier": [r.message for r in per_modifier]},
+        )
+    return ValidationInfo(
+        result=ValidationResult.VALID,
+        message="All modifiers valid for this CPT/HCPCS code",
+        normalized_value=[r.normalized_value for r in per_modifier],
+    )
+
+
+# =============================================================================
 # NDC Code Validation (National Drug Code)
 # =============================================================================
 

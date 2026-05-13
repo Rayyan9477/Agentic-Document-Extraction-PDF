@@ -1604,6 +1604,34 @@ REMARKS_FIELDS = [
 # =============================================================================
 
 UB04_CROSS_FIELD_RULES = [
+    # V3 Phase 5 — Sum reconciliation. UB-04 Form Locator 47 ("Total
+    # Charges") should equal the sum of FL47 across all revenue-code
+    # service lines. Like CMS-1500 we keep this advisory because
+    # rounding/discount deltas are common; the validator surfaces
+    # mismatches for human review without blocking.
+    CrossFieldRule(
+        source_field="service_lines",
+        target_field="total_charges",
+        operator=RuleOperator.SUM_EQUALS,
+        value="total_charges",  # per-line field on each service line
+        error_message=(
+            "Total charges (FL47 summary) should equal the sum of "
+            "line-item charges across service lines."
+        ),
+        severity="warning",
+    ),
+    # V3 Phase 5 — diagnosis presence: a UB-04 with reported service
+    # lines must carry at least the principal diagnosis (FL67).
+    CrossFieldRule(
+        source_field="service_lines",
+        target_field="principal_diagnosis",
+        operator=RuleOperator.REQUIRES_IF,
+        error_message=(
+            "Principal diagnosis (FL67) must be present when service "
+            "lines are reported."
+        ),
+        severity="error",
+    ),
     # Statement period from must be before to
     CrossFieldRule(
         source_field="statement_from_date",
