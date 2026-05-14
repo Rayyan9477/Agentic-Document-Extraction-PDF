@@ -1,15 +1,68 @@
+---
+title: Specialised Medical Input Modes
+audience: operators
+canonical_plan: ./VERIDOC_MASTER_PLAN.md
+phase_added: Phase 5
+last_reviewed: 2026-05-14
+---
+
 # Specialised Medical Input Modes
 
-> **Operator-facing deep-dive.** Canonical taxonomy lives in
-> [VERIDOC_MASTER_PLAN.md → Appendix E](./VERIDOC_MASTER_PLAN.md#e-domain-modes--modality-vs-profile).
-> This file goes one level deeper — detection heuristics, override
-> wiring, and the "adding a new mode" runbook. If the two disagree,
-> the master plan wins.
+> [!NOTE]
+> **Operator deep-dive.** The canonical product description lives in [`VERIDOC_MASTER_PLAN.md`](./VERIDOC_MASTER_PLAN.md) (see [Appendix E](./VERIDOC_MASTER_PLAN.md#e-domain-modes--modality-vs-profile)). This document goes one layer deeper on the operator surface: the actual detection heuristics, override wiring, and the "adding a new mode" runbook. If the two disagree, the master plan wins.
 
 The system tags every document with one or more *modalities* — string
 tags from a fixed set — and the image enhancer + extraction prompt
 builder branch on those tags. Auto-detection happens during analysis;
 callers can override via the API request or the upload UI.
+
+## Dual-axis detection at a glance
+
+Veridoc decides two orthogonal things about every PDF: **what it looks
+like** (modality) and **what it is about** (profile). The composed
+`(profile, modes={...})` tuple drives the rest of the pipeline.
+
+```mermaid
+flowchart TB
+    A[PDF received] --> B[Preprocess<br/>analyzer signals]
+    B --> C{Modality detection<br/>derive_modalities}
+    B --> D{Profile detection<br/>auto-detect signals}
+
+    C --> C1[printed<br/>default]
+    C --> C2[handwritten<br/>has_handwriting]
+    C --> C3[visual<br/>low text density]
+    C --> C4[fax<br/>low contrast + low blur]
+    C --> C5[table<br/>has_tables]
+    C --> C6[form<br/>layout_type=form]
+
+    D --> D1[generic-document<br/>fallback]
+    D --> D2[medical-rcm<br/>NPI / CPT / ICD / header]
+    D --> D3[finance<br/>invoice / W2 / 1099]
+    D --> D4[legal-contract<br/>clauses + parties]
+    D --> D5[insurance-form<br/>ACORD watermark]
+    D --> D6[logistics<br/>BOL / HS codes]
+
+    C1 & C2 & C3 & C4 & C5 & C6 --> E[Composed context<br/>profile, modes={...}]
+    D1 & D2 & D3 & D4 & D5 & D6 --> E
+
+    E --> F[Prompt fragments]
+    E --> G[Reconciler weights]
+    E --> H[Validator pack]
+    E --> I[Profile emitter]
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+
+    class A,B primary
+    class C,D validation
+    class C1,C2,C3,C5,C6,D1 data
+    class C4 warning
+    class D2,D3,D4,D5,D6 shipped
+    class E,F,G,H,I primary
+```
 
 ## The 6 modes
 
@@ -83,12 +136,8 @@ combines:
    tagging the document; it deliberately doesn't fire on a single
    noisy page.
 
-### Conservative fallback
-
-When the analyzer hasn't run yet (e.g. orchestrator called the
-splitter only), `derive_modalities({})` returns `["printed"]` as a
-safe default. The prompt builder treats `["printed"]` as "no extra
-fragments", so behaviour is identical to the legacy non-modality path.
+> [!IMPORTANT]
+> **Conservative fallback.** When the analyzer hasn't run yet (e.g. the orchestrator called the splitter only), `derive_modalities({})` returns `["printed"]` as a safe default — and `derive_profile({})` returns `generic-document`. The prompt builder treats `["printed"]` as "no extra fragments", so behaviour is identical to the legacy non-modality path. Profile detection follows the same rule: when ambiguous, fall back to `generic-document` with all applicable validator packs running advisory-only. Never silently disable a check that would have caught a billing error.
 
 ## Adding a new mode
 
@@ -102,6 +151,9 @@ fragments", so behaviour is identical to the legacy non-modality path.
    `MODALITY_CHIPS` list.
 6. Add a test case in `tests/unit/test_modality.py`.
 
+> [!TIP]
+> Profiles follow a parallel-but-separate runbook. To add one, register it in `src/profiles/`, declare its auto-detect signals, list its default schemas, point at its validator pack, and (optionally) wire an emitter. See `medical-rcm` as the reference implementation.
+
 ## Why this is split into preprocessing AND prompt rules
 
 Both layers have to know about modality because they each fix a
@@ -114,6 +166,5 @@ Both layers have to know about modality because they each fix a
   happily invent a "patient name" field on a chest X-ray unless told
   not to).
 
-You need both. The image enhancer can't tell the VLM "treat this as
-fax-grade input"; the prompt can't repair pixels that have already
-been over-processed.
+> [!CAUTION]
+> You need **both** layers. The image enhancer can't tell the VLM "treat this as fax-grade input"; the prompt can't repair pixels that have already been over-processed. Skipping either half silently degrades extraction quality on the affected modality without surfacing as a hard failure.

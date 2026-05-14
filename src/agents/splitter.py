@@ -11,6 +11,8 @@ Inspired by: LandingAI Parse→Split→Extract pipeline, DocsRay hierarchical TO
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from src.agents.base import BaseAgent
 from src.client.lm_client import LMStudioClient
 from src.config import get_logger
@@ -21,6 +23,45 @@ logger = get_logger(__name__)
 
 # Batch size for page classification (balance between context and accuracy)
 CLASSIFICATION_BATCH_SIZE = 5
+
+
+# ---------------------------------------------------------------------------
+# V3 Phase 1 — schemas for constrained-decode calls
+# ---------------------------------------------------------------------------
+
+
+class _PageBoundary(BaseModel):
+    """One row of the boundary-detection response."""
+
+    is_new_document: bool = Field(
+        description=(
+            "True iff this page starts a new document; False if it "
+            "continues the previous page's document."
+        )
+    )
+    document_type: str = Field(
+        default="unknown",
+        description="Detected document type for this page.",
+    )
+    confidence: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Self-reported confidence in [0, 1].",
+    )
+    reason: str = Field(
+        default="",
+        description="Brief justification (visual cue, layout shift, etc.).",
+    )
+
+
+class SegmentBoundaries(BaseModel):
+    """Boundary-detection response: one row per page in the batch."""
+
+    pages: list[_PageBoundary] = Field(
+        default_factory=list,
+        description="Per-page boundary decisions, ordered by page index in the batch.",
+    )
 
 
 @dataclass(slots=True)
@@ -190,9 +231,11 @@ class SplitterAgent(BaseAgent):
             first_page = batch[0]
             image_data = first_page.get("data_uri", first_page.get("base64_encoded", ""))
 
-            response = self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound boundary detection.
+            response, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt="\n".join(prompt_parts),
+                schema=SegmentBoundaries,
                 system_prompt=BOUNDARY_DETECTION_SYSTEM_PROMPT,
                 max_tokens=2048,
                 temperature=0.1,

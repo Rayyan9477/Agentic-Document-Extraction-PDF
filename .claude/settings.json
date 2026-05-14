@@ -38,7 +38,9 @@
       "Bash(pytest tests/unit/ --tb=no -q --junit-xml=D:/tmp/unit.xml)",
       "Bash(pytest tests/integration/ --tb=no -q --junit-xml=D:/tmp/integration.xml)",
       "Bash(pytest tests/security/ --tb=no -q --junit-xml=D:/tmp/security.xml)",
-      "Bash(pytest tests/test_integration.py tests/test_validation.py --tb=no -q --junit-xml=D:/tmp/extras.xml)"
+      "Bash(pytest tests/test_integration.py tests/test_validation.py --tb=no -q --junit-xml=D:/tmp/extras.xml)",
+      "Bash(npx --no-install tsc --noEmit)",
+      "Bash(npx --no-install next lint --quiet)"
     ]
   }
 }

@@ -27,6 +27,9 @@ Origin requirements: the original product spec is preserved at
 is kept for historical traceability only — the master plan supersedes
 it for any design question.
 
+> [!NOTE]
+> **This document is the single source of truth.** If `STATUS.md`, an operator deep-dive (`MODES.md`, `OBSERVABILITY.md`, `PHI_MODE.md`), or any `docs/MVP/` file disagrees with this plan, this plan wins. Per-feature docs declare which section of this plan they extend.
+
 ---
 
 ## Table of contents
@@ -95,19 +98,47 @@ Veridoc is the only system that combines:
 - **vLLM** — was a first-class backend up to Phase 7; replaced by Bedrock for the cloud-scaled use case (Phase 9).
 - **AMD MI300X** — sized in legacy docs as one of five GPU targets; no longer in scope. Hardware affinity is a deployment concern, not engine code.
 
+> [!WARNING]
+> **vLLM is being deleted, not deprecated.** Phase 9 removes `vllm_backend.py`, the `[vlm-server]` extra, every vLLM-specific test, and the `vllm` factory branch. Operators on the old vLLM path must migrate to LM Studio (self-hosted) or Bedrock (cloud). See `docs/MIGRATION_VLLM_TO_BEDROCK.md` for the env-var and code-path diff.
+
 **Deferred:** LangChain-AWS chains (Phase 14). The current pipeline does not require chain semantics; LangChain adds a layer of abstraction that's only worth its weight when chain-of-thought reasoning over multiple turns is in play.
 
 ### What's in the box
 
-```
-L1  Ingress           REST / API / channels (email IMAP, e-fax webhook, watch-folder)
-L2  Preprocessing     PyMuPDF rasterization + OpenCV enhancement + per-page quality scoring
-L3  Understanding     VLM Analyzer (classification, modalities, complexity_score) + Splitter + TableDetector
-L4  Extraction        Triage → Fast / Standard / Hard → dual-VLM + Reconciler
-L5  Validation        6-layer pyramid: schema → patterns → codes → cross-field → Critic → calibration
-L6  Output            Provenance-threaded JSON / Excel / Markdown / FHIR R4 + bbox overlays
-L7  Egress            Webhook / DLQ / API / SFTP / secure-email
-LX  Cross-cutting     LangGraph v3 (Command + interrupt + durable SQLite) · FAISS memory · PHI mode · Phoenix + PostHog
+```mermaid
+%% Veridoc seven-layer stack (L1-L7) with LX cross-cutting concerns running alongside every layer.
+flowchart TB
+    subgraph stack["Primary processing stack"]
+        direction TB
+        L1["<b>L1 · Ingress</b><br/>REST · API · email IMAP<br/>e-fax webhook · watch-folder"]
+        L2["<b>L2 · Preprocessing</b><br/>PyMuPDF rasterization<br/>OpenCV enhancement<br/>per-page quality scoring"]
+        L3["<b>L3 · Understanding</b><br/>VLM Analyzer (doc_type, modalities,<br/>complexity_score) · Splitter · TableDetector"]
+        L4["<b>L4 · Extraction</b><br/>Triage → Fast / Standard / Hard<br/>dual-VLM + Reconciler"]
+        L5["<b>L5 · Validation</b><br/>6-layer pyramid: schema → patterns →<br/>codes → cross-field → Critic → calibration"]
+        L6["<b>L6 · Output</b><br/>Provenance-threaded JSON / Excel /<br/>Markdown / FHIR R4 + bbox overlays"]
+        L7["<b>L7 · Egress</b><br/>Webhook · DLQ · API · SFTP · secure-email"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+    end
+    LX["<b>LX · Cross-cutting</b><br/>LangGraph v3 (Command +<br/>interrupt + durable SQLite)<br/>FAISS memory · PHI mode<br/>Phoenix + PostHog"]
+    L1 -.-> LX
+    L2 -.-> LX
+    L3 -.-> LX
+    L4 -.-> LX
+    L5 -.-> LX
+    L6 -.-> LX
+    L7 -.-> LX
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef external fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    class L1,L7 external
+    class L2,L3 data
+    class L4 primary
+    class L5 validation
+    class L6 warning
+    class LX data
 ```
 
 ---
@@ -131,70 +162,104 @@ Every architectural decision derives from these. They have held through Phases 0
 
 ## 3. The seven-layer architecture
 
-```
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                                  VERIDOC                                     ║
-╠══════════════════════════════════════════════════════════════════════════════╣
-║                                                                              ║
-║  L1  Ingress                                                                 ║
-║        REST upload · API · email-IMAP · e-fax webhook · watch-folder · MCP   ║
-║                                                                              ║
-║  L2  Preprocessing                                                           ║
-║        PyMuPDF rasterization (300 DPI) · OpenCV enhancement (mode-aware)     ║
-║        per-page quality scoring · 1-bit/CCITT detection · orientation check  ║
-║                                                                              ║
-║  L3  Document understanding                                                  ║
-║        Splitter (multi-doc boundaries) → Analyzer (VLM: doc_type +           ║
-║        structure flags + complexity_score) → Profile detection →             ║
-║        TableDetector (Standard/Hard only) → Modality derivation              ║
-║                                                                              ║
-║  L4  Extraction (Fast / Standard / Hard, dual-VLM core)                      ║
-║        Pass 1 (primary VLM, EXTRACTOR frame) ‖ Pass 2 (secondary VLM,        ║
-║        AUDITOR frame, bbox-mandated) → Reconciler (5-step tiebreaker)        ║
-║                                                                              ║
-║  L5  Validation pyramid (six layers)                                         ║
-║        5.1 Pydantic schema  → 5.2 pattern detector  → 5.3 code validators    ║
-║        5.4 cross-field      → 5.5 Critic agent       → 5.6 calibrated conf.  ║
-║                                                                              ║
-║  L6  Output                                                                  ║
-║        Provenance-threaded JSON / Excel / Markdown / FHIR R4 / DataFrame +   ║
-║        bbox overlay PNGs · profile-specific emitters (C-CDA, X12N 275)       ║
-║                                                                              ║
-║  L7  Egress                                                                  ║
-║        Webhook (HMAC + DLQ) · API response · SFTP · secure-email · MCP       ║
-║                                                                              ║
-║  LX  Cross-cutting                                                           ║
-║        LangGraph v3 (Command + interrupt + durable SQLite) · FAISS memory   ║
-║        Phoenix + PostHog observability · structlog audit · RBAC · PHI mode  ║
-║                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+```mermaid
+%% Veridoc seven-layer architecture, expanded with per-layer detail. LX runs across every layer.
+flowchart TB
+    subgraph veridoc["VERIDOC"]
+        direction TB
+        L1["<b>L1 · Ingress</b><br/>REST upload · API · email-IMAP<br/>e-fax webhook · watch-folder · MCP"]
+        L2["<b>L2 · Preprocessing</b><br/>PyMuPDF rasterization (300 DPI)<br/>OpenCV enhancement (mode-aware)<br/>per-page quality scoring<br/>1-bit/CCITT detection · orientation check"]
+        L3["<b>L3 · Document understanding</b><br/>Splitter (multi-doc boundaries)<br/>→ Analyzer (VLM: doc_type + structure flags<br/>+ complexity_score)<br/>→ Profile detection<br/>→ TableDetector (Standard/Hard only)<br/>→ Modality derivation"]
+        L4["<b>L4 · Extraction</b> · Fast / Standard / Hard<br/>Pass 1 (primary VLM, EXTRACTOR frame)<br/>‖ Pass 2 (secondary VLM, AUDITOR frame, bbox-mandated)<br/>→ Reconciler (5-step tiebreaker)"]
+        L5["<b>L5 · Validation pyramid</b> (six layers)<br/>5.1 Pydantic schema → 5.2 pattern detector<br/>→ 5.3 code validators → 5.4 cross-field<br/>→ 5.5 Critic agent → 5.6 calibrated confidence"]
+        L6["<b>L6 · Output</b><br/>Provenance-threaded JSON / Excel /<br/>Markdown / FHIR R4 / DataFrame<br/>+ bbox overlay PNGs<br/>profile-specific emitters (C-CDA, X12N 275)"]
+        L7["<b>L7 · Egress</b><br/>Webhook (HMAC + DLQ) · API response<br/>SFTP · secure-email · MCP"]
+        L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+    end
+    LX["<b>LX · Cross-cutting</b><br/>LangGraph v3 (Command + interrupt + durable SQLite)<br/>FAISS memory · Phoenix + PostHog observability<br/>structlog audit · RBAC · PHI mode"]
+    L1 -.-> LX
+    L4 -.-> LX
+    L7 -.-> LX
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef external fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    class L1,L7 external
+    class L2,L3 data
+    class L4 primary
+    class L5 validation
+    class L6 warning
+    class LX data
 ```
 
 ### End-to-end flow (Standard path, generic document)
 
-```
-T+0.0s   Submission accepted (any L1 channel)
-T+0.1s   L2: PDF rasterized at 300 DPI, OpenCV enhancement
-T+0.6s   L2: per-page quality scores + 1-bit/CCITT signals
-T+0.7s   L3: Splitter — single-segment fallback for most docs
-T+0.8s   L3: Analyzer (1 VLM call) — doc_type, modalities, complexity_score
-T+2.5s   L3: Profile detection — generic-document chosen by default; medical-rcm if NPI/CPT/ICD signals
-T+2.6s   L4: triage_path = "standard" (0.30 < complexity < 0.75)
-T+2.6s   L4: Pass 1 (primary VLM) ‖ Pass 2 (secondary VLM) launched in parallel
-T+15s    L4: Both passes complete. Reconciler resolves disagreements.
-T+15.5s  L5.1-5.4: schema / pattern / codes / cross-field validation
-T+16s    L5.5: Critic agent (1 VLM call, family-rotated) — trust_score, concerns
-T+19s    L5.6: ConfidenceCalibrator — raw → calibrated confidence
-T+19.2s  Bbox round-trip verification on flagged fields (1-3 extra crops)
-T+22s    Final routing: AUTO-ACCEPT (calibrated_conf ≥ 0.85)
-T+22.1s  L6: provenance-threaded export bundle
-T+22.5s  L7: webhook fired; audit-log entry written
-T+22.5s  Done
+```mermaid
+%% Standard-path timing on a generic document. Median target <25s on a single H100 FP8.
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant I as Ingress (L1)
+    participant P as Preprocess (L2)
+    participant S as Splitter (L3)
+    participant A as Analyzer (L3)
+    participant PD as ProfileDetect (L3)
+    participant T as Triage (L4)
+    participant P1 as Pass 1 (primary VLM)
+    participant P2 as Pass 2 (secondary VLM)
+    participant R as Reconciler (L4)
+    participant V as Validator (L5.1-5.4)
+    participant Cr as Critic (L5.5)
+    participant Cf as Confidence (L5.6)
+    participant Rt as Route
+    participant E as Emit (L6)
+    participant W as Webhook (L7)
+
+    C->>I: T+0.0s · submission accepted
+    I->>P: T+0.1s · rasterize @ 300 DPI + OpenCV
+    P->>S: T+0.6s · quality + 1-bit/CCITT signals
+    S->>A: T+0.7s · single-segment fallback
+    A->>PD: T+0.8s · doc_type, modalities, complexity_score
+    PD->>T: T+2.5s · generic-document (medical-rcm if NPI/CPT/ICD)
+    T->>T: T+2.6s · triage_path = "standard" (0.30 < complexity < 0.75)
+    par parallel passes
+        T->>P1: T+2.6s · launch
+        T->>P2: T+2.6s · launch
+    end
+    P1-->>R: T+15s · pass1 complete
+    P2-->>R: T+15s · pass2 complete
+    R->>V: T+15.5s · reconciled extraction
+    V->>Cr: T+16s · schema / pattern / codes / cross-field OK
+    Cr->>Cf: T+19s · trust_score + concerns
+    Cf->>Rt: T+19.2s · bbox round-trip on flagged fields
+    Rt->>E: T+22s · AUTO-ACCEPT (calibrated_conf ≥ 0.85)
+    E->>W: T+22.1s · provenance-threaded bundle
+    W-->>C: T+22.5s · webhook fired; audit-log entry written
 ```
 
 Median wall-clock target on a single H100 (FP8): **<25s** for the Standard path.
 
 ### Triage paths
+
+```mermaid
+%% Complexity-score routing: complexity_score derives from page count, handwriting, tables, quality, modality, etc.
+flowchart LR
+    CS["<b>complexity_score</b><br/>(see formula below)"]
+    CS -->|"< 0.30"| FAST["<b>Fast</b><br/>Pass1 only<br/>~5s"]
+    CS -->|"0.30 - 0.75"| STD["<b>Standard</b><br/>Pass1 ‖ Pass2 + Reconciler<br/>Critic on disagreement<br/>~22s"]
+    CS -->|"> 0.75"| HARD["<b>Hard</b><br/>ROI pre-pass + Pass1 + Pass2<br/>+ crops + always-Critic<br/>~32s"]
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class CS data
+    class FAST validation
+    class STD primary
+    class HARD warning
+```
 
 | Path | Pass 1 | Pass 2 | Critic | Bbox round-trip | Latency budget |
 |---|---|---|---|---|---|
@@ -230,6 +295,9 @@ complexity_score =
 | **Auth** | Production refuses to boot with `api.auth_enabled=False` unless `AUTH_BYPASS_ACK` (Phase 8). | `src/config/settings.py`, `src/api/app.py` |
 | **Multi-tenancy** | `TenantResolverMiddleware` reads JWT claim → admin `X-Tenant-ID` header → default (Phase 8). Tenant-scoped FAISS, calibration, audit, checkpoints. Per-tenant rate limit with token-bucket burst (Phase 8). | `src/api/tenant_middleware.py`, `src/api/middleware.py` |
 | **Configuration** | Pydantic v2 settings, env-driven, validated at startup. | `src/config/settings.py` |
+
+> [!IMPORTANT]
+> **Default-deny on auth and PHI.** Production refuses to boot with `api.auth_enabled=False` or `phi.enabled=False` unless the operator sets `AUTH_BYPASS_ACK` / `PHI_BYPASS_ACK` explicitly. The bypass acks are loud, traceable, and audit-logged — they are not a silent escape hatch.
 
 ### Failure modes and recovery
 
@@ -309,6 +377,35 @@ Bedrock has no GPU sizing concern — that's AWS's problem. The Veridoc-side con
 | **12** | Production deployment prep: KMS signers + CI workflows + air-gap verification + deployment guide | planned | additive |
 | **13** | Customer polish: react-pdf validation + visual regression + memory/checkpoint migration | planned | additive |
 | **14** | Product roadmap (future): LangChain AWS, streaming Source View, API key lifecycle, i18n, MCP, etc. | future | future |
+
+```mermaid
+%% Phase 0-14 progression. done = shipped, active = current planned phase, crit = required, future = optional roadmap.
+gantt
+    title Veridoc phase progression (no calendar dates — quality-gated)
+    dateFormat X
+    axisFormat %s
+
+    section Shipped (V3 + MVP)
+    P0 · Backend abstraction         :done, p0, 0, 1
+    P1 · Constrained decoding        :done, p1, 1, 1
+    P2 · Heterogeneous dual-VLM      :done, p2, 2, 1
+    P3 · Critic + bbox round-trip    :done, p3, 3, 1
+    P4 · Provenance + click-to-source:done, p4, 4, 1
+    P5 · Profiles + RCM + fax        :done, p5, 5, 1
+    P6 · Eval + calibration + obs    :done, p6, 6, 1
+    P7 · Production hardening        :done, p7, 7, 1
+    P8 · Enterprise-MVP hardening    :done, p8, 8, 1
+
+    section Forward roadmap
+    P9 · Backend pivot (vLLM out, Bedrock in)  :crit, active, p9, 9, 1
+    P10 · Pre-launch validation                :p10, after p9, 1
+    P11 · Performance finish                   :p11, after p10, 1
+    P12 · Production deployment prep           :crit, p12, after p11, 1
+    P13 · Customer polish                      :p13, after p12, 1
+
+    section Future
+    P14 · Product roadmap (LangChain, streaming, MCP, i18n) :p14, after p13, 2
+```
 
 ---
 
@@ -407,6 +504,32 @@ The cloud-side first-class backend. Mirrors `LMStudioBackend`'s capabilities; pu
      - `amazon.nova-*` → `NovaAdapter`
      - `meta.llama*-vision*` → `LlamaVisionAdapter`
      - Anything else → `ConverseAdapter` (generic, uses the Bedrock Converse API).
+
+```mermaid
+%% Bedrock backend dispatch: model-id prefix selects adapter; each adapter knows its Bedrock API + body shape.
+flowchart LR
+    REQ["<b>VisionRequest</b><br/>image_data · prompt · role"]
+    REG{"<b>model-id prefix match</b><br/>(registry lookup)"}
+    REQ --> REG
+    REG -->|"anthropic.claude-*"| ANT["<b>AnthropicAdapter</b><br/>invokeModel API<br/>tool-use forcing for schema"]
+    REG -->|"amazon.nova-*"| NOVA["<b>NovaAdapter</b><br/>Converse API<br/>additionalModelRequestFields"]
+    REG -->|"meta.llama*-vision*"| LLAMA["<b>LlamaVisionAdapter</b><br/>Converse API<br/>structured output where supported"]
+    REG -->|"(fallback)"| GEN["<b>ConverseAdapter</b><br/>generic Converse<br/>system-prompt + post-validate"]
+    ANT --> BR(("<b>Bedrock Runtime</b>"))
+    NOVA --> BR
+    LLAMA --> BR
+    GEN --> BR
+    BR --> NORM["<b>VisionResponse</b><br/>(normalised by adapter)"]
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef external fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    class REQ,NORM data
+    class REG warning
+    class ANT,NOVA,LLAMA,GEN primary
+    class BR external
+```
   3. **Request shape.** Each adapter transforms a `VisionRequest` (image_data + prompt + max_tokens + temperature + role) into the appropriate Bedrock body. Images base64-decoded and re-encoded in the model's expected format.
   4. **Response shape.** Each adapter normalises into a `VisionResponse`: extract text reply, mock or pass through token counts, record latency, set `has_json`.
   5. **Constrained decoding.** Anthropic adapter uses tool-use forcing; Nova/Llama use Converse `additionalModelRequestFields` for structured output where supported; fall back to system-prompt-injected schema + post-validation otherwise.
@@ -437,6 +560,9 @@ The cloud-side first-class backend. Mirrors `LMStudioBackend`'s capabilities; pu
 | Cost model | fixed (GPU $/hr) | per-token usage-based |
 
 ### 9D — Config + model-selection ergonomics
+
+> [!IMPORTANT]
+> **No opinionated Bedrock model defaults — ever.** Model selection lives in the operator's config, not in defaulted code. Even when the team forms opinions, those opinions go in `docs/BEDROCK_SETUP.md`. The code's job is to fail loud with a clear pointer to the doc when `primary_model_id == ""`; it is not to pick a model.
 
 - **What.** The whole Bedrock integration is config-driven. Operators set model-ids in settings or env. We ship sensible comments, not defaults.
 - **Where.** `src/config/settings.py`, `.env.example`, `docs/BEDROCK_SETUP.md`.
@@ -689,55 +815,55 @@ Three primitives:
 
 ### Graph topology
 
-```
-preprocess
-   │
-   ▼
-split  ── Splitter (existing, default-on)
-   │
-   ▼  Send(...) per segment
-analyze    ── Analyzer (1 VLM call: doc_type, modalities, complexity_score)
-   │
-   ▼
-detect_profile ── medical-rcm | finance | legal | ... | generic-document
-   │
-   ▼
-triage   ── Command(goto=fast|standard|hard, update={triage_path: ...})
-   │
-   ├─── fast ──────────► extract_pass1 ─────► validate ─► confidence ─► route
-   │
-   ├─── standard ─► table_detect ──┐
-   │                               ▼
-   │                       Send: extract_pass1 ‖ extract_pass2  (per page)
-   │                               │            │
-   │                               └────┬───────┘
-   │                                    ▼
-   │                                reconcile  ── 5-step tiebreaker
-   │                                    │
-   │                                    ▼
-   │                                 validate  ── L5.1-5.4
-   │                                    │
-   │                                    ▼
-   │                                  critic   ── L5.5
-   │                                    │
-   │                                    ▼
-   │                              bbox_roundtrip (low-conf fields)
-   │                                    │
-   │                                    ▼
-   │                                confidence ── L5.6 calibration
-   │                                    │
-   │                                    ▼
-   │                                  route
-   │
-   └─── hard ─────► same as standard but force_human_review=true after emit gate
+```mermaid
+%% LangGraph v3 DAG: Command(goto=...) routing, Send(...) fanout, interrupt() for HITL.
+flowchart TB
+    PRE["<b>preprocess</b>"]
+    SPL["<b>split</b><br/>Splitter (default-on)"]
+    ANA["<b>analyze</b><br/>Analyzer · 1 VLM call<br/>doc_type, modalities, complexity_score"]
+    DP["<b>detect_profile</b><br/>medical-rcm · finance · legal · ... · generic"]
+    TRI{"<b>triage</b><br/>Command(goto=fast|standard|hard)"}
+    TD["<b>table_detect</b>"]
+    FAN[/"<b>Send(...)</b> fanout per page<br/>Pass 1 ‖ Pass 2"/]
+    P1["<b>extract_pass1</b><br/>primary VLM · EXTRACTOR frame"]
+    P2["<b>extract_pass2</b><br/>secondary VLM · AUDITOR frame"]
+    REC["<b>reconcile</b><br/>5-step tiebreaker"]
+    VAL["<b>validate</b><br/>L5.1-5.4 schema/pattern/codes/cross-field"]
+    CR["<b>critic</b><br/>L5.5 family-rotated VLM"]
+    BR["<b>bbox_roundtrip</b><br/>low-conf fields"]
+    CF["<b>confidence</b><br/>L5.6 calibration"]
+    RTE{"<b>route</b>"}
+    EMIT["<b>emit</b><br/>provenance-threaded export<br/>+ audit + webhook"]
+    RETRY["<b>retry</b><br/>(budgeted)"]
+    HR["<b>human_review</b><br/>interrupt(payload)<br/>resumes via Command(resume=...)"]
 
-route
- ├─ Command(goto=emit)          calibrated_conf ≥ HIGH and validation_is_valid
- ├─ Command(goto=retry)         MEDIUM/LOW with retry budget remaining
- └─ Command(goto=human_review)  Critic.recommendation=="human_review" or budget exhausted
+    PRE --> SPL --> ANA --> DP --> TRI
+    TRI -->|"fast"| P1
+    P1 --> VAL
+    TRI -->|"standard"| TD --> FAN
+    TRI -->|"hard<br/>(force_human_review=true after emit)"| TD
+    FAN --> P1
+    FAN --> P2
+    P1 --> REC
+    P2 --> REC
+    REC --> VAL --> CR --> BR --> CF --> RTE
+    RTE -->|"calibrated_conf ≥ HIGH<br/>+ validation_is_valid"| EMIT
+    RTE -->|"MEDIUM/LOW<br/>+ retry budget"| RETRY
+    RTE -->|"Critic recommends human_review<br/>or budget exhausted"| HR
+    RETRY -.->|"re-enter"| P1
 
-human_review  ── interrupt(payload); resumes via Command(resume=corrections)
-emit          ── terminal node; provenance-threaded export + audit + webhook
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef blocker fill:#dc2626,stroke:#7f1d1d,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class PRE,SPL,ANA,DP,TD,FAN data
+    class TRI,RTE warning
+    class P1,P2,REC primary
+    class VAL,CR,BR,CF validation
+    class EMIT validation
+    class RETRY warning
+    class HR blocker
 ```
 
 ### Per-tenant isolation
@@ -755,43 +881,47 @@ emit          ── terminal node; provenance-threaded export + audit + webhook
 
 **[updated 9] — LM Studio + Bedrock**, no vLLM.
 
-```
-   ┌─────────────────────┐      ┌─────────────────────┐
-   │  LM Studio:1234     │      │  Bedrock Runtime    │
-   │  Primary VLM        │  OR  │  primary_model_id   │
-   │  (e.g. Qwen3-VL)    │      │  (operator choice)  │
-   └─────────────────────┘      └─────────────────────┘
-            │                              │
-            └──────────────┬───────────────┘
-                           ▼
-                       VLMBackend (LM Studio or Bedrock)
-              role=primary   → primary endpoint / model
-              role=secondary → secondary endpoint / model
-              role=critic    → minority-family (rotates per request)
-              role=lite      → primary only (when VLM_MODE=lite)
+```mermaid
+%% Two-backend serving topology. Role resolution (primary/secondary/critic/lite) is backend-agnostic.
+flowchart TB
+    LMS["<b>LM Studio:1234</b><br/>self-hosted VLM<br/>(e.g. Qwen3-VL)"]
+    BR["<b>AWS Bedrock Runtime</b><br/>primary_model_id<br/>(operator choice)"]
+    VLM["<b>VLMBackend</b><br/>LM Studio or Bedrock<br/>(picked per deployment)"]
+    LMS -.->|"VLM_BACKEND=lm_studio"| VLM
+    BR -.->|"VLM_BACKEND=bedrock"| VLM
+    VLM --> RP["role=<b>primary</b><br/>→ primary endpoint / model"]
+    VLM --> RS["role=<b>secondary</b><br/>→ secondary endpoint / model"]
+    VLM --> RC["role=<b>critic</b><br/>→ minority-family<br/>(rotates per request)"]
+    VLM --> RL["role=<b>lite</b><br/>→ primary only<br/>(when VLM_MODE=lite)"]
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef external fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class LMS,BR external
+    class VLM primary
+    class RP,RS,RC,RL data
 ```
 
 ### Pass composition
 
-```
-            Page image (300 DPI, OpenCV-enhanced, mode-aware)
-                            │
-            ┌───────────────┴───────────────┐
-            ▼                               ▼
-┌─────────────────────────┐         ┌─────────────────────────┐
-│ PASS 1 — primary VLM    │         │ PASS 2 — secondary VLM  │
-│ Frame: "EXTRACTOR"      │         │ Frame: "AUDITOR"        │
-│ Style: read-and-emit    │         │ Style: every-claim-     │
-│   schema fields fluently│         │   must-cite-bbox        │
-│ ROI: full page          │         │ ROI: full page +        │
-│                         │         │   table crops if Pass 1 │
-│                         │         │   flagged tables        │
-│ Schema-bound decode     │         │ Schema-bound decode     │
-└─────────────┬───────────┘         └─────────────┬───────────┘
-              │                                   │
-              └─────────────────┬─────────────────┘
-                                ▼
-                            Reconciler
+```mermaid
+%% Pass 1 ‖ Pass 2 dual-VLM extraction. Both schema-bound at decode time; reconciler resolves disagreements.
+flowchart TB
+    IMG["<b>Page image</b><br/>300 DPI · OpenCV-enhanced · mode-aware"]
+    P1["<b>PASS 1 · primary VLM</b><br/>Frame: <i>EXTRACTOR</i><br/>Style: read-and-emit schema fields fluently<br/>ROI: full page<br/>Schema-bound decode"]
+    P2["<b>PASS 2 · secondary VLM</b><br/>Frame: <i>AUDITOR</i><br/>Style: every-claim-must-cite-bbox<br/>ROI: full page + table crops if Pass 1 flagged tables<br/>Schema-bound decode"]
+    REC["<b>Reconciler</b><br/>5-step tiebreaker + single_pass tier"]
+    IMG --> P1
+    IMG --> P2
+    P1 --> REC
+    P2 --> REC
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class IMG data
+    class P1,P2 primary
+    class REC validation
 ```
 
 ### Constrained decoding
@@ -862,6 +992,43 @@ Fed as `(raw_final_field_confidence, ground_truth_match)` pairs to `ConfidenceCa
                  ╱──────────────────────────╲ Pydantic schema (enforced
                 ────────────────────────────  by constrained_decode at decode time)
               Reconciled extraction (from L4)
+```
+
+```mermaid
+%% Validation pyramid as a left-to-right data flow with branching to routing outcomes.
+flowchart LR
+    REC["<b>Reconciled extraction</b><br/>(from L4)"]
+    L51["<b>5.1 Schema</b><br/>Pydantic + decode-time"]
+    L52["<b>5.2 Pattern</b><br/>18 detectors"]
+    L53["<b>5.3 Codes</b><br/>CPT/ICD/HCPCS/NPI<br/>IBAN/SWIFT/HS/etc."]
+    L54["<b>5.4 Cross-field</b><br/>math · dates · pairing"]
+    L55["<b>5.5 Critic</b><br/>independent VLM"]
+    L56["<b>5.6 Calibration</b><br/>Platt / isotonic / linear"]
+    RTE["<b>Routing</b>"]
+    AUTO["<b>AUTO-ACCEPT</b><br/>conf ≥ 0.95"]
+    AUDIT["<b>ACCEPT + audit</b><br/>0.85 - 0.94"]
+    RETRY["<b>RETRY</b><br/>0.50 - 0.69"]
+    HR["<b>HUMAN REVIEW</b><br/>< 0.50 or Critic flag"]
+
+    REC --> L51 --> L52 --> L53 --> L54 --> L55 --> L56 --> RTE
+    L51 -. hard-fail .-> HR
+    L53 -. hard-fail .-> HR
+    L54 -. hard-fail .-> HR
+    L55 -. recommendation=human_review .-> HR
+    RTE --> AUTO
+    RTE --> AUDIT
+    RTE --> RETRY
+    RTE --> HR
+
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef blocker fill:#dc2626,stroke:#7f1d1d,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class REC data
+    class L51,L52,L53,L54,L55,L56 validation
+    class RTE,AUDIT,RETRY warning
+    class AUTO validation
+    class HR blocker
 ```
 
 ### 5.1 — Schema validation
@@ -949,6 +1116,9 @@ Routing thresholds (post-calibration):
 | 0.70 - 0.84 | optional Critic verification, then re-route |
 | 0.50 - 0.69 | RETRY (max 2× with adjusted prompts) |
 | < 0.50 | HUMAN REVIEW queue |
+
+> [!TIP]
+> **Defense in depth, not single-point quality.** The four anti-hallucination layers below (constrained decoding, dual-VLM agreement, Critic agent, bbox round-trip) are designed to fail orthogonally — each catches a class the others miss. If you're tempted to skip one for latency, run the hallucination-injection harness first.
 
 ### Four anti-hallucination layers in summary
 
@@ -1045,6 +1215,43 @@ API endpoints:
 
 A faxed handwritten CMS-1500 is `profile=medical-rcm` with `modes={fax, handwritten, form}`.
 
+```mermaid
+%% Modality and profile are orthogonal. The "faxed handwritten CMS-1500" example sits at the intersection of three modes and one profile.
+flowchart LR
+    subgraph modes["MODALITY axis (Y) · how the page LOOKS"]
+        direction TB
+        M_PR["printed"]
+        M_HW["<b>handwritten</b>"]
+        M_VIS["visual"]
+        M_FAX["<b>fax</b>"]
+        M_TBL["table"]
+        M_FRM["<b>form</b>"]
+    end
+    subgraph profiles["PROFILE axis (X) · what the document IS ABOUT"]
+        direction LR
+        P_GEN["generic-document"]
+        P_RCM["<b>medical-rcm</b>"]
+        P_FIN["finance"]
+        P_LGL["legal-contract"]
+        P_INS["insurance-form"]
+        P_LOG["logistics"]
+    end
+    EX(("<b>Example:</b><br/>faxed handwritten<br/>CMS-1500<br/>= modes{fax, handwritten, form}<br/>+ profile=medical-rcm"))
+    M_HW -.-> EX
+    M_FAX -.-> EX
+    M_FRM -.-> EX
+    P_RCM -.-> EX
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class M_PR,M_VIS,M_TBL data
+    class M_HW,M_FAX,M_FRM warning
+    class P_GEN,P_FIN,P_LGL,P_INS,P_LOG data
+    class P_RCM warning
+    class EX primary
+```
+
 ### Modality taxonomy
 
 | Mode | Trigger | Effect |
@@ -1113,6 +1320,36 @@ Latency captured per stage as P50/P95/P99: preprocess, pass1, pass2, critic, val
 | Human-corrected outputs (HITL `Command(resume=...)` payload) | Low, high-signal | Online append per resume | Per-tenant, per-profile |
 | Eval-harness ground truth | Moderate, controlled | Weekly batch refit | Default tables shipped each release |
 | Dual-VLM agreement as proxy | High, weak signal | Nightly background refit | Tenants without HITL volume; bootstrap |
+
+```mermaid
+%% Calibration cadence: three sources feed a refit; every refit passes the ECE quality gate before publishing.
+flowchart LR
+    HITL["<b>HITL corrections</b><br/>Command(resume=...)<br/>low volume · high signal<br/><i>online append per resume</i>"]
+    EVAL["<b>Eval harness</b><br/>4 corpora · 4 noise profiles<br/>moderate volume · controlled<br/><i>weekly batch refit</i>"]
+    DUAL["<b>Dual-VLM agreement</b><br/>(proxy ground truth)<br/>high volume · weak signal<br/><i>nightly background refit</i>"]
+    FIT["<b>PartitionedCalibrator.fit_all()</b><br/>per-(profile, tenant_id) tables<br/>Platt / isotonic / linear"]
+    GATE{"<b>ECE quality gate</b><br/>post-fit ECE ≤ pre-fit ECE + 0.02?<br/>(first-fit auto-accepts)"}
+    PUB["<b>Publish new table</b>"]
+    KEEP["<b>Keep previous table</b><br/>rollback"]
+
+    HITL --> FIT
+    EVAL --> FIT
+    DUAL --> FIT
+    FIT --> GATE
+    GATE -->|"yes"| PUB
+    GATE -->|"no · regression"| KEEP
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef blocker fill:#dc2626,stroke:#7f1d1d,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class HITL,EVAL,DUAL data
+    class FIT primary
+    class GATE warning
+    class PUB validation
+    class KEEP blocker
+```
 
 **Per-extraction fit is forbidden.** Refitting on every extraction is statistically noisy and operationally dangerous.
 
@@ -1444,6 +1681,9 @@ That's the state-of-the-art launch bar.
 6. **Real PKI is supported via configuration injection**, not built. KMS-backed signing path is config-pluggable; AWS KMS lands in Phase 12.
 7. **No calendar dates.** Each phase ships when ready; quality gate is the gating function, not weeks-elapsed.
 8. **The 2575-test baseline grows monotonically.** Every regression is a P0 fix.
+
+> [!CAUTION]
+> **The 2575-test baseline is non-negotiable.** A red test in CI is a P0 — drop everything, root-cause, fix forward. The baseline never goes backwards; new tests are additive. Relaxing an assertion to make a flaky test pass is a refactor-and-investigate moment, not a shortcut.
 9. **"State of the art" means rigour, not novelty.** We're racing for the most reliable, most observable, most tested document-extraction product on the market.
 
 ---

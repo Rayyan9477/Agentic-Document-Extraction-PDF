@@ -7,6 +7,7 @@ security features, monitoring, and OpenAPI documentation.
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from collections.abc import AsyncGenerator
@@ -22,6 +23,31 @@ from src.config import get_logger, get_settings
 
 
 logger = get_logger(__name__)
+
+
+# V3 Phase 8 — Sanitise client-supplied tracking IDs.
+# ``X-Request-ID`` is interpolated into log fields, response headers,
+# audit metadata, AND filesystem paths (upload temp dirs). A raw
+# header value containing path-separator chars or control bytes lets
+# callers traverse the temp dir, inject log entries, or split response
+# headers. We accept only [A-Za-z0-9_-]{1,64} and fall back to a
+# fresh UUID4 hex when the input is empty / malformed.
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_request_id(raw: str | None) -> str:
+    """Return a sanitised request id safe for paths / headers / logs.
+
+    Accepts the input only if it matches ``[A-Za-z0-9_-]{1,64}``;
+    otherwise mints a fresh ``uuid.uuid4().hex``. Empty / None
+    input always mints a fresh id.
+    """
+    if not raw:
+        return uuid.uuid4().hex
+    raw = raw.strip()
+    if not raw or len(raw) > 64 or not _REQUEST_ID_RE.match(raw):
+        return uuid.uuid4().hex
+    return raw
 
 
 API_VERSION = "1.0.0"
@@ -238,15 +264,17 @@ def create_app(
         except ImportError as e:
             logger.warning("rate_limit_middleware_unavailable", error=str(e))
 
-    # Add authentication middleware (optional based on config)
-    auth_enabled = getattr(settings, "auth_enabled", False)
+    # V3 Phase 8 — Auth middleware. ``api.auth_enabled`` is a
+    # first-class Settings field; production-mode validator refuses to
+    # boot with auth off unless ``AUTH_BYPASS_ACK`` is set.
+    auth_enabled = settings.api.auth_enabled
     if enable_security and auth_enabled:
         try:
             from src.api.middleware import AuthenticationMiddleware
             from src.security.rbac import RBACManager
 
             rbac_manager = RBACManager(
-                secret_key=settings.secret_key,
+                secret_key=settings.security.secret_key.get_secret_value(),
             )
             app.add_middleware(
                 AuthenticationMiddleware,
@@ -256,12 +284,48 @@ def create_app(
             logger.info("authentication_middleware_enabled")
         except ImportError as e:
             logger.warning("authentication_middleware_unavailable", error=str(e))
+    elif enable_security and not auth_enabled:
+        logger.warning(
+            "authentication_middleware_disabled",
+            reason="api.auth_enabled=False",
+            note=(
+                "Production deployments must set API_AUTH_ENABLED=true "
+                "or AUTH_BYPASS_ACK=acknowledged"
+            ),
+        )
+
+    # V3 Phase 8 — Tenant resolver middleware. Mounted after
+    # AuthenticationMiddleware so JWT claims (which carry the
+    # canonical ``tenant_id``) are populated on ``request.state``
+    # before this middleware reads them. Mounted before
+    # RateLimitMiddleware which already consults
+    # ``request.state.tenant_id``.
+    try:
+        from src.api.tenant_middleware import TenantResolverMiddleware
+
+        app.add_middleware(
+            TenantResolverMiddleware,
+            default_tenant_id=settings.api.default_tenant_id,
+            enabled=settings.api.multi_tenant_enabled,
+        )
+        logger.info(
+            "tenant_resolver_middleware_enabled",
+            multi_tenant=settings.api.multi_tenant_enabled,
+            default_tenant=settings.api.default_tenant_id,
+        )
+    except ImportError as e:
+        logger.warning("tenant_resolver_middleware_unavailable", error=str(e))
 
     # Add custom request tracking middleware
     @app.middleware("http")
     async def request_middleware(request: Request, call_next: Any) -> Response:
-        """Add request ID and timing to all requests."""
-        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        """Add request ID and timing to all requests.
+
+        V3 Phase 8 — request_id is sanitised before any downstream use
+        (filesystem paths, log fields, response headers). See
+        ``_safe_request_id`` for the validation rule.
+        """
+        request_id = _safe_request_id(request.headers.get("X-Request-ID"))
         start_time = time.perf_counter()
 
         # Store request ID in state for access in routes

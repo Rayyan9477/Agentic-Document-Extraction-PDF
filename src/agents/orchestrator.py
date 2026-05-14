@@ -846,6 +846,7 @@ class OrchestratorAgent(BaseAgent):
         *,
         human_corrections: dict[str, Any] | None = None,
         processing_id: str | None = None,
+        tenant_id: str | None = None,
     ) -> ExtractionState:
         """
         Resume a checkpointed extraction workflow.
@@ -904,9 +905,17 @@ class OrchestratorAgent(BaseAgent):
         )
 
         config: dict[str, Any] = {"configurable": {"thread_id": thread_id}}
-        # WS-5a: per-processing checkpoint namespace gives multi-tenant
-        # isolation when several extractions share a checkpoint database.
-        if processing_id:
+        # WS-5a / V3 Phase 8: per-(tenant, processing) checkpoint
+        # namespace. ``run_extraction`` writes under
+        # ``tenant:{id}:proc:{id}`` when a tenant_id is in state; we
+        # mirror that here so resume reads from the same namespace.
+        # Legacy fallback to ``proc:{id}`` covers checkpoints written
+        # before Phase 8 (which never carried a tenant prefix).
+        if tenant_id and processing_id:
+            config["configurable"]["checkpoint_ns"] = (
+                f"tenant:{tenant_id}:proc:{processing_id}"
+            )
+        elif processing_id:
             config["configurable"]["checkpoint_ns"] = f"proc:{processing_id}"
 
         # Resume from a human-review interrupt (v3 path).

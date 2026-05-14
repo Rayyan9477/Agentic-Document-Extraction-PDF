@@ -308,6 +308,12 @@ class HeterogeneousReconciler:
                 continue
             if outcome.tiebreaker == "exact_match":
                 continue
+            # V3 Phase 8 — ``single_pass`` means one pass had the
+            # field and the other was silent. That's a coverage
+            # gap, not a disagreement; don't inflate the
+            # disagreement counter or treat it as a tiebreaker.
+            if outcome.tiebreaker == "single_pass":
+                continue
             report.disagreement_count += 1
             counts = report.tiebreakers_used
             counts[outcome.tiebreaker] = counts.get(outcome.tiebreaker, 0) + 1
@@ -316,7 +322,9 @@ class HeterogeneousReconciler:
             agreed = sum(
                 1
                 for f in report.fields.values()
-                if f.tiebreaker == "exact_match" or f.tiebreaker is None
+                if f.tiebreaker
+                in ("exact_match", "single_pass")
+                or f.tiebreaker is None
             )
             report.agreement_rate = agreed / len(all_fields)
         return report
@@ -342,6 +350,41 @@ class HeterogeneousReconciler:
         c2 = float(p2.get("confidence") or 0.0)
         bbox1 = p1.get("bbox")
         bbox2 = p2.get("bbox")
+
+        # ---- 0. V3 Phase 8 — Single-pass coverage gap ----
+        # When one pass returned the field and the other left it
+        # blank (different field-coverage between extractor models is
+        # common), this is NOT a disagreement. Treat it as
+        # uncontested coverage from the present pass: native
+        # confidence (no halving) and ``tiebreaker="single_pass"``
+        # so the orchestrator's disagreement_count doesn't inflate.
+        # Pre-Phase-8 behaviour: every one-pass-only field fell
+        # through to the low-confidence tier and got its confidence
+        # halved as ``low_confidence``.
+        v1_present = v1 is not None and v1 != ""
+        v2_present = v2 is not None and v2 != ""
+        if v1_present and not v2_present:
+            return ReconciledField(
+                field_name=name,
+                value=v1,
+                confidence=c1,
+                bbox=bbox1,
+                source_pass="pass1",
+                tiebreaker="single_pass",
+                pass1_candidate=v1,
+                pass2_candidate=None,
+            )
+        if v2_present and not v1_present:
+            return ReconciledField(
+                field_name=name,
+                value=v2,
+                confidence=c2,
+                bbox=bbox2,
+                source_pass="pass2",
+                tiebreaker="single_pass",
+                pass1_candidate=None,
+                pass2_candidate=v2,
+            )
 
         # ---- 1. Exact match ----
         if _values_agree(v1, v2):

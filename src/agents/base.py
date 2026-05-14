@@ -318,6 +318,19 @@ class BaseAgent(ABC):
         except Exception:  # pragma: no cover - defensive
             _dispatcher = None
 
+        # V3 Phase 8 — VLM queue-depth gate. ``vlm_queue_slot`` is a
+        # no-op when ``settings.vlm.max_concurrent_requests`` is 0
+        # (the default), so existing tests are unaffected. Production
+        # deployments set the capacity to bound concurrent VLM calls
+        # per Python process and protect the GPU backend from
+        # thundering-herd OOMs.
+        from src.client.backends.queue_depth import (
+            configure_from_settings as _qd_configure,
+            vlm_queue_slot,
+        )
+
+        _qd_configure()  # idempotent; picks up settings if changed
+
         try:
             self._logger.debug(
                 "sending_vision_request",
@@ -328,7 +341,7 @@ class BaseAgent(ABC):
             )
 
             if _dispatcher is not None and _dispatcher.is_active:
-                with _dispatcher.start_span(
+                with vlm_queue_slot(), _dispatcher.start_span(
                     "vlm.request",
                     agent=self._name,
                     request_id=request.request_id,
@@ -339,9 +352,10 @@ class BaseAgent(ABC):
                         request, model=model_override
                     )
             else:
-                response = self._client.send_vision_request(
-                    request, model=model_override
-                )
+                with vlm_queue_slot():
+                    response = self._client.send_vision_request(
+                        request, model=model_override
+                    )
 
             self._total_processing_ms += response.latency_ms
 
@@ -486,6 +500,14 @@ class BaseAgent(ABC):
         except Exception:  # pragma: no cover - defensive
             _dispatcher = None
 
+        # V3 Phase 8 — VLM queue-depth gate (see send_vision_request).
+        from src.client.backends.queue_depth import (
+            configure_from_settings as _qd_configure,
+            vlm_queue_slot,
+        )
+
+        _qd_configure()
+
         try:
             self._logger.debug(
                 "sending_constrained_vision_request",
@@ -496,7 +518,7 @@ class BaseAgent(ABC):
                 model_override=model_override,
             )
             if _dispatcher is not None and _dispatcher.is_active:
-                with _dispatcher.start_span(
+                with vlm_queue_slot(), _dispatcher.start_span(
                     "vlm.request_constrained",
                     agent=self._name,
                     request_id=request.request_id,
@@ -509,11 +531,12 @@ class BaseAgent(ABC):
                         response_format=response_format,
                     )
             else:
-                response = self._client.send_vision_request(
-                    request,
-                    model=model_override,
-                    response_format=response_format,
-                )
+                with vlm_queue_slot():
+                    response = self._client.send_vision_request(
+                        request,
+                        model=model_override,
+                        response_format=response_format,
+                    )
 
             self._total_processing_ms += response.latency_ms
 
