@@ -602,10 +602,10 @@ class TestRefreshTokenEndpoint:
     """Tests for POST /auth/refresh endpoint."""
 
     def test_refresh_token_success(self, client, test_user, test_tokens):
-        """Test successful token refresh."""
+        """Test successful token refresh (body path — Phase 8.5-A1)."""
         response = client.post(
             "/api/v1/auth/refresh",
-            params={"refresh_token": test_tokens.refresh_token},
+            json={"refresh_token": test_tokens.refresh_token},
         )
 
         assert response.status_code == status.HTTP_200_OK
@@ -622,7 +622,7 @@ class TestRefreshTokenEndpoint:
         """Test that access token cannot be used for refresh."""
         response = client.post(
             "/api/v1/auth/refresh",
-            params={"refresh_token": test_tokens.access_token},
+            json={"refresh_token": test_tokens.access_token},
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -633,7 +633,7 @@ class TestRefreshTokenEndpoint:
         """Test refresh with invalid token."""
         response = client.post(
             "/api/v1/auth/refresh",
-            params={"refresh_token": "invalid.refresh.token"},
+            json={"refresh_token": "invalid.refresh.token"},
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -652,10 +652,50 @@ class TestRefreshTokenEndpoint:
 
         response = client.post(
             "/api/v1/auth/refresh",
+            json={"refresh_token": test_tokens.refresh_token},
+        )
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_refresh_token_query_param_rejected_by_default(self, client, test_tokens):
+        """Phase 8.5-A1 — query-param path is OFF by default.
+
+        Supplying refresh_token via ?refresh_token=... without the legacy
+        flag set should NOT be accepted; the request falls through to
+        "Refresh token required" → 401.
+        """
+        response = client.post(
+            "/api/v1/auth/refresh",
             params={"refresh_token": test_tokens.refresh_token},
         )
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        # Should NOT have rotated tokens — verify by reusing the same one via body.
+        body_response = client.post(
+            "/api/v1/auth/refresh",
+            json={"refresh_token": test_tokens.refresh_token},
+        )
+        assert body_response.status_code == status.HTTP_200_OK
+
+    def test_refresh_token_query_param_accepted_when_legacy_flag_set(
+        self, client, test_user, test_tokens, monkeypatch
+    ):
+        """Phase 8.5-A1 — legacy flag re-enables query path for migration."""
+        from src.config import get_settings
+
+        settings = get_settings()
+        monkeypatch.setattr(
+            settings.api, "auth_refresh_query_param_legacy", True
+        )
+
+        response = client.post(
+            "/api/v1/auth/refresh",
+            params={"refresh_token": test_tokens.refresh_token},
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert "access_token" in data
 
 
 # =============================================================================

@@ -620,7 +620,12 @@ class TestSessionSecurity:
     """Test session hijacking prevention and security."""
 
     def test_token_cannot_be_reused_after_refresh(self, client, rbac_manager):
-        """Test that old refresh token cannot be reused after refresh."""
+        """Test that old refresh token cannot be reused after refresh.
+
+        Phase 8.5-A1 — refresh tokens must be supplied in the JSON body,
+        not the URL query string (the query path is OFF by default to
+        prevent token leakage into access / audit logs).
+        """
         user = rbac_manager.users.create_user(
             username="reusetest",
             email="reuse@example.com",
@@ -631,10 +636,10 @@ class TestSessionSecurity:
         tokens = rbac_manager.tokens.create_token_pair(user)
         old_refresh = tokens.refresh_token
 
-        # Use refresh token to get new tokens
+        # Use refresh token to get new tokens (body payload — Phase 8.5-A1).
         response = client.post(
             "/api/v1/auth/refresh",
-            params={"refresh_token": old_refresh},
+            json={"refresh_token": old_refresh},
         )
         assert response.status_code == status.HTTP_200_OK
 
@@ -643,7 +648,7 @@ class TestSessionSecurity:
         # This test documents expected behavior
         response = client.post(
             "/api/v1/auth/refresh",
-            params={"refresh_token": old_refresh},
+            json={"refresh_token": old_refresh},
         )
 
         # Depending on implementation, this may fail or succeed

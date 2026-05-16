@@ -103,9 +103,71 @@ PHI_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 
+# JWT / bearer / token-in-query-string patterns. Audit logs, error
+# messages, and request metadata may carry these without being a "PHI
+# value" in the HIPAA sense — but a leaked bearer token compromises an
+# entire account, so we mask them under the same primitive.
+#
+# Two views are exported:
+#   * ``TOKEN_PATTERNS_WITH_REPLACEMENTS`` — (pattern, replacement) pairs
+#     for inline substitution (preserves surrounding context, e.g.
+#     ``foo=bar&refresh_token=[TOKEN-MASKED]&baz=qux``). Used by the
+#     structlog logging processor and the audit middleware query-string
+#     scrubber.
+#   * ``TOKEN_PATTERNS`` — patterns only, used by ``enforce_mask_phi`` for
+#     whole-value redaction when a single field value matches.
+TOKEN_PATTERNS_WITH_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    # JWT: three base64url segments joined by dots, leading "eyJ" header.
+    (
+        re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
+        "[TOKEN-MASKED]",
+    ),
+    # HTTP Authorization header value (Bearer / Token / Basic).
+    (
+        re.compile(r"(Bearer|Token|Basic)\s+[A-Za-z0-9_\-\.=+/]{4,}", re.IGNORECASE),
+        r"\1 [TOKEN-MASKED]",
+    ),
+    # Token in query string or form body.
+    (
+        re.compile(
+            r"(refresh_token|access_token|api_key|secret|token|password)=[^&\s\"']+",
+            re.IGNORECASE,
+        ),
+        r"\1=[TOKEN-MASKED]",
+    ),
+)
+
+TOKEN_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    pattern for pattern, _ in TOKEN_PATTERNS_WITH_REPLACEMENTS
+)
+
+
+def mask_tokens_in_text(text: str) -> str:
+    """Apply inline token-masking to a string, preserving surrounding context.
+
+    Used by audit middleware and logging processors that need to scrub
+    bearer tokens, JWTs, and token-style query parameters from free-form
+    text without erasing the entire value.
+
+    Args:
+        text: Arbitrary text that may contain token shapes.
+
+    Returns:
+        The text with every recognised token replaced by ``[TOKEN-MASKED]``.
+        Non-matching input is returned unchanged.
+    """
+    result = text
+    for pattern, replacement in TOKEN_PATTERNS_WITH_REPLACEMENTS:
+        result = pattern.sub(replacement, result)
+    return result
+
+
 def _redact_string_value(value: str) -> str:
-    """Apply value-level PHI regexes; fully redact if any pattern matches."""
+    """Apply value-level PHI / token regexes; fully redact if any pattern matches."""
     for pattern in PHI_VALUE_PATTERNS:
+        if pattern.search(value):
+            return REDACTED_TOKEN
+    for pattern in TOKEN_PATTERNS:
         if pattern.search(value):
             return REDACTED_TOKEN
     return value
@@ -181,4 +243,12 @@ def _walk(
     return obj
 
 
-__all__ = ["REDACTED_TOKEN", "PHI_FIELD_PATTERNS", "PHI_VALUE_PATTERNS", "enforce_mask_phi"]
+__all__ = [
+    "PHI_FIELD_PATTERNS",
+    "PHI_VALUE_PATTERNS",
+    "REDACTED_TOKEN",
+    "TOKEN_PATTERNS",
+    "TOKEN_PATTERNS_WITH_REPLACEMENTS",
+    "enforce_mask_phi",
+    "mask_tokens_in_text",
+]

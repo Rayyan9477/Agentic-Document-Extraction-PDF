@@ -3,6 +3,12 @@ Generic Fallback Schema for Unknown Documents.
 
 Provides a flexible schema for extracting data from documents that don't match
 any known medical document types (CMS-1500, UB-04, Superbill, EOB).
+
+V3 Phase 5 note: the previously-embedded ``HEALTHCARE_FIELDS`` block is now
+scoped to the medical-RCM profile via
+``src.schemas.profile_overlays.HEALTHCARE_CORE_FIELDS`` and only applied
+when that profile is detected. A non-medical document running through
+the generic fallback no longer has medical fields proposed to it.
 """
 
 from src.schemas.base import DocumentSchema, DocumentType, SchemaRegistry
@@ -125,57 +131,19 @@ FINANCIAL_FIELDS = [
     ),
 ]
 
-# Healthcare-Specific Fields (for medical documents)
-HEALTHCARE_FIELDS = [
-    FieldDefinition(
-        name="patient_name",
-        display_name="Patient Name",
-        field_type=FieldType.NAME,
-        description="Patient's full name",
-        required=False,
-        location_hint="Patient information section",
-    ),
-    FieldDefinition(
-        name="provider_name",
-        display_name="Provider Name",
-        field_type=FieldType.NAME,
-        description="Healthcare provider name",
-        required=False,
-        location_hint="Provider section or signature area",
-    ),
-    FieldDefinition(
-        name="service_date",
-        display_name="Date of Service",
-        field_type=FieldType.DATE,
-        description="Date services were provided",
-        required=False,
-        location_hint="Service details section",
-    ),
-    FieldDefinition(
-        name="diagnosis_codes",
-        display_name="Diagnosis Codes",
-        field_type=FieldType.STRING,  # Use STRING for arrays
-        description="ICD-10 diagnosis codes if present (comma-separated)",
-        required=False,
-        location_hint="Diagnosis section",
-    ),
-    FieldDefinition(
-        name="procedure_codes",
-        display_name="Procedure Codes",
-        field_type=FieldType.STRING,  # Use STRING for arrays
-        description="CPT procedure codes if present (comma-separated)",
-        required=False,
-        location_hint="Services or procedures section",
-    ),
-]
+# NOTE: Healthcare-specific fields used to live here as
+# ``HEALTHCARE_FIELDS``. They have been moved to the medical-RCM
+# profile overlay (``src.schemas.profile_overlays.HEALTHCARE_CORE_FIELDS``)
+# so that a non-medical document does not get phantom
+# ``patient_name`` / ``diagnosis_codes`` fields proposed.
 
 # =============================================================================
 # Enhanced Generic Schema
 # =============================================================================
 
-# Combine all field groups
+# Combine all field groups (medical fields excluded; see note above).
 ALL_GENERIC_FIELDS = (
-    DOCUMENT_FIELDS + ENTITY_FIELDS + PERSON_FIELDS + FINANCIAL_FIELDS + HEALTHCARE_FIELDS
+    DOCUMENT_FIELDS + ENTITY_FIELDS + PERSON_FIELDS + FINANCIAL_FIELDS
 )
 
 # Create the enhanced generic schema
