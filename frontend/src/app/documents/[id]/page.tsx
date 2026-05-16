@@ -661,8 +661,16 @@ export default function DocumentDetailPage() {
 }
 
 // Human Review Form Component
+interface DocumentDetail {
+  human_review_reason?: string;
+  field_metadata?: Record<
+    string,
+    { confidence: number; validation_passed: boolean; value: unknown }
+  >;
+}
+
 interface HumanReviewFormProps {
-  document: any;
+  document: DocumentDetail;
   onSubmit: (approved: boolean, notes: string) => void;
   onCancel: () => void;
 }
@@ -695,9 +703,9 @@ function HumanReviewForm({ document, onSubmit, onCancel }: HumanReviewFormProps)
         <h4 className="text-sm font-medium text-surface-700 mb-2">Key Fields to Verify:</h4>
         <div className="space-y-2 max-h-48 overflow-y-auto">
           {Object.entries(document?.field_metadata || {})
-            .filter(([_, result]: [string, any]) => result.confidence < 0.85 || !result.validation_passed)
+            .filter(([_key, result]) => result.confidence < 0.85 || !result.validation_passed)
             .slice(0, 5)
-            .map(([name, result]: [string, any]) => (
+            .map(([name, result]) => (
               <div key={name} className="flex items-center justify-between p-2 bg-surface-50 rounded">
                 <span className="text-sm font-medium text-surface-700">{name}</span>
                 <span className="text-sm text-surface-600">{String(result.value)}</span>

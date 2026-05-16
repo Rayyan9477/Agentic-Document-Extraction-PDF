@@ -973,6 +973,158 @@ async def generate_preview(
     )
 
 
+@router.get(
+    "/documents/{processing_id}/pages/{page_number}",
+    summary="Get raw page image (V3 Phase 4)",
+    description=(
+        "Return the rendered page image (PNG bytes) for one page of a "
+        "previously-processed document. Used by the click-to-source UI "
+        "to render the source page next to the structured extraction."
+    ),
+)
+async def get_document_page_image(
+    processing_id: Annotated[
+        str,
+        FastAPIPath(
+            min_length=16,
+            max_length=64,
+            pattern=r"^[a-zA-Z0-9\-_]+$",
+        ),
+    ],
+    page_number: Annotated[
+        int,
+        FastAPIPath(ge=1, le=1000),
+    ],
+    http_request: Request,
+):
+    """V3 Phase 4 — serve a per-page rendered PNG.
+
+    The rendering pipeline already stores per-page ``data_uri`` strings
+    on each page in ``state["page_images"]``; this endpoint extracts
+    the requested page, decodes the data URI, and returns raw PNG
+    bytes with ``image/png`` content-type.
+
+    Returns 404 when:
+    * no orchestrator with a checkpointer is available (the runtime
+      isn't configured to retain document state across requests);
+    * the requested processing_id has no checkpoint;
+    * the page_number is out of range.
+    """
+    import base64
+
+    from fastapi.responses import Response
+
+    if not re.match(r"^[a-zA-Z0-9\-_]{16,64}$", processing_id):
+        raise HTTPException(status_code=400, detail="Invalid processing ID format")
+
+    orch = getattr(http_request.app.state, "orchestrator", None)
+    if orch is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document state retrieval not available in this deployment",
+        )
+
+    state = orch.get_checkpoint_state(processing_id)
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document not found: {processing_id}",
+        )
+
+    page_images = state.get("page_images", []) or []
+    target_page = next(
+        (p for p in page_images if int(p.get("page_number", 0)) == page_number),
+        None,
+    )
+    if target_page is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Page {page_number} not found for document {processing_id}",
+        )
+
+    data_uri = target_page.get("data_uri") or target_page.get("base64_encoded", "")
+    if not data_uri:
+        raise HTTPException(status_code=404, detail="Page image not available")
+
+    # Strip the ``data:image/png;base64,`` prefix when present.
+    if data_uri.startswith("data:"):
+        _, _, b64 = data_uri.partition(",")
+    else:
+        b64 = data_uri
+    try:
+        raw_bytes = base64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Page image decode failed") from None
+
+    return Response(content=raw_bytes, media_type="image/png")
+
+
+@router.get(
+    "/documents/{processing_id}/provenance",
+    summary="Get provenance map (V3 Phase 4)",
+    description=(
+        "Return the per-field provenance map for a previously-processed "
+        "document. Used by the click-to-source UI for lazy-loading the "
+        "audit timeline without pulling the full extraction payload."
+    ),
+)
+async def get_document_provenance(
+    processing_id: Annotated[
+        str,
+        FastAPIPath(
+            min_length=16,
+            max_length=64,
+            pattern=r"^[a-zA-Z0-9\-_]+$",
+        ),
+    ],
+    http_request: Request,
+) -> dict[str, Any]:
+    """V3 Phase 4 — serve the per-field provenance dict.
+
+    Reads ``merged_extraction_v2`` from checkpointed state, unwraps
+    each ``FieldValue`` envelope, and returns the flat
+    ``{field_name: Provenance.to_serialisable()}`` map. Empty map
+    when the document was processed under the legacy single-VLM
+    engine without dual-write enabled.
+    """
+    if not re.match(r"^[a-zA-Z0-9\-_]{16,64}$", processing_id):
+        raise HTTPException(status_code=400, detail="Invalid processing ID format")
+
+    orch = getattr(http_request.app.state, "orchestrator", None)
+    if orch is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Document state retrieval not available in this deployment",
+        )
+
+    state = orch.get_checkpoint_state(processing_id)
+    if state is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document not found: {processing_id}",
+        )
+
+    from src.pipeline.provenance import unwrap_provenance
+
+    merged_v2 = state.get("merged_extraction_v2") or {}
+    if not isinstance(merged_v2, dict):
+        merged_v2 = {}
+
+    out: dict[str, dict[str, Any]] = {}
+    for field_name, wrapper in merged_v2.items():
+        prov = unwrap_provenance(wrapper)
+        if prov is None:
+            continue
+        out[field_name] = prov.to_serialisable()
+
+    return {
+        "processing_id": processing_id,
+        "engine": state.get("extraction_engine", "legacy"),
+        "field_count": len(out),
+        "fields": out,
+    }
+
+
 @router.post(
     "/documents/{processing_id}/preview",
     response_model=PreviewResponse,

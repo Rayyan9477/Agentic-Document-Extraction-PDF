@@ -13,11 +13,12 @@
  * `next/dynamic({ ssr: false })`.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Skeleton } from '@/components/ui';
 import { pageImageUrl } from '@/lib/api/provenance';
 import type { FieldProvenance } from '@/lib/api/provenance';
 import { BboxOverlay, bboxesForPage } from './BboxOverlay';
+import { AuthenticatedImage } from './AuthenticatedImage';
 
 interface PdfPageCanvasProps {
   processingId: string;
@@ -34,7 +35,6 @@ export function PdfPageCanvas({
   activeFieldName,
   onSelectField,
 }: PdfPageCanvasProps) {
-  const imgRef = useRef<HTMLImageElement | null>(null);
   const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,9 +67,7 @@ export function PdfPageCanvas({
       {!naturalSize && !error && (
         <Skeleton className="absolute inset-0" />
       )}
-      {/* eslint-disable-next-line @next/next/no-img-element -- we proxy bytes from the backend; Next/Image's loader optimisation isn't applicable here */}
-      <img
-        ref={imgRef}
+      <AuthenticatedImage
         src={url}
         alt={`Page ${pageNumber} of document`}
         onLoad={(e) => {

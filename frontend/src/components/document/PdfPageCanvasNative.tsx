@@ -56,7 +56,10 @@ export default function PdfPageCanvasNative({
         // to the importError path below.
         const mod = await import('react-pdf');
         // Worker pinned to a Next.js public asset; air-gap safe.
-        mod.pdfjs.GlobalWorkerOptions.workerSrc = '/pdfjs-worker.min.js';
+        mod.pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+          'pdfjs-dist/build/pdf.worker.min.mjs',
+          import.meta.url,
+        ).toString();
         if (!cancelled) setRpdf(mod);
       } catch {
         if (!cancelled) {

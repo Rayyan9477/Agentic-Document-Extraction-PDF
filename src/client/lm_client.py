@@ -401,6 +401,8 @@ class LMStudioClient:
         request: VisionRequest,
         *,
         model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
     ) -> VisionResponse:
         """
         Send a vision request with retry logic.
@@ -413,6 +415,15 @@ class LMStudioClient:
                 router (``BaseAgent.send_vision_request`` consults
                 ``ModelRouter.route_for_agent`` and passes the chosen model
                 here). Pass ``None`` to use the configured default.
+            response_format: Optional OpenAI-style ``response_format`` dict.
+                Used by V3 Phase 1 to bind a JSON Schema at decode time
+                (e.g. ``{"type": "json_schema", "json_schema": {...}}``)
+                so malformed output is structurally impossible. Modern
+                LM Studio (0.3+) and vLLM (0.6+) both honour this.
+            extra_body: Optional ``extra_body`` dict forwarded to the
+                OpenAI client. vLLM uses this for ``guided_json`` /
+                ``guided_decoding_backend`` so the operator can pick
+                XGrammar over Outlines for schema enforcement.
 
         Returns:
             VisionResponse with model output.
@@ -425,7 +436,12 @@ class LMStudioClient:
         start_time = time.perf_counter()
 
         try:
-            response = self._send_with_retry(request, model=model)
+            response = self._send_with_retry(
+                request,
+                model=model,
+                response_format=response_format,
+                extra_body=extra_body,
+            )
             latency_ms = int((time.perf_counter() - start_time) * 1000)
 
             # Extract content
@@ -464,28 +480,51 @@ class LMStudioClient:
             latency_ms = int((time.perf_counter() - start_time) * 1000)
             last_exception = e.last_attempt.exception()
 
-            if isinstance(last_exception, APIConnectionError):
-                raise LMConnectionError(
-                    f"Connection failed after {self._max_retries} retries: {last_exception}"
-                ) from e
+            # NOTE: APITimeoutError is a subclass of APIConnectionError in the
+            # openai SDK, so the timeout check MUST come first; otherwise
+            # timeouts get misclassified as connection errors.
             if isinstance(last_exception, APITimeoutError):
                 raise LMTimeoutError(
                     f"Request timed out after {self._max_retries} retries: {last_exception}"
+                ) from e
+            if isinstance(last_exception, APIConnectionError):
+                raise LMConnectionError(
+                    f"Connection failed after {self._max_retries} retries: {last_exception}"
                 ) from e
             raise LMClientError(
                 f"Request failed after {self._max_retries} retries: {last_exception}"
             ) from e
 
-    def _send_with_retry(self, request: VisionRequest, *, model: str | None = None) -> Any:
+    def _send_with_retry(
+        self,
+        request: VisionRequest,
+        *,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> Any:
         """
         Send request with tenacity retry logic.
 
         Uses configurable exponential backoff for transient failures.
         The retry count is read from settings at runtime, not hardcoded.
         """
-        return self._retryer(self._send_single_request, request, model=model)
+        return self._retryer(
+            self._send_single_request,
+            request,
+            model=model,
+            response_format=response_format,
+            extra_body=extra_body,
+        )
 
-    def _send_single_request(self, request: VisionRequest, *, model: str | None = None) -> Any:
+    def _send_single_request(
+        self,
+        request: VisionRequest,
+        *,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+        extra_body: dict[str, Any] | None = None,
+    ) -> Any:
         """Execute a single VLM request (called by the retryer)."""
         # Build messages
         messages: list[dict[str, Any]] = []
@@ -533,11 +572,20 @@ class LMStudioClient:
             "temperature": request.temperature,
         }
 
-        # NOTE: LM Studio does not support response_format={"type":"json_object"}.
-        # It only accepts "json_schema" or "text". Since we already have robust
-        # JSON extraction via _extract_json() (handles markdown blocks, embedded
-        # JSON, etc.), we rely on prompt-level "respond in JSON" instructions
-        # instead of API-level enforcement.
+        # V3 Phase 1: optional schema enforcement at decode time. When
+        # ``response_format`` is provided (typically a
+        # ``{"type": "json_schema", "json_schema": {...}}`` shape from
+        # LMStudioBackend), LM Studio 0.3+ and vLLM 0.6+ guarantee the
+        # generated tokens conform to the schema. Malformed JSON is
+        # structurally impossible.
+        if response_format is not None:
+            api_kwargs["response_format"] = response_format
+
+        # vLLM-specific extras (e.g. ``{"guided_json": ...,
+        # "guided_decoding_backend": "xgrammar"}``) flow through here.
+        # LM Studio ignores unknown extra_body fields per OpenAI-compat.
+        if extra_body is not None:
+            api_kwargs["extra_body"] = extra_body
 
         response = client.chat.completions.create(**api_kwargs)
 

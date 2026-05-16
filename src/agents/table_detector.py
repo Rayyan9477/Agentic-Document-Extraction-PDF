@@ -165,13 +165,18 @@ class TableDetectorAgent(BaseAgent):
         )
 
         def make_vlm_call() -> dict[str, Any]:
-            return self.send_vision_request_with_json(
+            # V3 Phase 1: schema-bound (permissive envelope).
+            from src.agents._constrained_envelopes import JSONObjectEnvelope
+
+            payload, _trace = self.send_vision_request_with_schema(
                 image_data=image_data,
                 prompt=prompt,
+                schema=JSONObjectEnvelope,
                 system_prompt=TABLE_DETECTION_SYSTEM_PROMPT,
                 temperature=0.1,
                 max_tokens=4096,
             )
+            return payload
 
         try:
             raw = retry_with_backoff(

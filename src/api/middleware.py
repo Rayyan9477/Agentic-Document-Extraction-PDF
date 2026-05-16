@@ -30,6 +30,7 @@ from src.security.audit import (
     AuditLogger,
     AuditOutcome,
 )
+from src.security.phi_mask import mask_tokens_in_text
 from src.security.rbac import (
     Permission,
     RBACManager,
@@ -37,6 +38,19 @@ from src.security.rbac import (
     TokenExpiredError,
     TokenPayload,
 )
+
+
+def _safe_query_string(query_string: str) -> str:
+    """Scrub bearer tokens, JWTs, and ``token=`` params from a query string.
+
+    Phase 8.5-A2. Used before writing the query-string into an audit log.
+    Preserves surrounding context so non-sensitive query params remain
+    readable for forensic analysis. Returns the input unchanged if no
+    token shapes are present.
+    """
+    if not query_string:
+        return query_string
+    return mask_tokens_in_text(query_string)
 
 
 logger = structlog.get_logger(__name__)
@@ -181,10 +195,20 @@ class RateLimitConfig:
 
 @dataclass
 class RateLimitState:
-    """Rate limiting state for a client."""
+    """Rate limiting state for a client.
+
+    V3 Phase 8 — adds ``tokens`` and ``last_refill`` for the burst
+    token-bucket layer. The legacy ``requests`` sliding-window list
+    stays in place for the ``X-RateLimit-Reset`` header semantics
+    and to keep existing observability shape unchanged. ``tokens``
+    is initialised lazily inside ``is_allowed`` because we don't
+    know the bucket capacity at construction time.
+    """
 
     requests: list[float] = field(default_factory=list)
     last_cleanup: float = 0.0
+    tokens: float = -1.0  # -1 sentinel = uninitialised
+    last_refill: float = 0.0
 
 
 class RateLimiter:
@@ -296,6 +320,7 @@ class RateLimiter:
         else:
             config = self._endpoint_limits.get(endpoint or "", None)
         rpm = config.requests_per_minute if config else self._default_rpm
+        burst = config.burst_size if config else self._burst_size
 
         with self._lock:
             # Get/create client state
@@ -306,20 +331,51 @@ class RateLimiter:
                 state.requests = [t for t in state.requests if t > window_start]
                 state.last_cleanup = now
 
-            # Check limit
-            remaining = max(0, rpm - len(state.requests))
+            # V3 Phase 8 — Burst token-bucket on top of the sliding
+            # window. The bucket holds up to ``burst`` tokens and
+            # refills at ``rpm/60`` tokens per second. Each request
+            # consumes 1 token. We also keep the sliding-window
+            # list for header reporting compatibility.
+            #
+            # Special case: rpm=0 → emergency-disabled tenant. We
+            # never refill and never allow regardless of bucket
+            # state. (A burst-size>0 grace would defeat the purpose
+            # of an emergency disable.)
+            if rpm == 0:
+                # Emergency-disabled — surface 429 with zero remaining.
+                headers_block = {
+                    "X-RateLimit-Limit": 0,
+                    "X-RateLimit-Remaining": 0,
+                    "X-RateLimit-Reset": int(window_start + 60),
+                }
+                return False, headers_block
+
+            # Initialise bucket on first sight of this client.
+            if state.tokens < 0:
+                state.tokens = float(burst)
+                state.last_refill = now
+
+            # Refill.
+            elapsed = max(0.0, now - state.last_refill)
+            refill_rate = rpm / 60.0
+            state.tokens = min(
+                float(burst), state.tokens + elapsed * refill_rate
+            )
+            state.last_refill = now
+
             headers = {
                 "X-RateLimit-Limit": rpm,
-                "X-RateLimit-Remaining": remaining,
+                "X-RateLimit-Remaining": int(state.tokens),
                 "X-RateLimit-Reset": int(window_start + 60),
             }
 
-            if len(state.requests) >= rpm:
+            if state.tokens < 1.0:
                 return False, headers
 
-            # Record request
+            # Consume one token.
+            state.tokens -= 1.0
             state.requests.append(now)
-            headers["X-RateLimit-Remaining"] = remaining - 1
+            headers["X-RateLimit-Remaining"] = int(state.tokens)
 
             return True, headers
 
@@ -492,7 +548,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
         finally:
             duration_ms = (time.perf_counter() - start_time) * 1000
 
-            # Log API request
+            # Log API request. Phase 8.5-A2: query string scrubbed before
+            # it reaches the audit log to prevent bearer-token / refresh-token /
+            # JWT leakage when callers pass secrets in the URL.
             self._audit_logger.log_api_request(
                 method=request.method,
                 path=request.url.path,
@@ -500,7 +558,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 duration_ms=duration_ms,
                 client_ip=client_ip,
                 user_id=user_id,
-                query_params=str(request.query_params) if request.query_params else None,
+                query_params=_safe_query_string(str(request.query_params))
+                if request.query_params
+                else None,
             )
 
             # Clear context

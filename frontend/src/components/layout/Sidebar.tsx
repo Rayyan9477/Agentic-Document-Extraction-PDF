@@ -239,7 +239,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             animate={{ x: 0 }}
             exit={{ x: '-100%' }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            className="fixed inset-y-0 left-0 w-72 bg-white border-r border-surface-200 z-50 lg:hidden"
+            className="fixed inset-y-0 left-0 w-72 bg-surface dark:bg-surface-raised border-r border-surface-200 z-50 lg:hidden"
           >
             {sidebarContent}
           </motion.aside>
@@ -249,7 +249,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* Desktop Sidebar */}
       <aside
         className={cn(
-          'hidden lg:flex flex-col bg-white border-r border-surface-200',
+          'hidden lg:flex flex-col bg-surface dark:bg-surface-raised border-r border-surface-200',
           'transition-all duration-300',
           isCollapsed ? 'w-20' : 'w-72'
         )}

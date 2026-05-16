@@ -13,7 +13,7 @@ from typing import ClassVar
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
-from src.config import get_logger
+from src.config import get_logger, get_settings
 from src.security.rbac import (
     RBACManager,
     Role,
@@ -571,12 +571,20 @@ class RefreshTokenRequest(BaseModel):
     "/auth/refresh",
     response_model=TokenResponse,
     summary="Refresh token",
-    description="Refresh access token using refresh token with secure rotation. Supports both query param and HttpOnly cookie.",
+    description=(
+        "Refresh access token using refresh token with secure rotation. "
+        "Accepts the token via JSON body or HttpOnly cookie. The legacy "
+        "``?refresh_token=`` query-string path is OFF by default (Phase 8.5-A1) "
+        "because query strings flow into access logs verbatim — set "
+        "``API_AUTH_REFRESH_QUERY_PARAM_LEGACY=1`` to re-enable for one "
+        "release during client migration."
+    ),
     status_code=status.HTTP_200_OK,
 )
 async def refresh_token(
     http_request: Request,
     response: Response,
+    body: RefreshTokenRequest | None = None,
     refresh_token: str | None = Query(None, min_length=1),
     rbac: RBACManager = Depends(get_rbac_manager),
 ) -> TokenResponse:
@@ -588,12 +596,14 @@ async def refresh_token(
     - New token pair is issued
     - Prevents refresh token replay attacks
     - Detects token theft (reused revoked token = breach indicator)
-    - Supports both query param and HttpOnly cookie for backward compatibility
+    - Token source priority: JSON body > HttpOnly cookie > (legacy) query param
 
     Args:
         http_request: HTTP request object.
         response: HTTP response for setting new cookies.
-        refresh_token: Optional refresh token from query param.
+        body: Optional ``{"refresh_token": "..."}`` JSON body (preferred).
+        refresh_token: Legacy query parameter; only consulted when
+            ``settings.api.auth_refresh_query_param_legacy`` is True.
 
     Returns:
         New access and refresh tokens.
@@ -602,6 +612,7 @@ async def refresh_token(
         HTTPException: If refresh fails.
     """
     request_id = getattr(http_request.state, "request_id", "")
+    settings = get_settings()
 
     logger.info(
         "token_refresh_attempt",
@@ -609,10 +620,27 @@ async def refresh_token(
     )
 
     try:
-        # Try query param first, then fall back to cookie
-        incoming_refresh_token = refresh_token
+        # Token source priority (Phase 8.5-A1): body > cookie > legacy query.
+        incoming_refresh_token: str | None = None
+        if body is not None and body.refresh_token:
+            incoming_refresh_token = body.refresh_token
         if not incoming_refresh_token:
             incoming_refresh_token = http_request.cookies.get("refresh_token")
+        if (
+            not incoming_refresh_token
+            and refresh_token
+            and settings.api.auth_refresh_query_param_legacy
+        ):
+            logger.warning(
+                "token_refresh_query_param_legacy_used",
+                request_id=request_id,
+                detail=(
+                    "Refresh token supplied via query string. The query path "
+                    "is deprecated and OFF by default; migrate clients to "
+                    "JSON body or HttpOnly cookie."
+                ),
+            )
+            incoming_refresh_token = refresh_token
 
         if not incoming_refresh_token:
             raise HTTPException(
@@ -982,8 +1010,10 @@ async def create_api_key(
         # Generate key ID (for management - not the actual key)
         key_id = f"key_{secrets.token_urlsafe(16)}"
 
-        # Create API key
-        api_key = rbac.create_api_key(
+        # Create API key. V3 Phase 8: returns (api_key, jti); the JTI
+        # is recorded against the user so revocation can enforce
+        # ownership.
+        api_key, jti = rbac.create_api_key(
             user=user,
             name=body.name,
             expires_days=body.expires_days,
@@ -996,6 +1026,7 @@ async def create_api_key(
             "api_key_created",
             user_id=user_id,
             key_id=key_id,
+            key_jti=jti[:8] + "...",
             key_name=body.name,
             expires_days=body.expires_days,
             request_id=request_id,
@@ -1055,23 +1086,49 @@ async def revoke_api_key(
         )
 
     try:
-        # Revoke the token by its JTI
-        # In a full implementation, we'd verify ownership before revoking
+        # V3 Phase 8 — ownership check before revoke. Pre-Phase-8 keys
+        # have no recorded owner; admins may revoke them via the
+        # legacy fallback. Everyone else gets 404 (not 403) so we
+        # don't leak which JTIs exist.
+        is_admin = "admin" in (
+            getattr(request.state, "permissions", []) or []
+        )
+        is_owner = rbac.tokens.assert_owner(key_jti, user_id)
+        legacy_owner = rbac.tokens.get_key_owner(key_jti) is None
+
+        if not is_owner and not (is_admin and legacy_owner):
+            logger.warning(
+                "api_key_revocation_unauthorised",
+                user_id=user_id,
+                key_jti=key_jti[:8] + "..." if len(key_jti) > 8 else key_jti,
+                is_admin=is_admin,
+                legacy_owner=legacy_owner,
+                request_id=request_id,
+            )
+            # 404 not 403 — don't leak whether the JTI exists.
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="API key not found",
+            )
+
         rbac.tokens.revoke_token_by_jti(key_jti)
 
         logger.info(
             "api_key_revoked",
             user_id=user_id,
-            key_jti=key_jti,
+            key_jti=key_jti[:8] + "..." if len(key_jti) > 8 else key_jti,
+            via_admin_legacy=(is_admin and legacy_owner),
             request_id=request_id,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(
             "api_key_revocation_failed",
             error=str(e),
             user_id=user_id,
-            key_jti=key_jti,
+            key_jti=key_jti[:8] + "..." if len(key_jti) > 8 else key_jti,
             request_id=request_id,
         )
         raise HTTPException(
