@@ -19,8 +19,45 @@ from structlog.types import EventDict, Processor
 from src.config.settings import LogFormat, get_settings
 
 
-# PHI patterns for masking sensitive information
+# Token / bearer / auth-secret patterns. Mirrors
+# ``src.security.phi_mask.TOKEN_PATTERNS_WITH_REPLACEMENTS`` — duplicated
+# here to break the import cycle (``src.security.__init__`` eagerly loads
+# ``phi_redactor`` which imports from ``src.config``, so ``src.config``
+# cannot import from ``src.security`` at module load).
+#
+# ``tests/unit/test_phi_mask.py::test_logging_config_token_patterns_stay_in_sync``
+# asserts the two lists remain identical, so drift is caught at CI time.
+_TOKEN_PATTERNS_WITH_REPLACEMENTS: tuple[tuple[re.Pattern[str], str], ...] = (
+    # JWT: three base64url segments joined by dots, leading "eyJ" header.
+    (
+        re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+"),
+        "[TOKEN-MASKED]",
+    ),
+    # HTTP Authorization header value (Bearer / Token / Basic).
+    (
+        re.compile(r"(Bearer|Token|Basic)\s+[A-Za-z0-9_\-\.=+/]{4,}", re.IGNORECASE),
+        r"\1 [TOKEN-MASKED]",
+    ),
+    # Token in query string or form body.
+    (
+        re.compile(
+            r"(refresh_token|access_token|api_key|secret|token|password)=[^&\s\"']+",
+            re.IGNORECASE,
+        ),
+        r"\1=[TOKEN-MASKED]",
+    ),
+)
+
+
+# PHI patterns for masking sensitive information.
+#
+# Token shapes (JWT / Bearer headers / refresh_token in query strings) are
+# *prepended* so they run before the generic PHI patterns. This guarantees
+# bearer tokens are scrubbed from audit logs even when the surrounding
+# context (e.g. ``Authorization: Bearer eyJ...``) doesn't match any HIPAA
+# identifier pattern (Phase 8.5-A3).
 PHI_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    *_TOKEN_PATTERNS_WITH_REPLACEMENTS,
     # SSN patterns
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[SSN-MASKED]"),
     (re.compile(r"\b\d{9}\b(?=.*ssn)", re.IGNORECASE), "[SSN-MASKED]"),

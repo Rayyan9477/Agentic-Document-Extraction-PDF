@@ -61,6 +61,11 @@ class ExtractedRecord:
     confidence: float
     extraction_time_ms: int
     field_bboxes: dict[str, dict[str, float]] | None = None
+    # V3 Phase 4 — optional ``Provenance.to_serialisable()`` per field.
+    # Populated by producers reading from ``merged_extraction_v2``; left
+    # ``None`` for legacy callers. The Excel exporter renders a
+    # Provenance sheet when at least one record has this populated.
+    field_provenance: dict[str, dict[str, Any]] | None = None
 
 
 @dataclass

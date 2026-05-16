@@ -75,6 +75,10 @@ class MarkdownExportConfig:
     )
     phi_mask_pattern: str = "[REDACTED]"
     header_level: int = 1
+    # V3 Phase 4 — provenance footnotes. Auto-true for DETAILED and
+    # TECHNICAL styles, false for SIMPLE and SUMMARY (preserves
+    # existing readability). Operators can override per-call.
+    include_provenance_footnotes: bool | None = None
 
 
 class MarkdownExporter:
@@ -336,21 +340,43 @@ class MarkdownExporter:
 
     def _format_extracted_data_detailed(self, state: ExtractionState) -> str:
         """Format extracted data with confidence indicators."""
+        from src.pipeline.provenance import unwrap_provenance, unwrap_value
+
+        merged_v2 = state.get("merged_extraction_v2", {}) or {}
         merged = state.get("merged_extraction", {})
         field_meta = state.get("field_metadata", {})
 
-        if not merged:
+        # V3 Phase 4: prefer the FieldValue-shaped twin when populated.
+        source = merged_v2 if merged_v2 else merged
+        if not source:
             return "*No data extracted*"
+
+        # V3 Phase 4 — provenance footnotes. Auto-on for DETAILED and
+        # TECHNICAL styles when the operator hasn't explicitly opted out.
+        include_footnotes = self.config.include_provenance_footnotes
+        if include_footnotes is None:
+            include_footnotes = self.config.style in (
+                MarkdownStyle.DETAILED,
+                MarkdownStyle.TECHNICAL,
+            )
 
         # Build table
         lines = [
             "| Field | Value | Confidence | Status |",
             "|-------|-------|------------|--------|",
         ]
+        footnotes: list[str] = []
 
-        for field_name, field_data in sorted(merged.items()):
-            value = self._extract_value(field_data)
+        for field_name, field_data in sorted(source.items()):
+            # V3 Phase 4: unwrap_value handles wrapper-dict shapes.
+            value = unwrap_value(field_data)
+            if value is None and isinstance(field_data, dict):
+                # Legacy ``{"value": ...}`` envelope without provenance keys
+                value = self._extract_value(field_data)
             display_value = self._mask_if_phi(field_name, value)
+
+            # Provenance for footnote (when available).
+            prov = unwrap_provenance(field_data)
 
             # Get metadata
             meta = field_meta.get(field_name, {})
@@ -362,6 +388,11 @@ class MarkdownExporter:
                 confidence = 0.0
                 validation_passed = True
                 passes_agree = True
+
+            # Provenance confidence overrides legacy field_meta when
+            # the wrapper path is the source of truth.
+            if prov is not None and prov.confidence > 0.0:
+                confidence = prov.confidence
 
             # Confidence indicator
             conf_level = self._get_confidence_level(confidence)
@@ -382,12 +413,33 @@ class MarkdownExporter:
 
             status_str = ", ".join(status_parts)
 
+            # Provenance footnote marker when enabled.
+            footnote_marker = ""
+            if include_footnotes and prov is not None:
+                idx = len(footnotes) + 1
+                footnote_marker = f" <sup>{idx}</sup>"
+                bbox_str = ""
+                if prov.bbox is not None:
+                    bbox_str = (
+                        f"box ({prov.bbox.x:.2f}, {prov.bbox.y:.2f}, "
+                        f"{prov.bbox.width:.2f}, {prov.bbox.height:.2f})"
+                    )
+                path_str = " → ".join(prov.extraction_path) or "—"
+                agents_str = "/".join(prov.agent_signatures) or "—"
+                footnotes.append(
+                    f"<sup>{idx}</sup> _p.{prov.page} {bbox_str} · "
+                    f"{path_str} · {agents_str}_"
+                )
+
             lines.append(
                 f"| {self._format_field_name(field_name)} | "
-                f"{display_value} | {conf_str} | {status_str} |"
+                f"{display_value}{footnote_marker} | {conf_str} | {status_str} |"
             )
 
-        return "\n".join(lines)
+        out = "\n".join(lines)
+        if footnotes:
+            out += "\n\n" + "  \n".join(footnotes)
+        return out
 
     def _format_metadata(self, state: ExtractionState) -> str:
         """Format processing metadata."""

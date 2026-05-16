@@ -319,6 +319,79 @@ def export_excel(
     ws_s.column_dimensions["A"].width = 30
     ws_s.column_dimensions["B"].width = 40
 
+    # ── Sheet 5 (V3 Phase 4): Provenance ──
+    # Emitted only when at least one record carries ``field_provenance``.
+    # Keyed by ``(record_id, field_name)`` so audit consumers can
+    # join against the All Records sheet by record_id.
+    has_provenance = any(
+        getattr(r, "field_provenance", None) for r in records
+    )
+    if has_provenance:
+        ws_pv = wb.create_sheet("Provenance")
+        prov_headers = [
+            "Record #",
+            "Field",
+            "Page",
+            "Bbox X",
+            "Bbox Y",
+            "Bbox W",
+            "Bbox H",
+            "Source Block",
+            "Extraction Path",
+            "Agent Signatures",
+            "Confidence",
+            "VLM Model",
+            "Mem0 Match",
+        ]
+        for ci, h in enumerate(prov_headers, 1):
+            cell = ws_pv.cell(row=1, column=ci, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_align
+            cell.border = thin_border
+        ws_pv.row_dimensions[1].height = 25
+        ws_pv.freeze_panes = "A2"
+
+        ri = 2
+        for rec in records:
+            field_prov = getattr(rec, "field_provenance", None) or {}
+            if not isinstance(field_prov, dict) or not field_prov:
+                continue
+            for field_name, prov in field_prov.items():
+                if not isinstance(prov, dict):
+                    continue
+                bbox = prov.get("bbox") or {}
+                ws_pv.cell(row=ri, column=1, value=rec.record_id)
+                ws_pv.cell(row=ri, column=2, value=field_name)
+                ws_pv.cell(row=ri, column=3, value=prov.get("page"))
+                if isinstance(bbox, dict):
+                    ws_pv.cell(row=ri, column=4, value=bbox.get("x"))
+                    ws_pv.cell(row=ri, column=5, value=bbox.get("y"))
+                    ws_pv.cell(
+                        row=ri, column=6, value=bbox.get("width", bbox.get("w"))
+                    )
+                    ws_pv.cell(
+                        row=ri, column=7, value=bbox.get("height", bbox.get("h"))
+                    )
+                ws_pv.cell(row=ri, column=8, value=prov.get("source_block_id", ""))
+                ws_pv.cell(
+                    row=ri,
+                    column=9,
+                    value=",".join(prov.get("extraction_path") or []),
+                )
+                ws_pv.cell(
+                    row=ri,
+                    column=10,
+                    value=",".join(prov.get("agent_signatures") or []),
+                )
+                ws_pv.cell(row=ri, column=11, value=prov.get("confidence", 0.0))
+                ws_pv.cell(row=ri, column=12, value=prov.get("vlm_model_id", ""))
+                ws_pv.cell(row=ri, column=13, value=prov.get("mem0_match"))
+                ri += 1
+
+        for col_letter in "ABCDEFGHIJKLM":
+            ws_pv.column_dimensions[col_letter].width = 18
+
     # Save
     wb.save(str(output_path))
     logger.info("excel_exported", path=str(output_path), sheets=len(wb.sheetnames))

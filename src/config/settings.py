@@ -62,6 +62,269 @@ class ImageOutputFormat(str, Enum):
     TIFF = "TIFF"
 
 
+class VLMBackendName(str, Enum):
+    """Selector for the VLM backend (Phase 0 + Phase K).
+
+    All backends are equally first-class. The choice is operational:
+
+    * ``LM_STUDIO`` — the current shipping default. Single-binary,
+      easier ops, ``response_format=json_schema`` constrained decoding.
+    * ``VLLM`` — production-grade. XGrammar guided decoding, real
+      tensor parallelism, dual-instance heterogeneous extraction.
+    * ``GEMMA`` — Phase K Kaggle MVP. Gemma 4 26B-A4B-it via LM Studio
+      at a dedicated port. Native function-calling for medical-code
+      validators. ~17 GB VRAM at Q4_K_M; runs on a 24+ GB GPU.
+    """
+
+    LM_STUDIO = "lm_studio"
+    VLLM = "vllm"
+    GEMMA = "gemma"
+
+
+class VLMMode(str, Enum):
+    """Operational mode of the VLM stack (Phase 0).
+
+    * ``LITE`` — single VLM, no Critic, no dual-pass. Resource-constrained.
+    * ``STANDARD`` — dual-VLM extraction; Critic invoked on disagreement.
+    * ``HARD`` — dual-VLM + Critic always + bbox round-trip on every
+      flagged field.
+    """
+
+    LITE = "lite"
+    STANDARD = "standard"
+    HARD = "hard"
+
+
+class LMStudioBackendSettings(BaseSettings):
+    """Backend-specific settings for LM Studio in the V3 dual-VLM topology.
+
+    Distinct from the legacy :class:`LMStudioSettings` so the existing
+    deployment-wide LM Studio configuration is untouched. The factory
+    in ``src/client/backends/factory.py`` reads from this block first,
+    falling back to ``LMStudioSettings`` when ``primary_url`` /
+    ``primary_model`` are blank — preserving zero-config behaviour for
+    today's installs.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="VLM_LM_STUDIO_",
+        extra="ignore",
+    )
+
+    primary_url: str = Field(
+        default="",
+        description="Primary LM Studio endpoint. Blank → fall back to LMStudioSettings.base_url.",
+    )
+    primary_model: str = Field(
+        default="",
+        description="Primary LM Studio model. Blank → fall back to LMStudioSettings.model.",
+    )
+    secondary_url: str | None = Field(
+        default=None,
+        description=(
+            "Secondary LM Studio endpoint URL for dual-VLM operation. "
+            "Required when dual_mode=dual_instance."
+        ),
+    )
+    secondary_model: str | None = Field(
+        default=None,
+        description="Secondary LM Studio model identifier.",
+    )
+    dual_mode: str = Field(
+        default="single_only",
+        description=(
+            "How LM Studio handles the secondary role: "
+            "'dual_instance' (real heterogeneous, requires secondary_url+model), "
+            "'jit_swap' (single instance, swaps models — slow, dev-only), "
+            "'single_only' (collapse secondary to primary; Lite-mode behaviour)."
+        ),
+    )
+
+    @field_validator("dual_mode")
+    @classmethod
+    def _validate_dual_mode(cls, v: str) -> str:
+        valid = {"dual_instance", "jit_swap", "single_only"}
+        if v not in valid:
+            raise ValueError(f"dual_mode must be one of {valid}, got {v!r}")
+        return v
+
+
+class VLLMBackendSettings(BaseSettings):
+    """vLLM backend configuration (Phase 0)."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="VLLM_",
+        extra="ignore",
+    )
+
+    primary_url: str = Field(
+        default="http://localhost:8001/v1",
+        description="Primary vLLM OpenAI-compat endpoint.",
+    )
+    primary_model: str = Field(
+        default="Qwen/Qwen3.6-27B-VL-Instruct",
+        description="Primary VLM model identifier (HF or local path).",
+    )
+    secondary_url: str | None = Field(
+        default=None,
+        description="Secondary vLLM endpoint for dual-VLM extraction.",
+    )
+    secondary_model: str | None = Field(
+        default=None,
+        description="Secondary VLM model identifier.",
+    )
+    guided_decoding_backend: str = Field(
+        default="xgrammar",
+        description="vLLM guided-decoding backend (xgrammar | outlines).",
+    )
+
+    @field_validator("guided_decoding_backend")
+    @classmethod
+    def _validate_guided_decoding_backend(cls, v: str) -> str:
+        valid = {"xgrammar", "outlines"}
+        if v not in valid:
+            raise ValueError(f"guided_decoding_backend must be one of {valid}, got {v!r}")
+        return v
+
+
+class GemmaBackendSettings(BaseSettings):
+    """Gemma 4 backend configuration (Phase K — Kaggle MVP).
+
+    Targets ``lmstudio-community/gemma-4-26B-A4B-it-GGUF`` served by LM
+    Studio at a dedicated port (default 1235, distinct from the
+    legacy primary at 1234 so both can coexist). Native function-calling
+    is exposed via the OpenAI-compat ``tools`` + ``tool_choice`` body
+    fields, which LM Studio 0.3+ forwards verbatim for Gemma 4 GGUFs
+    whose chat template advertises tool support.
+
+    All roles (PRIMARY / SECONDARY / CRITIC / LITE) collapse to the same
+    endpoint by design — the orchestrator differentiates Pass 1 / Pass 2
+    / Critic via prompt frame, not model identity. This keeps the
+    operator runbook to one model load.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="GEMMA_",
+        extra="ignore",
+    )
+
+    primary_url: str = Field(
+        default="http://localhost:1235/v1",
+        description=(
+            "LM Studio endpoint serving Gemma 4. Defaults to port 1235 "
+            "so it can run alongside an existing LM Studio at 1234."
+        ),
+    )
+    primary_model: str = Field(
+        default="gemma-4-26b-a4b-it",
+        description=(
+            "Model identifier as listed by LM Studio. The GGUF community "
+            "tag at quant UD-Q4_K_M is the recommended starting point."
+        ),
+    )
+    tool_call_timeout: int = Field(
+        default=180,
+        ge=10,
+        le=600,
+        description=(
+            "Seconds to wait for a tool-use response. Higher than the "
+            "base 120s timeout because tool-forcing adds a decoding "
+            "step on top of generation."
+        ),
+    )
+    max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Retry attempts on transient failures before raising.",
+    )
+    temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature. Low value for deterministic extraction.",
+    )
+    register_rcm_tools: bool = Field(
+        default=True,
+        description=(
+            "When True, attach the five medical-code validator tools "
+            "(npi_luhn_check, cpt_validate, icd_normalize, sum_reconcile, "
+            "validate_date_ordering) to every extraction request so the "
+            "model can invoke them mid-extraction. Healthcare mode only."
+        ),
+    )
+    fail_open_on_health: bool = Field(
+        default=False,
+        description=(
+            "When True, ``health()`` returns ``overall_healthy=True`` "
+            "even if the underlying endpoint is unreachable. Useful for "
+            "demo environments where the LM Studio process boots after "
+            "the API. Default False — fail closed."
+        ),
+    )
+
+
+class VLMSettings(BaseSettings):
+    """Top-level VLM stack settings (Phase 0 + Phase K).
+
+    Selects the backend and mode, and holds the per-backend nested
+    settings. Existing ``settings.lm_studio`` continues to drive the
+    legacy single-VLM call-sites; the new ``settings.vlm.*`` blocks
+    drive the V3 backend abstraction.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="VLM_",
+        extra="ignore",
+    )
+
+    backend: VLMBackendName = Field(
+        default=VLMBackendName.LM_STUDIO,
+        description="Which VLM backend to use (lm_studio | vllm | gemma).",
+    )
+    mode: VLMMode = Field(
+        default=VLMMode.LITE,
+        description=(
+            "Extraction mode. Lite = single VLM (current default). "
+            "Standard = dual-VLM. Hard = dual-VLM + Critic always."
+        ),
+    )
+
+    lm_studio: LMStudioBackendSettings = Field(default_factory=LMStudioBackendSettings)
+    vllm: VLLMBackendSettings = Field(default_factory=VLLMBackendSettings)
+    gemma: GemmaBackendSettings = Field(default_factory=GemmaBackendSettings)
+
+    # V3 Phase 7 — process-wide VLM queue-depth gate. ``0`` disables.
+    # Production deployments should set this to a value matching the
+    # backend's batch-size headroom so a thundering herd of requests
+    # cannot drive the GPU into thrash.
+    max_concurrent_requests: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Maximum concurrent VLM requests per Python process. "
+            "0 = unbounded (legacy default). Set to N>0 to gate "
+            "concurrency at the application level (in addition to "
+            "any backend-side limits like vLLM's --max-num-batched-tokens)."
+        ),
+    )
+
+    @field_validator("backend", mode="before")
+    @classmethod
+    def _coerce_backend(cls, v: Any) -> Any:
+        # Allow case-insensitive env values like ``VLM_BACKEND=LM_Studio``.
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _coerce_mode(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+
 class LMStudioSettings(BaseSettings):
     """LM Studio VLM configuration settings."""
 
@@ -236,6 +499,19 @@ class Mem0Settings(BaseSettings):
         return path
 
 
+class ExtractionEngine(str, Enum):
+    """V3 Phase 2 — extraction-engine selector.
+
+    * ``LEGACY`` — single-VLM dual-pass (current shipping default).
+    * ``DUAL_VLM`` — heterogeneous dual-VLM (Qwen primary + Gemma
+      secondary), reconciled by ``HeterogeneousReconciler``. Behind a
+      flag until shadow-validated against legacy on the eval harness.
+    """
+
+    LEGACY = "legacy"
+    DUAL_VLM = "dual_vlm"
+
+
 class ExtractionSettings(BaseSettings):
     """Extraction pipeline configuration settings."""
 
@@ -268,6 +544,88 @@ class ExtractionSettings(BaseSettings):
         default=5,
         description="Batch size for processing multiple pages",
     )
+
+    # === V3 Phase 2 — heterogeneous dual-VLM ===
+    engine: ExtractionEngine = Field(
+        default=ExtractionEngine.LEGACY,
+        description=(
+            "Extraction engine. legacy = current single-VLM dual-pass; "
+            "dual_vlm = Qwen primary + Gemma secondary + HeterogeneousReconciler. "
+            "dual_vlm requires either VLM_BACKEND=vllm with both endpoints up, "
+            "or VLM_BACKEND=lm_studio with VLM_LM_STUDIO_DUAL_MODE=dual_instance."
+        ),
+    )
+    # Reconciler tiebreaker thresholds. The defaults track MVP/EXTRACTION.md §4
+    # and the eval-harness Day 1 baseline.
+    reconciler_bbox_iou_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = Field(
+        default=0.4,
+        description=(
+            "Minimum IoU for Pass 1 value to be considered inside Pass 2's "
+            "reported bbox region during reconciler tiebreak step 2."
+        ),
+    )
+    reconciler_history_similarity_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = Field(
+        default=0.88,
+        description=(
+            "Minimum FAISS similarity for field-history match to win during "
+            "reconciler tiebreak step 5."
+        ),
+    )
+    bbox_roundtrip_low_conf_band: Annotated[
+        tuple[float, float], Field(...)
+    ] = Field(
+        default=(0.5, 0.85),
+        description=(
+            "Dual-pass similarity band that triggers a bbox round-trip "
+            "verification call for the disputed field."
+        ),
+    )
+
+    # === V3 Phase 3 — Critic agent ===
+    critic_enabled: bool = Field(
+        default=False,
+        description=(
+            "Enable the Critic agent (V3 Phase 3). Independent VLM call "
+            "after validation that audits whether each extracted value "
+            "is actually visible in the page. Adds ~3-5s per document. "
+            "Strongest signal in dual-VLM mode (family-rotated against "
+            "the consensus of Pass 1 / Pass 2)."
+        ),
+    )
+    critic_min_trust_score: Annotated[float, Field(ge=0.0, le=1.0)] = Field(
+        default=0.50,
+        description=(
+            "Minimum Critic trust_score below which the document routes "
+            "to human review even if individual concerns aren't errors."
+        ),
+    )
+    critic_combiner_weights: Annotated[
+        tuple[float, float, float], Field(...)
+    ] = Field(
+        default=(0.50, 0.30, 0.20),
+        description=(
+            "Weights for the final-confidence combiner: "
+            "(dual_pass_agreement, critic_trust, 1 - modality_penalty). "
+            "Must sum to 1.0."
+        ),
+    )
+
+    @field_validator("engine", mode="before")
+    @classmethod
+    def _coerce_engine(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            return v.lower()
+        return v
+
+    @field_validator("critic_combiner_weights", mode="after")
+    @classmethod
+    def _validate_combiner_weights(cls, v: tuple[float, float, float]) -> tuple[float, float, float]:
+        total = sum(v)
+        if abs(total - 1.0) > 1e-6:
+            raise ValueError(
+                f"critic_combiner_weights must sum to 1.0, got {total} for {v!r}"
+            )
+        return v
 
 
 class ValidationSettings(BaseSettings):
@@ -353,6 +711,44 @@ class APISettings(BaseSettings):
     cors_origins: list[str] = Field(
         default=["http://localhost:8501"],
         description="Allowed CORS origins",
+    )
+    auth_enabled: bool = Field(
+        default=False,
+        description=(
+            "V3 Phase 8 — install AuthenticationMiddleware. Defaults False "
+            "for dev/test convenience. In production environments the "
+            "Settings model_validator refuses to boot with this False "
+            "unless ``AUTH_BYPASS_ACK`` is explicitly acknowledged."
+        ),
+    )
+    multi_tenant_enabled: bool = Field(
+        default=False,
+        description=(
+            "V3 Phase 8 — when True, install TenantResolverMiddleware "
+            "and gate per-tenant FAISS / rate-limit / checkpoint paths. "
+            "Single-tenant deployments keep this False (every request "
+            "lands on the ``default`` tenant)."
+        ),
+    )
+    default_tenant_id: str = Field(
+        default="default",
+        description=(
+            "Tenant id used when multi-tenancy is disabled OR when an "
+            "authenticated request has no tenant_id claim and isn't an "
+            "admin override."
+        ),
+    )
+    auth_refresh_query_param_legacy: bool = Field(
+        default=False,
+        description=(
+            "V3 Phase 8.5-A1 — legacy compatibility flag. When True, "
+            "POST /auth/refresh continues to accept the refresh token "
+            "via the ``?refresh_token=...`` query string in addition to "
+            "the JSON body and HttpOnly cookie. Default False: query "
+            "strings flow into audit logs and access logs verbatim, so "
+            "the new body-only path is fail-closed. Set to True only "
+            "for one release while migrating unmigrated API clients."
+        ),
     )
 
 
@@ -567,6 +963,97 @@ class DatabaseSettings(BaseSettings):
     echo: bool = Field(
         default=False,
         description="Enable SQL echo for debugging",
+    )
+
+
+class ProvenanceSettings(BaseSettings):
+    """V3 Phase 4 — provenance threading configuration.
+
+    The migration from bare-scalar ``merged_extraction`` to
+    ``FieldValue``-wrapped ``merged_extraction_v2`` is staged via the
+    ``enforce_field_value_wrapper`` flag:
+
+    * ``False`` (default) — the reconciler dual-writes both shapes;
+      legacy exporters keep working unchanged; provenance-aware
+      exporters opt in by reading ``merged_extraction_v2`` first.
+    * ``True`` — the reconciler only writes the wrapper shape; bare
+      scalars in ``merged_extraction`` raise ``ProvenanceMissingError``
+      when an exporter tries to read them via ``unwrap_value(strict=True)``.
+
+    Flip the flag tenant-by-tenant during rollout. Once every consumer
+    is on the wrapper path, set the global default to ``True`` and
+    delete the dual-write code in a follow-up cleanup PR.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="PROVENANCE_",
+        extra="ignore",
+    )
+
+    enforce_field_value_wrapper: bool = Field(
+        default=False,
+        description=(
+            "When True, the reconciler stops writing the legacy "
+            "``merged_extraction`` (scalar dict) shape and writes only "
+            "``merged_extraction_v2`` (FieldValue dict). Exporters that "
+            "haven't migrated will see empty merged_extraction and "
+            "must use ``unwrap_value()`` on the v2 path."
+        ),
+    )
+    fhir_extension_url: str = Field(
+        default="urn:veridoc:provenance:1.0",
+        description=(
+            "FHIR R4 extension URL stamped on every emitted resource. "
+            "Use ``urn:chartsend:provenance:1.0`` only inside the "
+            "Medical-RCM profile's C-CDA emitter (see PROVENANCE.md §5)."
+        ),
+    )
+
+
+class ProfileSettings(BaseSettings):
+    """V3 Phase 5 — document profile configuration.
+
+    A *profile* is the orthogonal axis to *modality*: profiles describe
+    **what kind of document** it is (generic, medical-RCM, finance, …),
+    modalities describe **how it looks** (printed, fax, handwritten, …).
+
+    Profile detection runs as a pure-text post-step in the analyzer
+    (no extra VLM call). When ``detection_enabled=True`` and the
+    detection score clears the profile's ``confidence_floor``, the
+    selected profile drives:
+
+    * Prompt fragment injection (medical-RCM gets CPT/ICD reminders).
+    * Schema overlay (medical-RCM re-introduces healthcare fields).
+    * Validator pack mode (blocking vs advisory per profile).
+    * Available export emitters (C-CDA / X12N 275 only on medical-RCM).
+
+    The setting is on by default. Operators can disable it to force
+    every doc to ``generic-document`` while debugging a misdetection.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="PROFILE_",
+        extra="ignore",
+    )
+
+    detection_enabled: bool = Field(
+        default=True,
+        description=(
+            "Enable profile auto-detection in the analyzer. When False, "
+            "every document falls back to 'generic-document'."
+        ),
+    )
+    default_profile: str = Field(
+        default="generic-document",
+        description="Profile name used when detection is disabled or fails.",
+    )
+    apply_overlay: bool = Field(
+        default=True,
+        description=(
+            "When True, the analyzer applies the detected profile's "
+            "schema overlay (e.g. medical-RCM re-adds HEALTHCARE_FIELDS) "
+            "before extraction. Disable to test base schemas in isolation."
+        ),
     )
 
 
@@ -824,6 +1311,10 @@ class Settings(BaseSettings):
     )
 
     # Component settings
+    # VLM backend abstraction (Phase 0) — selects between LM Studio and vLLM,
+    # and carries dual-instance settings. ``lm_studio`` (legacy) continues
+    # to drive default URL/model when ``vlm.lm_studio.primary_url`` is blank.
+    vlm: VLMSettings = Field(default_factory=VLMSettings)
     lm_studio: LMStudioSettings = Field(default_factory=LMStudioSettings)
     pdf: PDFProcessingSettings = Field(default_factory=PDFProcessingSettings)
     image: ImageEnhancementSettings = Field(default_factory=ImageEnhancementSettings)
@@ -841,6 +1332,8 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     calibration: CalibrationSettings = Field(default_factory=CalibrationSettings)
+    provenance: ProvenanceSettings = Field(default_factory=ProvenanceSettings)
+    profile: ProfileSettings = Field(default_factory=ProfileSettings)
     model_routing: ModelRoutingSettings = Field(default_factory=ModelRoutingSettings)
     phi: PHISettings = Field(default_factory=PHISettings)
     observability: ObservabilitySettings = Field(default_factory=ObservabilitySettings)
@@ -911,6 +1404,51 @@ class Settings(BaseSettings):
             # Ensure debug is disabled
             if self.debug:
                 raise ValueError("DEBUG must be False in production")
+
+            # V3 Phase 8 — Auth fail-closed in production.
+            # ``api.auth_enabled`` defaults False for dev convenience.
+            # Production refuses to boot with auth off unless the
+            # operator has explicitly acknowledged the bypass via
+            # ``AUTH_BYPASS_ACK``. Mirrors the PHI bypass pattern so
+            # auth-off deployments are deliberate decisions logged in
+            # config, not forgotten flags.
+            if not self.api.auth_enabled:
+                import os as _os
+
+                auth_ack = _os.environ.get("AUTH_BYPASS_ACK", "").strip().lower()
+                if auth_ack not in {"1", "true", "yes", "acknowledged"}:
+                    raise ValueError(
+                        "API authentication is disabled in production "
+                        "(API_AUTH_ENABLED=false). Set "
+                        "API_AUTH_ENABLED=true OR set "
+                        "AUTH_BYPASS_ACK=acknowledged to confirm this "
+                        "deployment intentionally ships unauthenticated. "
+                        "Refusing to boot."
+                    )
+
+            # V3 Phase 7 — PHI mode production enforcement.
+            # When environment == production, we refuse to boot with PHI
+            # mode disabled unless the operator has explicitly
+            # acknowledged the bypass via the ``PHI_BYPASS_ACK`` env
+            # var. This protects against the most common production
+            # incident: a config oversight that ships PHI in the clear.
+            #
+            # Rationale: HIPAA exposure from disabled PHI redaction is
+            # a high-blast-radius mistake; making the bypass require
+            # an explicit ack ensures it's a deliberate decision logged
+            # in deployment config, not a forgotten flag.
+            if not self.phi.enabled:
+                import os as _os
+
+                bypass_ack = _os.environ.get("PHI_BYPASS_ACK", "").strip().lower()
+                if bypass_ack not in {"1", "true", "yes", "acknowledged"}:
+                    raise ValueError(
+                        "PHI redaction is disabled in production "
+                        "(PHI_ENABLED=false). Set PHI_ENABLED=true OR "
+                        "set PHI_BYPASS_ACK=acknowledged to confirm "
+                        "this deployment intentionally ships without "
+                        "PHI redaction. Refusing to boot."
+                    )
 
         return self
 

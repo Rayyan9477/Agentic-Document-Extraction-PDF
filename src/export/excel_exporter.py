@@ -45,6 +45,29 @@ class SheetType(str, Enum):
     PAGE_DETAILS = "page_details"
     RAW_PASSES = "raw_passes"
     PIPELINE = "pipeline"
+    # V3 Phase 4 — per-row provenance sheet. Surfaces the FieldValue
+    # ``_provenance`` shape (page, bbox, extraction_path,
+    # agent_signatures, confidence, vlm_model_id, mem0_match) as a
+    # flat sheet keyed by ``field_path``. The data sheet's
+    # ``_provenance_ref`` column points back at this sheet's rows so
+    # the data sheet stays readable. Only emitted when
+    # ``ExcelExportConfig.include_provenance`` is true (auto-true for
+    # DETAILED / TECHNICAL styles via :meth:`ExcelExportConfig.from_style`).
+    PROVENANCE = "provenance"
+
+
+class ExcelStyle(str, Enum):
+    """Excel export style — mirrors :class:`MarkdownStyle`.
+
+    Determines which sheets ship by default and whether the
+    provenance sheet is included. See
+    :meth:`ExcelExportConfig.from_style` for the mapping.
+    """
+
+    MINIMAL = "minimal"  # Data sheet only
+    SUMMARY = "summary"  # Data + metadata
+    DETAILED = "detailed"  # Standard 5 sheets + provenance
+    TECHNICAL = "technical"  # All sheets + raw passes + provenance
 
 
 @dataclass(slots=True)
@@ -117,6 +140,74 @@ class ExcelExportConfig:
     default_column_width: int = 18
     header_row_height: int = 25
     data_row_height: int = 20
+    # V3 Phase 4 — per-row provenance. When ``True`` the exporter:
+    # (1) appends a ``Provenance`` worksheet listing every leaf's
+    #     ``Provenance`` row (page, bbox, extraction_path, ...), and
+    # (2) adds a ``_provenance_ref`` column to the data sheet whose
+    #     value is the ``field_path`` key matching the provenance row.
+    # Default is ``False`` to preserve the legacy 5-sheet shape that
+    # existing callers and tests rely on. :meth:`from_style` flips
+    # this on for DETAILED / TECHNICAL.
+    include_provenance: bool = False
+
+    @classmethod
+    def from_style(
+        cls,
+        style: "ExcelStyle",
+        *,
+        include_provenance: bool | None = None,
+        **overrides: Any,
+    ) -> "ExcelExportConfig":
+        """Construct a config from an :class:`ExcelStyle`.
+
+        Mapping (matches the master plan Appendix D contract):
+
+        * ``MINIMAL``   → ``[DATA]`` only, provenance OFF.
+        * ``SUMMARY``   → ``[DATA, METADATA]``, provenance OFF.
+        * ``DETAILED``  → 5-sheet legacy roster + ``PROVENANCE``;
+          provenance ON.
+        * ``TECHNICAL`` → all sheets including ``RAW_PASSES`` and
+          ``PAGE_DETAILS`` + ``PROVENANCE``; provenance ON.
+
+        ``include_provenance`` overrides the style default. MINIMAL /
+        SUMMARY callers must opt in explicitly per the master plan
+        ("only include it if explicitly opted in").
+
+        Any keyword in ``overrides`` (e.g. ``mask_phi=True``) is
+        forwarded to the constructor unchanged.
+        """
+        roster_by_style: dict[ExcelStyle, list[SheetConfig]] = {
+            ExcelStyle.MINIMAL: [
+                SheetConfig(SheetType.DATA, "Extracted Data"),
+            ],
+            ExcelStyle.SUMMARY: [
+                SheetConfig(SheetType.DATA, "Extracted Data"),
+                SheetConfig(SheetType.METADATA, "Processing Metadata"),
+            ],
+            ExcelStyle.DETAILED: [
+                SheetConfig(SheetType.DATA, "Extracted Data"),
+                SheetConfig(SheetType.METADATA, "Processing Metadata"),
+                SheetConfig(SheetType.VALIDATION, "Validation Results"),
+                SheetConfig(SheetType.AUDIT, "Audit Trail"),
+                SheetConfig(SheetType.PIPELINE, "Pipeline Intelligence"),
+            ],
+            ExcelStyle.TECHNICAL: [
+                SheetConfig(SheetType.DATA, "Extracted Data"),
+                SheetConfig(SheetType.METADATA, "Processing Metadata"),
+                SheetConfig(SheetType.VALIDATION, "Validation Results"),
+                SheetConfig(SheetType.AUDIT, "Audit Trail"),
+                SheetConfig(SheetType.PIPELINE, "Pipeline Intelligence"),
+                SheetConfig(SheetType.PAGE_DETAILS, "Page Details"),
+                SheetConfig(SheetType.RAW_PASSES, "Raw Passes"),
+            ],
+        }
+        sheets = list(roster_by_style[style])
+        # Default provenance behaviour per style.
+        prov_default = style in (ExcelStyle.DETAILED, ExcelStyle.TECHNICAL)
+        prov_on = prov_default if include_provenance is None else include_provenance
+        if prov_on:
+            sheets.append(SheetConfig(SheetType.PROVENANCE, "Provenance"))
+        return cls(sheets=sheets, include_provenance=prov_on, **overrides)
 
 
 class ExcelStyler:
@@ -302,6 +393,7 @@ class ExcelExporter:
             SheetType.PAGE_DETAILS: self._build_page_details_sheet,
             SheetType.RAW_PASSES: self._build_raw_passes_sheet,
             SheetType.PIPELINE: self._build_pipeline_sheet,
+            SheetType.PROVENANCE: self._build_provenance_sheet,
         }
 
         builder = builders.get(config.sheet_type)
@@ -334,6 +426,13 @@ class ExcelExporter:
             "Bbox W",
             "Bbox H",
         ]
+        # V3 Phase 4 — when provenance is enabled the data sheet
+        # carries a back-reference into the Provenance sheet (matched
+        # by ``field_path``). We keep the bbox columns above for
+        # legacy callers who scrape coordinates from the data sheet
+        # directly; the new column is purely additive.
+        if self.config.include_provenance:
+            headers.append("_provenance_ref")
         self._write_header_row(worksheet, headers)
 
         # Calculate column index dynamically to avoid hardcoding
@@ -342,6 +441,13 @@ class ExcelExporter:
 
         merged = state.get("merged_extraction", {})
         field_meta = state.get("field_metadata", {})
+        # Field paths covered by the provenance sheet (merged_extraction_v2
+        # is the FieldValue-shaped twin; the provenance sheet keys on
+        # those names). Empty when v2 isn't populated.
+        merged_v2 = state.get("merged_extraction_v2") or {}
+        provenance_field_paths: set[str] = (
+            set(merged_v2.keys()) if isinstance(merged_v2, dict) else set()
+        )
 
         row = 2
         for field_name, field_data in merged.items():
@@ -383,6 +489,14 @@ class ExcelExporter:
                 bbox_w,
                 bbox_h,
             ]
+            if self.config.include_provenance:
+                # Reference points to the Provenance sheet's
+                # ``field_path`` cell. Only emit when v2 actually
+                # carries provenance for the field; otherwise leave
+                # blank so consumers don't chase a dead link.
+                row_data.append(
+                    field_name if field_name in provenance_field_paths else ""
+                )
 
             self._write_data_row(worksheet, row, row_data)
 
@@ -743,6 +857,113 @@ class ExcelExporter:
         for row_idx, (category, prop, value) in enumerate(rows, start=2):
             row_data = [category, prop, str(value) if value is not None else ""]
             self._write_data_row(worksheet, row_idx, row_data)
+
+        self._auto_size_columns(worksheet)
+
+    def _build_provenance_sheet(
+        self,
+        worksheet: Worksheet,
+        state: ExtractionState,
+    ) -> None:
+        """V3 Phase 4 — build the per-row provenance worksheet.
+
+        Mirrors :meth:`JSONExporter._build_provenance_block`: walks
+        ``merged_extraction_v2`` (the FieldValue-shaped twin), pulls
+        the ``Provenance`` off each leaf via :func:`unwrap_provenance`,
+        and writes one row per field. The data sheet's
+        ``_provenance_ref`` column carries the matching ``field_path``
+        key so reviewers can cross-reference without baking bbox
+        coordinates into every data row.
+
+        Empty (header only) when ``merged_extraction_v2`` isn't
+        populated — same back-compat behaviour as the JSON exporter's
+        provenance block.
+        """
+        from src.pipeline.provenance import unwrap_provenance
+
+        headers = [
+            "field_path",
+            "page",
+            "bbox_x",
+            "bbox_y",
+            "bbox_width",
+            "bbox_height",
+            "source_block_id",
+            "extraction_path",
+            "agent_signatures",
+            "confidence",
+            "vlm_model_id",
+            "mem0_match",
+        ]
+        self._write_header_row(worksheet, headers)
+
+        merged_v2 = state.get("merged_extraction_v2") or {}
+        if not isinstance(merged_v2, dict) or not merged_v2:
+            self._auto_size_columns(worksheet)
+            return
+
+        confidence_column_idx = headers.index("confidence") + 1
+
+        row = 2
+        for field_name, wrapper in merged_v2.items():
+            if field_name in self.config.phi_fields and self.config.mask_phi:
+                # PHI redaction policy: keep the structured provenance
+                # (page/bbox are about the extraction act, not the
+                # patient) but redact the field_path so the sheet can
+                # be shared with non-privileged reviewers without
+                # leaking the field name's PHI association. See
+                # PHIFieldValue docstring for the broader principle.
+                field_path_cell: Any = self.config.phi_mask_pattern
+            else:
+                field_path_cell = field_name
+
+            prov = unwrap_provenance(wrapper)
+            if prov is None:
+                # No provenance available — emit a placeholder row so
+                # the data-sheet's _provenance_ref doesn't dangle.
+                row_data = [field_path_cell, "", "", "", "", "", "", "", "", "", "", ""]
+                self._write_data_row(worksheet, row, row_data)
+                row += 1
+                continue
+
+            serial = prov.to_serialisable()
+            bbox = serial.get("bbox") or {}
+            bbox_x = bbox.get("x", "") if isinstance(bbox, dict) else ""
+            bbox_y = bbox.get("y", "") if isinstance(bbox, dict) else ""
+            bbox_w = bbox.get("width", "") if isinstance(bbox, dict) else ""
+            bbox_h = bbox.get("height", "") if isinstance(bbox, dict) else ""
+
+            # Lists get joined with "; " so the cell renders cleanly
+            # in Excel while preserving order. Reviewers who need the
+            # structured form can read the JSON export instead.
+            ext_path = serial.get("extraction_path") or []
+            agent_sigs = serial.get("agent_signatures") or []
+
+            confidence = float(serial.get("confidence") or 0.0)
+
+            row_data = [
+                field_path_cell,
+                serial.get("page", ""),
+                bbox_x,
+                bbox_y,
+                bbox_w,
+                bbox_h,
+                serial.get("source_block_id", ""),
+                "; ".join(str(s) for s in ext_path),
+                "; ".join(str(s) for s in agent_sigs),
+                confidence,
+                serial.get("vlm_model_id", ""),
+                serial.get("mem0_match") or "",
+            ]
+            self._write_data_row(worksheet, row, row_data)
+
+            if self.config.include_confidence_colors:
+                self._styler.apply_confidence_color(
+                    worksheet.cell(row=row, column=confidence_column_idx),
+                    confidence,
+                )
+
+            row += 1
 
         self._auto_size_columns(worksheet)
 

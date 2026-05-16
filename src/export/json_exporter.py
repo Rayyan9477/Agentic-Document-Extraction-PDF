@@ -123,27 +123,56 @@ class JSONExporter:
             processing_id=state.get("processing_id", ""),
         )
 
-        # Build export based on format
-        if self.config.format == ExportFormat.MINIMAL:
-            result = self._build_minimal_export(state)
-        elif self.config.format == ExportFormat.STANDARD:
-            result = self._build_standard_export(state)
-        elif self.config.format == ExportFormat.DETAILED:
-            result = self._build_detailed_export(state)
-        elif self.config.format == ExportFormat.FHIR_COMPATIBLE:
-            result = self._build_fhir_export(state)
-        elif self.config.format == ExportFormat.DATAFRAME_FLAT:
-            result = self._build_dataframe_flat_export(state)
-        else:
-            result = self._build_standard_export(state)
+        import time
 
-        # Apply PHI masking if enabled
-        if self.config.mask_phi:
-            result = self._apply_phi_masking(result)
+        export_start = time.perf_counter()
+        success = True
+        result: dict[str, Any] = {}
 
-        # Write to file if path provided
-        if output_path:
-            self._write_to_file(result, Path(output_path))
+        try:
+            # Build export based on format
+            if self.config.format == ExportFormat.MINIMAL:
+                result = self._build_minimal_export(state)
+            elif self.config.format == ExportFormat.STANDARD:
+                result = self._build_standard_export(state)
+            elif self.config.format == ExportFormat.DETAILED:
+                result = self._build_detailed_export(state)
+            elif self.config.format == ExportFormat.FHIR_COMPATIBLE:
+                result = self._build_fhir_export(state)
+            elif self.config.format == ExportFormat.DATAFRAME_FLAT:
+                result = self._build_dataframe_flat_export(state)
+            else:
+                result = self._build_standard_export(state)
+
+            # Apply PHI masking if enabled
+            if self.config.mask_phi:
+                result = self._apply_phi_masking(result)
+
+            # Write to file if path provided
+            if output_path:
+                self._write_to_file(result, Path(output_path))
+        except Exception:
+            success = False
+            raise
+        finally:
+            duration_ms = (time.perf_counter() - export_start) * 1000.0
+            # V3 Phase 6 — emit canonical export_completed event.
+            try:
+                from src.monitoring.observability import emit_export_event
+
+                emit_export_event(
+                    exporter="json",
+                    style=self.config.format.value,
+                    record_count=(
+                        len(result.get("data", {})) if success else 0
+                    ),
+                    success=success,
+                    duration_ms=duration_ms,
+                    profile=state.get("profile"),
+                    document_type=state.get("document_type"),
+                )
+            except Exception:  # pragma: no cover - defensive
+                pass
 
         self._logger.debug(
             "json_export_complete",
@@ -190,6 +219,40 @@ class JSONExporter:
         if pipeline:
             result["pipeline"] = pipeline
 
+        # V3 Phase 4 — provenance block. Surfaces the FieldValue
+        # ``_provenance`` shape in a flat top-level map keyed by field
+        # name. Consumers that don't want to walk ``data`` for the
+        # underscore-prefixed keys can read this map instead.
+        provenance_block = self._build_provenance_block(state)
+        if provenance_block:
+            result["provenance"] = provenance_block
+
+        return result
+
+    def _build_provenance_block(
+        self, state: ExtractionState
+    ) -> dict[str, dict[str, Any]]:
+        """V3 Phase 4 — build the top-level provenance map.
+
+        Reads ``merged_extraction_v2`` (the FieldValue-shaped twin)
+        and emits a flat ``{field_name: {page, bbox, confidence,
+        extraction_path, agent_signatures, vlm_model_id, mem0_match}}``
+        dict. Empty when v2 isn't populated (legacy path).
+        """
+        merged_v2 = state.get("merged_extraction_v2") or {}
+        if not isinstance(merged_v2, dict) or not merged_v2:
+            return {}
+
+        from src.pipeline.provenance import unwrap_provenance
+
+        result: dict[str, dict[str, Any]] = {}
+        for field_name, wrapper in merged_v2.items():
+            if field_name in self.config.exclude_fields:
+                continue
+            prov = unwrap_provenance(wrapper)
+            if prov is None:
+                continue
+            result[field_name] = prov.to_serialisable()
         return result
 
     def _build_detailed_export(self, state: ExtractionState) -> dict[str, Any]:
@@ -240,20 +303,27 @@ class JSONExporter:
         for files saved as ``json.dump(result["rows"], f)``,
         ``pandas.read_json(path)``.
         """
+        from src.pipeline.provenance import unwrap_provenance, unwrap_value
+
         merged = state.get("merged_extraction", {}) or {}
+        merged_v2 = state.get("merged_extraction_v2", {}) or {}
         field_metadata = state.get("field_metadata", {}) or {}
         phi_redacted = set(state.get("phi_redacted_fields", []) or [])
         record_id = state.get("processing_id", "rec")
 
+        # V3 Phase 4: prefer the FieldValue-shaped twin when populated.
+        source = merged_v2 if merged_v2 else merged
+
         rows: list[dict[str, Any]] = []
-        for field_name, field_data in merged.items():
+        for field_name, field_data in source.items():
             if field_name in self.config.exclude_fields:
                 continue
 
             # Unwrap the {value, confidence, human_corrected, ...} envelope
             # if present; otherwise treat field_data itself as the value.
+            prov = unwrap_provenance(field_data)
             if isinstance(field_data, dict) and "value" in field_data:
-                value = field_data.get("value")
+                value = unwrap_value(field_data)
                 inline_confidence = field_data.get("confidence")
                 human_corrected = bool(field_data.get("human_corrected", False))
             else:
@@ -267,7 +337,18 @@ class JSONExporter:
                 if isinstance(meta, dict) and "confidence" in meta
                 else inline_confidence
             )
-            bbox = meta.get("bbox") if isinstance(meta, dict) else None
+            # V3 Phase 4: prefer the bbox carried by the canonical
+            # ``Provenance`` (when v2 is populated). Falls back to the
+            # legacy ``field_metadata.bbox`` for backwards compat.
+            bbox = None
+            if prov is not None and prov.bbox is not None:
+                bbox = (
+                    prov.bbox.to_dict()
+                    if hasattr(prov.bbox, "to_dict")
+                    else prov.bbox
+                )
+            else:
+                bbox = meta.get("bbox") if isinstance(meta, dict) else None
 
             row: dict[str, Any] = {
                 "record_id": record_id,
@@ -288,6 +369,22 @@ class JSONExporter:
                 row["bbox_y"] = None
                 row["bbox_w"] = None
                 row["bbox_h"] = None
+
+            # V3 Phase 4 — surface provenance lineage as flat columns
+            # so the resulting DataFrame is queryable via simple boolean
+            # filters (e.g. ``df[df.tiebreaker == "bbox_overlap"]``).
+            if prov is not None:
+                row["extraction_path"] = ",".join(prov.extraction_path)
+                row["agent_signatures"] = ",".join(prov.agent_signatures)
+                row["vlm_model_id"] = prov.vlm_model_id
+                row["mem0_match"] = prov.mem0_match
+                row["source_block_id"] = prov.source_block_id
+            else:
+                row["extraction_path"] = ""
+                row["agent_signatures"] = ""
+                row["vlm_model_id"] = ""
+                row["mem0_match"] = None
+                row["source_block_id"] = ""
 
             if field_name in phi_redacted:
                 row["redacted_value"] = value
@@ -421,16 +518,39 @@ class JSONExporter:
         return pipeline
 
     def _extract_values(self, state: ExtractionState) -> dict[str, Any]:
-        """Extract field values from state."""
-        merged = state.get("merged_extraction", {})
+        """Extract field values from state.
+
+        V3 Phase 4: when ``merged_extraction_v2`` is populated (the
+        FieldValue-shaped twin from the dual-write reconciler), prefer
+        it. ``unwrap_value`` handles both wrapper-dict and bare-scalar
+        legacy paths transparently so this path is always safe to take.
+        Falls back to ``merged_extraction`` when v2 isn't populated
+        (legacy single-VLM extractor, or ``enforce_field_value_wrapper=False``
+        AND no dual-VLM reconciler ran).
+        """
+        from src.pipeline.provenance import unwrap_value
+
+        merged_v2 = state.get("merged_extraction_v2") or {}
+        merged = state.get("merged_extraction", {}) or {}
+        source = merged_v2 if merged_v2 else merged
         values: dict[str, Any] = {}
 
-        for field_name, field_data in merged.items():
+        for field_name, field_data in source.items():
             if field_name in self.config.exclude_fields:
                 continue
 
+            # ``unwrap_value`` handles FieldValue wrappers, dict-shaped
+            # serialised wrappers, and bare scalars. Legacy
+            # ``merged_extraction`` entries that store ``{"value": ...}``
+            # without a provenance key are also unwrapped via the dict
+            # branch in ``unwrap_value``.
             if isinstance(field_data, dict):
-                values[field_name] = field_data.get("value")
+                if "value" in field_data and (
+                    "_provenance" in field_data or "provenance" in field_data
+                ):
+                    values[field_name] = unwrap_value(field_data)
+                else:
+                    values[field_name] = field_data.get("value")
             else:
                 values[field_name] = field_data
 

@@ -97,6 +97,7 @@ def export_fhir(
     *,
     document_type: str = "",
     processing_id: str | None = None,
+    provenance_map: dict[str, dict[str, Any]] | None = None,
 ) -> FHIRBundle:
     """Build a FHIR R4 ``Bundle`` from an extracted record.
 
@@ -108,6 +109,12 @@ def export_fhir(
             ``eob``). Used to choose which resources to build.
         processing_id: Unique identifier for the extraction run, used
             as the bundle ``id``. Auto-generated if omitted.
+        provenance_map: V3 Phase 4 — optional ``{field_name: Provenance.to_serialisable()}``
+            map. When provided, the bundle gains a ``meta.extension``
+            entry stamping the provenance namespace + per-field detail.
+            Bundle-level placement keeps the per-resource builders
+            unchanged; field-level extension within each resource is a
+            follow-up task tracked in ``docs/MVP/PROVENANCE.md``.
 
     Returns:
         ``FHIRBundle`` containing the JSON-serialisable bundle dict.
@@ -129,7 +136,7 @@ def export_fhir(
             resources.append(patient)
         resources.append(_build_document_reference(flat, processing_id=bundle_id))
 
-    bundle = {
+    bundle: dict[str, Any] = {
         "resourceType": "Bundle",
         "id": bundle_id,
         "type": "collection",
@@ -142,6 +149,12 @@ def export_fhir(
         ],
     }
 
+    # V3 Phase 4 — attach provenance at bundle level.
+    if provenance_map:
+        meta_block = _build_provenance_meta(provenance_map)
+        if meta_block:
+            bundle["meta"] = meta_block
+
     validated = _validate_with_fhir_resources(bundle) if _has_fhir_resources() else False
 
     return FHIRBundle(
@@ -150,6 +163,86 @@ def export_fhir(
         document_type=document_type or "unknown",
         resource_count=len(resources),
     )
+
+
+def _build_provenance_meta(
+    provenance_map: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """V3 Phase 4 — convert per-field provenance into a FHIR ``meta`` block.
+
+    The extension URL is ``urn:veridoc:provenance:1.0`` (configurable
+    via ``settings.provenance.fhir_extension_url``). Each field becomes
+    one nested ``extension`` entry with sub-extensions for page, bbox,
+    extraction_path, agent_signatures, confidence, vlm_model_id.
+
+    Returns ``None`` when ``provenance_map`` is empty so the bundle's
+    ``meta`` block stays absent rather than having a no-op extension.
+    """
+    if not provenance_map:
+        return None
+
+    try:
+        from src.config import get_settings
+
+        url = get_settings().provenance.fhir_extension_url
+    except Exception:
+        url = "urn:veridoc:provenance:1.0"
+
+    field_extensions: list[dict[str, Any]] = []
+    for field_name, prov in provenance_map.items():
+        if not isinstance(prov, dict):
+            continue
+        sub_exts: list[dict[str, Any]] = [
+            {"url": "fieldName", "valueString": field_name},
+            {"url": "page", "valueInteger": int(prov.get("page", 0))},
+            {
+                "url": "extractionPath",
+                "valueString": ",".join(prov.get("extraction_path") or []),
+            },
+            {
+                "url": "agentSignatures",
+                "valueString": ",".join(prov.get("agent_signatures") or []),
+            },
+            {
+                "url": "confidence",
+                "valueDecimal": float(prov.get("confidence", 0.0)),
+            },
+            {
+                "url": "vlmModelId",
+                "valueString": prov.get("vlm_model_id", "") or "",
+            },
+        ]
+        bbox = prov.get("bbox")
+        if isinstance(bbox, dict):
+            x = bbox.get("x")
+            y = bbox.get("y")
+            w = bbox.get("width", bbox.get("w"))
+            h = bbox.get("height", bbox.get("h"))
+            if x is not None and y is not None and w is not None and h is not None:
+                sub_exts.append(
+                    {
+                        "url": "bbox",
+                        "valueString": f"{x:.4f},{y:.4f},{w:.4f},{h:.4f}",
+                    }
+                )
+        if prov.get("source_block_id"):
+            sub_exts.append(
+                {"url": "sourceBlockId", "valueString": prov["source_block_id"]}
+            )
+        mem0 = prov.get("mem0_match")
+        if mem0:
+            sub_exts.append({"url": "mem0Match", "valueString": mem0})
+
+        field_extensions.append(
+            {
+                "url": url,
+                "extension": sub_exts,
+            }
+        )
+
+    if not field_extensions:
+        return None
+    return {"extension": field_extensions}
 
 
 # ---------------------------------------------------------------------------
