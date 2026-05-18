@@ -374,6 +374,10 @@ def process_document_task(
     mask_phi: bool = False,
     priority: str = "normal",
     callback_url: str | None = None,
+    extraction_mode: str | None = None,
+    profile_override: str | None = None,
+    modality_override: list[str] | None = None,
+    phi_mode: bool | None = None,
 ) -> dict[str, Any]:
     """
     Process a single document asynchronously.
@@ -387,6 +391,11 @@ def process_document_task(
         mask_phi: Whether to mask PHI fields.
         priority: Processing priority (low/normal/high).
         callback_url: URL to call on completion/failure (webhook).
+        extraction_mode: Optional extraction mode (multi / single / auto).
+        profile_override: Phase K — explicit profile id. ``None`` = auto-detect.
+        modality_override: Phase 5 — explicit modality list. ``None`` /
+            empty = auto-detect.
+        phi_mode: Per-task PHI override. ``None`` = follow settings.
 
     Returns:
         TaskResult as dictionary.
@@ -429,11 +438,15 @@ def process_document_task(
         # Import pipeline here to avoid circular imports
         from src.pipeline.runner import PipelineRunner
 
-        # Run the extraction pipeline
+        # Run the extraction pipeline. Phase K — thread profile and
+        # modality overrides through so Healthcare / General modes from
+        # the upload UI actually influence the analyzer's choice.
         runner = PipelineRunner(enable_checkpointing=False)
         pipeline_result = runner.extract_from_pdf(
             pdf_path=pdf_path,
             custom_schema=None,
+            profile_override=profile_override,
+            modality_override=modality_override or None,
         )
 
         result.processing_id = pipeline_result.get("processing_id", "")

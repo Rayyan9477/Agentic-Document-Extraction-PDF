@@ -114,6 +114,9 @@ class PipelineRunner:
         pdf_path: str | Path,
         custom_schema: dict[str, Any] | None = None,
         thread_id: str | None = None,
+        *,
+        profile_override: str | None = None,
+        modality_override: list[str] | None = None,
     ) -> ExtractionState:
         """
         Extract data from a PDF file.
@@ -122,6 +125,11 @@ class PipelineRunner:
             pdf_path: Path to the PDF file.
             custom_schema: Optional custom extraction schema.
             thread_id: Optional thread ID for checkpointing.
+            profile_override: Phase K — explicit profile id (e.g.
+                ``"medical-rcm"``). When set, the analyzer bypasses
+                auto-detection. ``None`` = auto-detect.
+            modality_override: Phase 5 — explicit modality list. Empty
+                or ``None`` = auto-detect.
 
         Returns:
             Final extraction state with results.
@@ -135,7 +143,12 @@ class PipelineRunner:
         if not pdf_path.exists():
             raise FileNotFoundError(f"PDF file not found: {pdf_path}")
 
-        self._logger.info("starting_extraction", pdf_path=str(pdf_path))
+        self._logger.info(
+            "starting_extraction",
+            pdf_path=str(pdf_path),
+            profile_override=profile_override,
+            modality_override=modality_override or [],
+        )
 
         # Generate IDs
         processing_id = generate_processing_id()
@@ -147,6 +160,8 @@ class PipelineRunner:
             pdf_path=str(pdf_path),
             custom_schema=custom_schema,
             processing_id=processing_id,
+            profile_override=profile_override,
+            modality_override=modality_override,
         )
 
         # Ensure workflow is ready

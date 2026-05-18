@@ -709,7 +709,12 @@ class APISettings(BaseSettings):
         description="Enable auto-reload for development",
     )
     cors_origins: list[str] = Field(
-        default=["http://localhost:8501"],
+        default=[
+            "http://localhost:8501",
+            # Phase K — Next.js dev / production server ports.
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
         description="Allowed CORS origins",
     )
     auth_enabled: bool = Field(
@@ -748,6 +753,26 @@ class APISettings(BaseSettings):
             "strings flow into audit logs and access logs verbatim, so "
             "the new body-only path is fail-closed. Set to True only "
             "for one release while migrating unmigrated API clients."
+        ),
+    )
+    export_receipt_signing_key: str = Field(
+        default="",
+        description=(
+            "Phase K — HMAC-SHA256 shared secret used to sign export "
+            "receipts (see src/export/signed_receipt.py). Empty = "
+            "receipts are minted but unsigned (still useful for offline "
+            "artefact-hash verification). Production deployments should "
+            "set this to a 32-byte hex string and rotate alongside the "
+            "audit-chain anchor key."
+        ),
+    )
+    export_receipt_signer_key_id: str = Field(
+        default="",
+        description=(
+            "Phase K — operator-chosen identifier for the receipt "
+            "signing key (e.g. ``'ops-2026-Q2'``). Stamped into every "
+            "receipt so key-rotation events can be traced post-hoc. "
+            "Empty = no key id field."
         ),
     )
 

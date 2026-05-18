@@ -311,6 +311,8 @@ def _run_single_record_sync(
     result = run_extraction_pipeline(
         pdf_path=request.pdf_path,
         schema_name=request.schema_name,
+        profile_override=request.profile_override,
+        modality_override=request.modality_override or None,
     )
 
     output_path = ""
@@ -475,6 +477,9 @@ async def upload_document(
     mask_phi: bool = Form(False),
     priority: str = Form("normal"),
     extraction_mode: ExtractionModeEnum = Form(ExtractionModeEnum.MULTI),
+    profile_override: str | None = Form(None),
+    modality_override: str | None = Form(None),
+    phi_mode: bool | None = Form(None),
 ) -> AsyncProcessResponse:
     """
     Upload and process a PDF document.
@@ -484,6 +489,13 @@ async def upload_document(
     - **export_format**: Output format (json/excel/both)
     - **mask_phi**: Whether to mask PHI fields in output
     - **priority**: Processing priority level
+    - **profile_override**: Phase K — explicit profile id (e.g.
+      ``"medical-rcm"`` for Healthcare mode, ``"generic-document"`` for
+      General mode). ``None`` lets the analyzer auto-detect.
+    - **modality_override**: JSON-encoded list of modality names
+      (``["fax", "handwritten"]``). Empty / missing = auto-detect.
+    - **phi_mode**: Override extraction-time PHI redaction. ``None`` =
+      use server default; ``true`` = force on; ``false`` = bypass.
 
     Returns:
         Task ID for async processing.
@@ -493,12 +505,28 @@ async def upload_document(
     """
     request_id = getattr(http_request.state, "request_id", "")
 
+    # Phase K — parse modality_override (sent as JSON-encoded list).
+    parsed_modality_override: list[str] = []
+    if modality_override:
+        try:
+            import json as _json
+            decoded = _json.loads(modality_override)
+            if isinstance(decoded, list):
+                parsed_modality_override = [str(m) for m in decoded if isinstance(m, str)]
+        except (ValueError, TypeError):
+            # Tolerate bad input — silently fall back to auto-detect rather
+            # than reject the upload over a malformed override.
+            parsed_modality_override = []
+
     logger.info(
         "document_upload_request",
         request_id=request_id,
         filename=file.filename,
         file_size=file.size,
         schema_name=schema_name,
+        profile_override=profile_override,
+        modality_override=parsed_modality_override or None,
+        phi_mode=phi_mode,
     )
 
     # Validate file type
@@ -570,6 +598,9 @@ async def upload_document(
             mask_phi=mask_phi,
             priority=priority,
             extraction_mode=extraction_mode.value,
+            profile_override=profile_override,
+            modality_override=parsed_modality_override,
+            phi_mode=phi_mode,
         )
 
         logger.info(
@@ -577,6 +608,7 @@ async def upload_document(
             request_id=request_id,
             task_id=task.id,
             temp_path=str(temp_file_path),
+            profile_override=profile_override,
         )
 
         return AsyncProcessResponse(

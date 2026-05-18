@@ -4,6 +4,20 @@ Multi-model routing for task-specific model selection.
 Routes VLM requests to the most suitable model based on task type.
 Supports Florence-2 for layout/detection tasks and Qwen3-VL for
 text-heavy extraction, with automatic fallback to the default model.
+
+Phase 0 (V3) extends this module with role-based routing on top of
+the existing task-based routing. ``ModelTask`` and ``route_for_agent``
+remain the public surface for legacy callers; ``VLMRole`` and
+``route_for_role`` are the new dual-VLM-friendly path consumed by the
+``VLMBackend`` abstraction in ``src/client/backends/``.
+
+Both axes coexist. ``ModelTask`` describes "what work is the model
+doing" (classification, layout analysis, field extraction). ``VLMRole``
+describes "which slot in the dual-VLM topology the call belongs to"
+(primary, secondary, critic, lite). They are orthogonal: an
+``extractor`` agent doing ``FIELD_EXTRACTION`` always runs as ``PRIMARY``
+on Pass 1 and as ``SECONDARY`` on Pass 2. The router lets call-sites
+ask either question.
 """
 
 from __future__ import annotations
@@ -12,6 +26,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from src.client.backends.protocol import VLMRole
 from src.config import get_logger
 
 
@@ -351,6 +366,10 @@ class ModelRouter:
             "component_detector": ModelTask.COMPONENT_DETECTION,
             "table_detector": ModelTask.TABLE_DETECTION,
             "extractor": ModelTask.FIELD_EXTRACTION,
+            "extractor_pass1": ModelTask.FIELD_EXTRACTION,
+            "extractor_pass2": ModelTask.FIELD_EXTRACTION,
+            "reconciler": ModelTask.VERIFICATION,
+            "critic": ModelTask.VERIFICATION,
             "validator": ModelTask.VERIFICATION,
             "schema_generator": ModelTask.SCHEMA_GENERATION,
             "schema_proposal": ModelTask.SCHEMA_GENERATION,
@@ -359,6 +378,61 @@ class ModelRouter:
 
         task = task_map.get(agent_name, ModelTask.GENERAL)
         return self.route(task)
+
+    # ------------------------------------------------------------------
+    # Role-based routing (Phase 0)
+    # ------------------------------------------------------------------
+
+    def role_for_agent(self, agent_name: str) -> VLMRole:
+        """Map an agent name to its default ``VLMRole``.
+
+        The mapping is conservative: every legacy agent maps to
+        ``PRIMARY`` so existing call-sites are unaffected. New Phase 2/3
+        agents (``extractor_pass2``, ``critic``) bind to their natural
+        roles. Operators can override per-agent role via ``ModelConfig``
+        in the future; today it's a static map.
+        """
+        role_map: dict[str, VLMRole] = {
+            "extractor_pass2": VLMRole.SECONDARY,
+            "critic": VLMRole.CRITIC,
+        }
+        return role_map.get(agent_name, VLMRole.PRIMARY)
+
+    def route_for_role(
+        self,
+        role: VLMRole,
+        *,
+        agent_name: str | None = None,
+    ) -> RoutingDecision:
+        """Resolve a role to a ``ModelConfig`` via task-based routing.
+
+        Bridges the role axis (``VLMRole``) to the existing task axis
+        (``ModelTask``) so a single ``ModelRouter`` instance keeps
+        serving both legacy and V3 call-sites.
+
+        Default mapping:
+            * ``PRIMARY`` / ``LITE`` → use the ``agent_name`` task
+              mapping (or ``GENERAL`` when no agent name is supplied).
+            * ``SECONDARY`` → ``FIELD_EXTRACTION`` (Pass 2 = auditor on
+              the same field-extraction problem).
+            * ``CRITIC`` → ``VERIFICATION`` (the critic is a verifier).
+
+        Args:
+            role: Logical VLM role.
+            agent_name: Optional caller hint for ``PRIMARY`` lookups.
+
+        Returns:
+            ``RoutingDecision`` consumed by the backend.
+        """
+        if role in (VLMRole.PRIMARY, VLMRole.LITE):
+            if agent_name is not None:
+                return self.route_for_agent(agent_name)
+            return self.route(ModelTask.GENERAL)
+        if role is VLMRole.SECONDARY:
+            return self.route(ModelTask.FIELD_EXTRACTION)
+        if role is VLMRole.CRITIC:
+            return self.route(ModelTask.VERIFICATION)
+        raise ValueError(f"Unknown VLMRole: {role!r}")
 
     # ------------------------------------------------------------------
     # Statistics

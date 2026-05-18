@@ -301,6 +301,69 @@ class TestParseToolCalls:
         assert results[0]["call_id"] == "x"
 
 
+class TestProvenanceStageProjection:
+    """Phase K-5c — tool-call results project into Provenance stages."""
+
+    def test_single_call_produces_one_stage(self, gemma_backend) -> None:
+        dispatched = [
+            {
+                "name": "cpt_validate",
+                "arguments": {"cpt_code": "99213"},
+                "result": {"valid": True, "category": "I"},
+                "call_id": "call_abc",
+            }
+        ]
+        stages = gemma_backend.tool_calls_to_provenance_stages(dispatched)
+        assert len(stages) == 1
+        assert stages[0]["stage"] == "gemma_tool_call"
+        assert stages[0]["agent"] == "gemma:cpt_validate"
+        assert stages[0]["metadata"]["tool_name"] == "cpt_validate"
+        assert stages[0]["metadata"]["result"]["valid"] is True
+        assert stages[0]["metadata"]["call_id"] == "call_abc"
+
+    def test_empty_input_returns_empty_list(self, gemma_backend) -> None:
+        assert gemma_backend.tool_calls_to_provenance_stages([]) == []
+
+    def test_missing_name_falls_back(self, gemma_backend) -> None:
+        stages = gemma_backend.tool_calls_to_provenance_stages([{"arguments": {}}])
+        assert stages[0]["agent"] == "gemma:unknown_tool"
+
+    def test_end_to_end_through_parse_dispatch_project(
+        self, gemma_backend
+    ) -> None:
+        """Round-trip: parse → dispatch → project, all under one backend."""
+        import json
+
+        response = VisionResponse(
+            content="",
+            parsed_json=None,
+            model="gemma-4-26b-a4b-it",
+            usage={
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+                "tool_calls": [
+                    {
+                        "function": {
+                            "name": "icd_normalize",
+                            "arguments": json.dumps({"raw_code": "J069"}),
+                        }
+                    }
+                ],
+            },
+            latency_ms=5,
+            request_id="r",
+        )
+        parsed = gemma_backend.parse_tool_calls(response)
+        dispatched = gemma_backend.dispatch_tool_calls(parsed)
+        stages = gemma_backend.tool_calls_to_provenance_stages(dispatched)
+
+        assert len(stages) == 1
+        assert stages[0]["stage"] == "gemma_tool_call"
+        assert stages[0]["agent"] == "gemma:icd_normalize"
+        assert stages[0]["metadata"]["result"]["normalised"] == "J06.9"
+
+
 class TestHealth:
     """``health()`` probes the configured endpoint and reflects connectivity."""
 

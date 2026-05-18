@@ -161,6 +161,15 @@ class PageImage:
     has_images: bool
     rotation: int
     text_content: str = ""
+    # V3 Phase 5 — fax/scan provenance signals lifted from the source
+    # PDF's content stream. These power the modality system's
+    # "fax" auto-detection: when ``is_one_bit`` or ``is_ccitt`` is
+    # true we add ``"fax"`` to the page's modality list, which in
+    # turn flips the image enhancer into binarization + despeckle
+    # mode. ``None`` means "not inspected" (e.g. for non-PDF inputs).
+    is_one_bit: bool | None = None
+    is_ccitt: bool | None = None
+    fax_signals: tuple[str, ...] = ()
 
     @property
     def base64_encoded(self) -> str:
@@ -196,6 +205,9 @@ class PageImage:
             "rotation": self.rotation,
             "size_kb": self.size_kb,
             "has_text_content": bool(self.text_content),
+            "is_one_bit": self.is_one_bit,
+            "is_ccitt": self.is_ccitt,
+            "fax_signals": list(self.fax_signals),
         }
 
 
@@ -509,6 +521,12 @@ class PDFProcessor:
             has_text = bool(raw_text)
             has_images = len(page.get_images()) > 0
 
+            # V3 Phase 5 — inspect embedded image streams for
+            # 1-bit / CCITT signals (the canonical fax-on-PDF
+            # encoding). PyMuPDF's ``get_images`` returns image
+            # references; we look up the colorspace + filter for each.
+            is_one_bit, is_ccitt, fax_signals = self._inspect_image_streams(page)
+
             page_image = PageImage(
                 page_number=page_number + 1,  # Convert to 1-indexed
                 image_bytes=img_bytes,
@@ -522,6 +540,9 @@ class PDFProcessor:
                 has_images=has_images,
                 rotation=int(page.rotation),
                 text_content=raw_text,
+                is_one_bit=is_one_bit,
+                is_ccitt=is_ccitt,
+                fax_signals=tuple(fax_signals),
             )
 
             logger.debug(
@@ -536,6 +557,76 @@ class PDFProcessor:
 
         except Exception as e:
             raise PDFProcessingError(f"Failed to render page {page_number + 1}: {e}") from e
+
+    def _inspect_image_streams(
+        self,
+        page: "fitz.Page",
+    ) -> tuple[bool, bool, list[str]]:
+        """V3 Phase 5 — inspect a page's embedded image streams for
+        fax-encoding signals.
+
+        Returns ``(is_one_bit, is_ccitt, signals)`` where ``signals``
+        is a list of human-readable tokens (``"1-bit-image"``,
+        ``"ccitt-fax-encoded"``, ``"jbig2-encoded"``) lifted from the
+        XObject metadata. The detection is best-effort:
+
+        * 1-bit images are flagged when any embedded image has
+          ``BitsPerComponent == 1`` *and* a DeviceGray (``"DeviceGray"``)
+          colorspace.
+        * CCITT detection looks for ``Filter`` containing
+          ``CCITTFaxDecode``. JBIG2 is also a fax-style codec; we
+          surface it under the same ``is_ccitt`` flag because the
+          downstream consumer only cares about "is this a 1-bit fax
+          stream".
+
+        Errors during inspection are swallowed — a malformed XObject
+        must not block extraction. Returns ``(False, False, [])`` on
+        any failure.
+        """
+        try:
+            images = page.get_images(full=True)
+        except Exception:
+            return False, False, []
+
+        if not images:
+            return False, False, []
+
+        is_one_bit = False
+        is_ccitt = False
+        signals: list[str] = []
+
+        # ``page.get_images()`` returns tuples whose 0th element is
+        # the XRef integer. We resolve each via ``page.parent.xref_object``
+        # to read its filter / colorspace dictionary.
+        doc = page.parent
+        for img_info in images:
+            try:
+                xref = img_info[0]
+                obj_str = doc.xref_object(xref)
+            except Exception:
+                continue
+            obj_lower = obj_str.lower() if isinstance(obj_str, str) else ""
+            if not obj_lower:
+                continue
+            # 1-bit detection. PDF objects expose ``/BitsPerComponent N``
+            # as a literal string in xref_object output.
+            if "/bitspercomponent 1" in obj_lower:
+                is_one_bit = True
+                if "1-bit-image" not in signals:
+                    signals.append("1-bit-image")
+            # CCITT detection.
+            if "ccittfaxdecode" in obj_lower or "/ccf" in obj_lower:
+                is_ccitt = True
+                if "ccitt-fax-encoded" not in signals:
+                    signals.append("ccitt-fax-encoded")
+            # JBIG2 — also a fax-style codec; we treat it as ccitt for
+            # downstream consumers.
+            if "jbig2decode" in obj_lower:
+                is_ccitt = True
+                if "jbig2-encoded" not in signals:
+                    signals.append("jbig2-encoded")
+
+        return is_one_bit, is_ccitt, signals
 
     def process(
         self,

@@ -667,11 +667,20 @@ class ProcessManager:
 
 # ==================== CLI Extraction ====================
 
+_MODE_TO_PROFILE: Dict[str, str] = {
+    "healthcare": "medical-rcm",
+    "general": "generic-document",
+}
+
+
 def extract_pdf_cli(
     pdf_path: str,
     output_dir: Optional[str] = None,
     pages: Optional[str] = None,
     config: Optional[ExtractionConfig] = None,
+    *,
+    mode: str = "auto",
+    profile_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Extract data from PDF using CLI mode.
@@ -681,10 +690,19 @@ def extract_pdf_cli(
         output_dir: Output directory for results
         pages: Page range (e.g., "1-5", "1,3,5", "all")
         config: Extraction configuration
+        mode: Phase K — high-level extraction mode. ``"healthcare"``
+            forces the medical-RCM profile; ``"general"`` forces the
+            generic profile; ``"auto"`` (default) lets the analyzer
+            decide. Mapped to a profile id via ``_MODE_TO_PROFILE``.
+        profile_override: Phase K — explicit profile id (advanced).
+            Takes precedence over ``mode`` when set.
 
     Returns:
         Extraction results dictionary
     """
+    # Resolve effective profile override: explicit ``profile_override``
+    # wins, otherwise map from the mode.
+    resolved_profile = profile_override or _MODE_TO_PROFILE.get(mode)
     if config is None:
         config = load_config()
 
@@ -693,7 +711,13 @@ def extract_pdf_cli(
 
     # Import extraction modules
     from src.client.lm_client import LMStudioClient
-    from src.export.consolidated_export import export_excel, export_json, export_markdown
+    from src.export.consolidated_export import (
+        export_excel,
+        export_fhir_bundle,
+        export_json,
+        export_markdown,
+        write_signed_receipt,
+    )
     from src.pipeline.runner import PipelineRunner
 
     pdf_file = Path(pdf_path)
@@ -768,6 +792,80 @@ def extract_pdf_cli(
                 export_markdown(result, md_file, mask_phi=config.mask_phi)
                 logger.info(f"Markdown export: {md_file}")
 
+            # Phase K — FHIR R4 emission for Healthcare mode. The
+            # helper is profile-gated and no-ops when not applicable,
+            # so we always call it; the cost is one dict lookup.
+            fhir_file = out / f"{pdf_file.stem}.fhir.json"
+            fhir_bundle = export_fhir_bundle(
+                result,
+                fhir_file,
+                mask_phi=config.mask_phi,
+                profile=resolved_profile,
+            )
+            if fhir_bundle is not None:
+                logger.info(f"FHIR R4 export: {fhir_file}")
+                log(f"FHIR R4 Bundle: {fhir_file}", Color.GREEN)
+
+            # Phase K — post-extraction tool-based validation. Runs the
+            # five medical-code validators (npi_luhn_check, cpt_validate,
+            # icd_normalize, sum_reconcile, validate_date_ordering)
+            # against every extracted field. Tagged failures land in
+            # ``validations.json`` so a reviewer / downstream system can
+            # route on them. This is the safety-net that closes the loop
+            # on hallucinated NPIs / mis-OCRed CPTs / line-sum mismatches.
+            try:
+                import json as _json
+
+                from src.validation.tool_validation import (
+                    validate_extraction_result,
+                )
+
+                validation_report = validate_extraction_result(result.to_dict())
+                vfile = out / "validations.json"
+                with vfile.open("w", encoding="utf-8") as _fh:
+                    _json.dump(validation_report, _fh, indent=2, default=str)
+                failed = validation_report["totals"]["total_failed_validations"]
+                logger.info(
+                    f"Tool validation: {vfile} ({failed} failed checks)"
+                )
+                if failed > 0:
+                    log(
+                        f"Tool validation flagged {failed} failed check(s): {vfile}",
+                        Color.YELLOW,
+                    )
+                else:
+                    log(f"Tool validation: all checks passed ({vfile})", Color.GREEN)
+            except Exception as _exc:
+                logger.warning("tool_validation_failed", error=str(_exc))
+
+            # Phase K — signed export receipt. Mints a SHA-256 attestation
+            # of every artefact in the bundle and (when configured) an
+            # HMAC signature. Offline-verifiable.
+            try:
+                from src.config import get_settings as _get_settings
+
+                _api_settings = _get_settings().api
+                receipt_artefacts = [p for p in out.iterdir() if p.is_file()]
+                receipt_path = write_signed_receipt(
+                    bundle_dir=out,
+                    processing_id=getattr(result, "processing_id", "")
+                    or pdf_file.stem,
+                    profile=resolved_profile,
+                    artefact_paths=receipt_artefacts,
+                    audit_chain_tail=None,  # CLI runs typically have no audit context
+                    signing_key=_api_settings.export_receipt_signing_key or None,
+                    signer_key_id=_api_settings.export_receipt_signer_key_id or None,
+                )
+                logger.info(f"Signed receipt: {receipt_path}")
+                log(f"Signed receipt: {receipt_path}", Color.GREEN)
+            except Exception as _exc:
+                # Receipt is informational, not load-bearing — never block
+                # the export on a receipt-mint failure.
+                logger.warning(
+                    "signed_receipt_failed",
+                    error=str(_exc),
+                )
+
             # Print summary
             log_success("Extraction Complete!")
             log(f"Pages: {result.total_pages}", Color.GREEN)
@@ -784,7 +882,10 @@ def extract_pdf_cli(
             }
         else:
             # Single-record extraction (legacy pipeline)
-            result = runner.extract_from_pdf(str(pdf_file))
+            result = runner.extract_from_pdf(
+                str(pdf_file),
+                profile_override=resolved_profile,
+            )
 
             results_file = out / f"{pdf_file.stem}_results.json"
             with open(results_file, "w", encoding="utf-8") as f:
@@ -1042,6 +1143,27 @@ Examples:
         action="store_true",
         help="Redact PHI fields/values in all exported formats (defence-in-depth).",
     )
+    extract_parser.add_argument(
+        "--mode",
+        choices=["healthcare", "general", "auto"],
+        default="auto",
+        help=(
+            "Phase K — extraction mode. 'healthcare' forces the medical-RCM "
+            "profile (CMS-1500 / UB-04 / EOB / superbill schemas + NPI/CPT/ICD "
+            "validators + FHIR R4 emission). 'general' forces the generic "
+            "profile for any other document. 'auto' (default) lets the "
+            "analyzer detect from the document content."
+        ),
+    )
+    extract_parser.add_argument(
+        "--profile",
+        default=None,
+        help=(
+            "Phase K — explicit profile id (advanced). Overrides --mode if set. "
+            "Valid values: 'medical-rcm', 'generic-document', 'finance', "
+            "'legal-contract', 'insurance-form', 'logistics'."
+        ),
+    )
 
     # Batch command
     batch_parser = subparsers.add_parser("batch", help="Batch process PDFs in directory")
@@ -1092,7 +1214,14 @@ Examples:
             if args.mask_phi:
                 config.mask_phi = True
 
-            result = extract_pdf_cli(args.pdf_file, args.output, args.pages, config)
+            result = extract_pdf_cli(
+                args.pdf_file,
+                args.output,
+                args.pages,
+                config,
+                mode=getattr(args, "mode", "auto"),
+                profile_override=getattr(args, "profile", None),
+            )
             return 0 if result["status"] == "success" else 1
 
         elif args.command == "batch":
