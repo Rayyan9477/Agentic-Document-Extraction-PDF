@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Card, CardHeader, CardContent, Select, Input } from '@/components/ui';
 import type { SelectOption } from '@/components/ui';
+import { MODE_LABELS, type ModeKey } from '@/lib/branding';
 import type { ExportFormat, ExtractionMode, ProcessingPriority } from '@/types/api';
 
 // WS-3 modality canonical names — must match the backend's
@@ -40,6 +41,9 @@ export interface UploadOptions {
   modalityOverride: Modality[];
   // WS-6: null = use server default; true/false = per-request override.
   phiMode: boolean | null;
+  // Phase K: top-level mode chip. ``auto`` lets the analyzer detect the
+  // profile; ``healthcare`` and ``general`` force a specific profile.
+  mode: ModeKey;
 }
 
 interface UploadOptionsProps {
@@ -131,6 +135,10 @@ const UploadOptionsComponent: React.FC<UploadOptionsProps> = ({
       ? 'on'
       : 'off';
 
+  // Phase K — top-level mode chips. Defaults to ``auto`` so existing
+  // behaviour is preserved when the user doesn't touch the row.
+  const activeMode: ModeKey = options.mode ?? 'auto';
+
   return (
     <Card variant="elevated" padding="md">
       <CardHeader
@@ -138,6 +146,49 @@ const UploadOptionsComponent: React.FC<UploadOptionsProps> = ({
         description="Configure how your documents will be processed"
       />
       <CardContent className="mt-4 space-y-4">
+        {/* Phase K: Top-level mode selector (Healthcare / General / Auto). */}
+        <div className="space-y-2">
+          <div className="flex items-baseline justify-between">
+            <label className="block text-sm font-medium text-surface-900">
+              Document Mode
+            </label>
+            <span className="text-xs text-surface-500">
+              {MODE_LABELS[activeMode].label}
+            </span>
+          </div>
+          <p className="text-xs text-surface-500">
+            {MODE_LABELS[activeMode].description}
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Document mode"
+            className="flex flex-wrap gap-2"
+          >
+            {(Object.keys(MODE_LABELS) as ModeKey[]).map((modeKey) => {
+              const cfg = MODE_LABELS[modeKey];
+              const active = activeMode === modeKey;
+              return (
+                <button
+                  type="button"
+                  key={modeKey}
+                  role="radio"
+                  aria-checked={active ? 'true' : 'false'}
+                  title={cfg.description}
+                  onClick={() => updateOption('mode', modeKey)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border ${
+                    active
+                      ? 'bg-primary-600 text-white border-primary-600'
+                      : 'bg-surface-50 text-surface-700 border-surface-200 hover:bg-surface-100'
+                  }`}
+                >
+                  <span aria-hidden="true">{cfg.icon}</span>
+                  {cfg.short}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Extraction Mode */}
         <Select
           label="Extraction Mode"

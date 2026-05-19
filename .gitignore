@@ -79,3 +79,9 @@ htmlcov/
 
 # Azure
 azure.log
+
+# Local extraction outputs (regenerated per run; may contain synthetic PHI)
+output/
+
+# Playwright MCP snapshot scratchpad
+.playwright-mcp/

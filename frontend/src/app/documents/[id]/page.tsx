@@ -703,6 +703,7 @@ function HumanReviewForm({ document, onSubmit, onCancel }: HumanReviewFormProps)
         <h4 className="text-sm font-medium text-surface-700 mb-2">Key Fields to Verify:</h4>
         <div className="space-y-2 max-h-48 overflow-y-auto">
           {Object.entries(document?.field_metadata || {})
+            // eslint-disable-next-line @typescript-eslint/no-unused-vars
             .filter(([_key, result]) => result.confidence < 0.85 || !result.validation_passed)
             .slice(0, 5)
             .map(([name, result]) => (

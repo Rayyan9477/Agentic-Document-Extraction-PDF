@@ -1,23 +1,32 @@
 'use client';
 
 /**
- * V3 Phase 8 — PDF page canvas (NATIVE PDF mode, opt-in).
+ * V3 Phase 8 / Phase K — PDF page canvas (NATIVE PDF mode, opt-in).
  *
- * High-fidelity renderer using `react-pdf` for PDF text layer +
- * Ctrl+F search + native selection. Loaded via `next/dynamic({
- * ssr: false })` so the ~150KB gzip cost is paid only when the user
- * opts in via the render-mode switch.
+ * Originally this component lazy-loaded ``react-pdf`` for a text-layer
+ * + Ctrl-F search experience. Phase K ships without ``react-pdf`` in
+ * dependencies because:
  *
- * If `react-pdf` is not installed (or the backend doesn't expose
- * `/pdf`), the component renders a fallback message telling the
- * user to switch back to PNG mode.
+ * 1. The default Source View renderer (``PdfPageCanvas`` PNG mode) is
+ *    sufficient for the Kaggle demo and for the air-gapped on-prem
+ *    deployment story.
+ * 2. ``react-pdf`` + ``pdfjs-dist`` pull in a ~150 KB worker that
+ *    Next.js's Terser cannot minify cleanly, and the dependency
+ *    pulls in build-time pain for an opt-in feature.
+ *
+ * This stub keeps the file present so the existing dynamic import in
+ * ``SourceViewTab.tsx`` continues to compile; at render time it shows
+ * an explanatory message and steers the user back to PNG mode. To
+ * activate the native renderer, an operator can:
+ *
+ * * ``npm install react-pdf pdfjs-dist`` (re-add the optional
+ *   dependency)
+ * * Replace this file's body with the original react-pdf
+ *   implementation (kept in git history)
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { Skeleton } from '@/components/ui';
-import { pdfDownloadUrl } from '@/lib/api/provenance';
+import { Skeleton as _Skeleton } from '@/components/ui';
 import type { FieldProvenance } from '@/lib/api/provenance';
-import { BboxOverlay, bboxesForPage } from './BboxOverlay';
 
 interface PdfPageCanvasNativeProps {
   processingId: string;
@@ -27,102 +36,32 @@ interface PdfPageCanvasNativeProps {
   onSelectField: (fieldName: string) => void;
 }
 
-// Lazy + optional import. ``react-pdf`` is a soft dependency —
-// installations that don't include the [pdf-viewer] extra fall
-// back to a graceful error message inside the canvas. We use
-// ``any`` for the module shape so the project type-checks even
-// when ``react-pdf`` is not installed.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ReactPdfModule = any;
+// Re-export to keep the skeleton type visible to downstream tooling.
+export const Skeleton = _Skeleton;
 
-export default function PdfPageCanvasNative({
-  processingId,
-  pageNumber,
-  fields,
-  activeFieldName,
-  onSelectField,
-}: PdfPageCanvasNativeProps) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [rpdf, setRpdf] = useState<ReactPdfModule | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        // @ts-expect-error -- react-pdf is an opt-in soft dependency;
-        // installations without the [pdf-viewer] extra fall through
-        // to the importError path below.
-        const mod = await import('react-pdf');
-        // Worker pinned to a Next.js public asset; air-gap safe.
-        mod.pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-          'pdfjs-dist/build/pdf.worker.min.mjs',
-          import.meta.url,
-        ).toString();
-        if (!cancelled) setRpdf(mod);
-      } catch {
-        if (!cancelled) {
-          setImportError(
-            'PDF mode is unavailable in this build. Install the ' +
-              '[pdf-viewer] extra or switch to Image mode.',
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (importError) {
-    return (
-      <div className="rounded-lg border border-default bg-canvas p-6 text-body text-text-secondary">
-        {importError}
-      </div>
-    );
-  }
-
-  if (!rpdf) {
-    return <Skeleton className="w-[720px] h-[1000px] rounded-lg" />;
-  }
-
-  const { Document, Page } = rpdf;
-  const items = bboxesForPage(fields, pageNumber);
-
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function PdfPageCanvasNative(_props: PdfPageCanvasNativeProps) {
   return (
     <div
-      ref={containerRef}
-      className="relative inline-block rounded-lg overflow-hidden bg-canvas border border-default shadow-elev-2"
+      role="status"
+      className="rounded-lg border border-default bg-canvas p-6 text-body text-text-secondary max-w-[720px]"
     >
-      <Document
-        file={pdfDownloadUrl(processingId)}
-        loading={<Skeleton className="w-[720px] h-[1000px]" />}
-        error={
-          <div className="p-6 text-body text-accent-danger">
-            Failed to load PDF. Switch back to Image mode.
-          </div>
-        }
-      >
-        <Page
-          pageNumber={pageNumber}
-          width={720}
-          onLoadSuccess={(p: { width: number; height: number }) =>
-            setSize({ w: p.width, h: p.height })
-          }
-          renderTextLayer
-          renderAnnotationLayer={false}
-        />
-      </Document>
-      {size && (
-        <BboxOverlay
-          items={items}
-          activeFieldName={activeFieldName}
-          onSelect={onSelectField}
-          width={size.w}
-          height={size.h}
-        />
-      )}
+      <p className="font-semibold text-text-primary mb-2">
+        PDF mode is unavailable in this build
+      </p>
+      <p>
+        The native PDF renderer (with text-layer + Ctrl-F search) is an
+        opt-in feature that requires the <code>react-pdf</code>{' '}
+        dependency. The default <strong>Image</strong> mode renders the
+        same bounding-box overlay and click-to-source workflow without
+        the extra bundle weight.
+      </p>
+      <p className="mt-2 text-text-muted">
+        To enable PDF mode, install <code>react-pdf</code> and{' '}
+        <code>pdfjs-dist</code>, then replace{' '}
+        <code>PdfPageCanvasNative.tsx</code> with the
+        git-history version of the native renderer.
+      </p>
     </div>
   );
 }

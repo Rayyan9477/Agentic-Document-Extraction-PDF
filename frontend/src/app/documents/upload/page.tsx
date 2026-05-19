@@ -1,6 +1,11 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+// useSearchParams() requires a Suspense boundary during static
+// generation; opting out of pre-render is the simplest fix for an
+// authenticated route that we never want to ship as a static page.
+export const dynamic = 'force-dynamic';
+
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -14,6 +19,7 @@ import { documentsApi, schemaApi } from '@/lib/api';
 import { generateId } from '@/lib/utils';
 import type { ExportFormat, ExtractionMode, ProcessingPriority } from '@/types/api';
 import type { Modality } from '@/components/documents/UploadOptions';
+import { modeToProfileOverride, type ModeKey } from '@/lib/branding';
 
 const UPLOAD_STEPS = [
   { label: 'Select Files', description: 'Choose PDF documents' },
@@ -23,6 +29,14 @@ const UPLOAD_STEPS = [
 ];
 
 export default function DocumentUploadPage() {
+  return (
+    <Suspense fallback={null}>
+      <DocumentUploadPageBody />
+    </Suspense>
+  );
+}
+
+function DocumentUploadPageBody() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
@@ -38,6 +52,9 @@ export default function DocumentUploadPage() {
     modalityOverride: [] as Modality[],
     // WS-6: null = use server default; true = force redaction; false = bypass.
     phiMode: null as boolean | null,
+    // Phase K — top-level mode chip; resolves to profile_override on the
+    // backend. ``auto`` preserves the analyzer's auto-detection.
+    mode: 'auto' as ModeKey,
   });
 
   // WS-4: pick up ?schema=NAME query param so the schemas gallery can
@@ -76,6 +93,9 @@ export default function DocumentUploadPage() {
             ? options.modalityOverride
             : undefined,
         phi_mode: options.phiMode === null ? undefined : options.phiMode,
+        // Phase K — only send profile_override when the user picked a
+        // non-auto mode. ``auto`` leaves the analyzer free to detect.
+        profile_override: modeToProfileOverride(options.mode) ?? undefined,
       });
     },
     onSuccess: (response, variables) => {

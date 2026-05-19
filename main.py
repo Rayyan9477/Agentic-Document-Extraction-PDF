@@ -751,6 +751,24 @@ def extract_pdf_cli(
         log(f"Processing: {pdf_file.name}", Color.CYAN)
         log(f"Output: {out}", Color.CYAN)
         log(f"Mode: {'Multi-record' if config.enable_multi_record else 'Single-record'}", Color.CYAN)
+        # Phase K — surface the resolved profile so the operator can see
+        # whether Healthcare-mode emitters (FHIR R4, signed receipt,
+        # medical-code tool validation) will fire.
+        if resolved_profile:
+            phase_k_label = (
+                "Healthcare"
+                if resolved_profile == "medical-rcm"
+                else "General"
+                if resolved_profile == "generic-document"
+                else resolved_profile
+            )
+            log(
+                f"Phase K profile: {phase_k_label} (profile={resolved_profile})",
+                Color.CYAN,
+            )
+        else:
+            log("Phase K profile: auto-detect", Color.CYAN)
+        log(f"VLM: {config.vlm_model} @ {config.vlm_endpoint}", Color.CYAN)
 
         # Create pipeline runner
         client = LMStudioClient(
@@ -913,6 +931,9 @@ def batch_process_cli(
     directory: str,
     output_dir: Optional[str] = None,
     config: Optional[ExtractionConfig] = None,
+    *,
+    mode: str = "auto",
+    profile_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Batch process all PDFs in a directory.
@@ -921,6 +942,10 @@ def batch_process_cli(
         directory: Directory containing PDF files
         output_dir: Output directory for all results
         config: Extraction configuration
+        mode: Phase K — extraction mode applied to every file in the
+            batch. ``"healthcare"`` / ``"general"`` / ``"auto"`` (default).
+        profile_override: Phase K — explicit profile id; takes
+            precedence over ``mode`` when set.
 
     Returns:
         Batch processing results
@@ -952,17 +977,34 @@ def batch_process_cli(
     results = []
     failed = []
 
+    # Phase K — log the active mode once per batch run so it's clear
+    # whether Healthcare emitters fire on every file.
+    resolved_batch_profile = profile_override or _MODE_TO_PROFILE.get(mode)
+    if resolved_batch_profile:
+        log(
+            f"Batch Phase K profile: {resolved_batch_profile} (applies to every file)",
+            Color.CYAN,
+        )
+    else:
+        log("Batch Phase K profile: auto-detect per file", Color.CYAN)
+
     if config.parallel_workers > 1:
         log(f"Processing with {config.parallel_workers} parallel workers", Color.CYAN)
 
         with ProcessPoolExecutor(max_workers=config.parallel_workers) as executor:
             futures = {
+                # Phase K — thread the resolved mode through every batch
+                # invocation so per-file extracts honour Healthcare /
+                # General. ``profile_override`` wins over ``mode`` exactly
+                # as in the single-file path.
                 executor.submit(
                     extract_pdf_cli,
                     str(pdf_file),
                     str(out / pdf_file.stem),
                     "all",
                     config,
+                    mode=mode,
+                    profile_override=profile_override,
                 ): pdf_file
                 for pdf_file in pdf_files
             }
@@ -988,6 +1030,8 @@ def batch_process_cli(
                 str(out / pdf_file.stem),
                 "all",
                 config,
+                mode=mode,
+                profile_override=profile_override,
             )
 
             if result["status"] == "success":
@@ -1170,6 +1214,23 @@ Examples:
     batch_parser.add_argument("directory", help="Directory containing PDF files")
     batch_parser.add_argument("-o", "--output", help="Output directory")
     batch_parser.add_argument("--parallel", type=int, help="Number of parallel workers")
+    batch_parser.add_argument(
+        "--mode",
+        choices=["healthcare", "general", "auto"],
+        default="auto",
+        help=(
+            "Phase K — extraction mode applied to every file in the batch. "
+            "Same semantics as 'extract --mode'."
+        ),
+    )
+    batch_parser.add_argument(
+        "--profile",
+        default=None,
+        help=(
+            "Phase K — explicit profile id; overrides --mode when set. "
+            "Applies to every file in the batch."
+        ),
+    )
 
     # Config command
     config_parser = subparsers.add_parser("config", help="Manage configuration")
@@ -1229,7 +1290,13 @@ Examples:
             if args.parallel:
                 config.parallel_workers = args.parallel
 
-            result = batch_process_cli(args.directory, args.output, config)
+            result = batch_process_cli(
+                args.directory,
+                args.output,
+                config,
+                mode=getattr(args, "mode", "auto"),
+                profile_override=getattr(args, "profile", None),
+            )
             return 0 if result["status"] == "success" else 1
 
         elif args.command == "config":

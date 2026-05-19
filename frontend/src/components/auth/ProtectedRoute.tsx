@@ -30,19 +30,23 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   const { isAuthenticated, isLoading } = useAuth();
   const [isRedirecting, setIsRedirecting] = useState(false);
 
-  // DEV MODE: Skip all auth checks
-  if (DEV_AUTO_LOGIN) {
-    return <>{children}</>;
-  }
-
-  // Handle redirect when not authenticated
+  // Handle redirect when not authenticated. Hook is declared
+  // unconditionally so React's hook-order invariant holds even when
+  // ``DEV_AUTO_LOGIN`` short-circuits below — the effect simply no-ops
+  // in dev mode.
   useEffect(() => {
+    if (DEV_AUTO_LOGIN) return;
     if (!isLoading && !isAuthenticated && !isRedirecting) {
       setIsRedirecting(true);
       // Use replace to prevent back button returning to protected page
       router.replace(redirectTo);
     }
   }, [isAuthenticated, isLoading, isRedirecting, router, redirectTo]);
+
+  // DEV MODE: Skip all auth checks
+  if (DEV_AUTO_LOGIN) {
+    return <>{children}</>;
+  }
 
   // Show loading while checking auth
   if (isLoading) {

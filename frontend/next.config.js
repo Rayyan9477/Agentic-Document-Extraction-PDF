@@ -23,6 +23,28 @@ const nextConfig = {
   images: {
     domains: ['localhost'],
   },
+
+  // Phase K — Webpack tweaks for the opt-in PDF mode of the Source View.
+  // ``pdfjs-dist`` ships its worker as an ES module that Terser cannot
+  // minify safely (it uses bare ``import``/``export`` at the worker
+  // entry). We exclude that worker file from minification.
+  webpack: (config, { dev }) => {
+    if (!dev && config.optimization && config.optimization.minimizer) {
+      config.optimization.minimizer.forEach((plugin) => {
+        if (plugin.constructor && plugin.constructor.name === 'TerserPlugin') {
+          const existing = plugin.options.exclude;
+          const patterns = Array.isArray(existing)
+            ? existing
+            : existing
+            ? [existing]
+            : [];
+          patterns.push(/pdf\.worker(\.min)?\.m?js$/);
+          plugin.options.exclude = patterns;
+        }
+      });
+    }
+    return config;
+  },
 };
 
 module.exports = nextConfig;
