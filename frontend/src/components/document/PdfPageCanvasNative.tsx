@@ -1,14 +1,14 @@
 'use client';
 
 /**
- * V3 Phase 8 / Phase K — PDF page canvas (NATIVE PDF mode, opt-in).
+ * Veridoc — PDF page canvas (NATIVE PDF mode, opt-in).
  *
  * Originally this component lazy-loaded ``react-pdf`` for a text-layer
- * + Ctrl-F search experience. Phase K ships without ``react-pdf`` in
- * dependencies because:
+ * + Ctrl-F search experience. The current build ships without ``react-pdf``
+ * in dependencies because:
  *
  * 1. The default Source View renderer (``PdfPageCanvas`` PNG mode) is
- *    sufficient for the Kaggle demo and for the air-gapped on-prem
+ *    sufficient for the demo flow and for the air-gapped on-prem
  *    deployment story.
  * 2. ``react-pdf`` + ``pdfjs-dist`` pull in a ~150 KB worker that
  *    Next.js's Terser cannot minify cleanly, and the dependency

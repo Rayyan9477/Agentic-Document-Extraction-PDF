@@ -126,6 +126,20 @@ class ProcessRequest(BaseModel):
             "(default off); True = force redaction; False = bypass."
         ),
     )
+    # Phase K — explicit profile override. ``None`` lets the analyzer
+    # auto-detect (current behaviour). When set, the value is threaded
+    # into ``state["profile_override"]`` and bypasses detection. The
+    # frontend's Healthcare / General mode chip serialises to this field.
+    profile_override: str | None = Field(
+        default=None,
+        description=(
+            "Explicit profile override. Valid values: 'medical-rcm' "
+            "(Healthcare mode), 'generic-document' (General mode), "
+            "'finance', 'legal-contract', 'insurance-form', 'logistics'. "
+            "Leave null for auto-detection."
+        ),
+        max_length=64,
+    )
     async_processing: bool = Field(
         False,
         description="Whether to process asynchronously",

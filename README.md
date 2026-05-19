@@ -102,75 +102,48 @@ Healthcare-mode adds `<stem>.fhir.json` — a validated FHIR R4 Bundle (Patient 
 ## The seven-layer architecture
 
 ```mermaid
-%% End-to-end pipeline — every layer is independently observable.
-flowchart TB
-    subgraph L1["L1 — Ingress"]
-        REST[REST API<br/>FastAPI]
-        CLI[CLI<br/>python main.py]
-        UI[Next.js UI<br/>upload page]
-    end
+%% Seven-layer pipeline — flows left → right; each stage is independently observable.
+flowchart LR
+    IN(["PDF · scan · photo"]) ==> L1
+    L1["<b>L1 · Ingress</b><br/>━━━━━━━━━━<br/>REST API<br/>CLI<br/>Next.js UI"]
+    L2["<b>L2 · Preprocess</b><br/>━━━━━━━━━━<br/>PyMuPDF 300 DPI<br/>OpenCV · CLAHE<br/>Modality detect"]
+    L3["<b>L3 · Understand</b><br/>━━━━━━━━━━<br/>Analyzer<br/>Splitter · Tables<br/>Profile detect"]
+    L4["<b>L4 · Extract</b><br/>━━━━━━━━━━<br/>Pass 1 EXTRACTOR<br/>Pass 2 AUDITOR<br/>Reconciler"]
+    L5["<b>L5 · Validate</b><br/>━━━━━━━━━━<br/>Schema · Patterns<br/>Codes · Cross-field<br/>Critic · Calibration"]
+    L6["<b>L6 · Output</b><br/>━━━━━━━━━━<br/>JSON · Excel · MD<br/>FHIR R4 · Bbox PNGs<br/>Signed receipt"]
+    L7["<b>L7 · Egress</b><br/>━━━━━━━━━━<br/>Webhook + DLQ<br/>Audit chain<br/>Phoenix · PostHog"]
+    OUT(["Validated structured output"])
 
-    subgraph L2["L2 — Preprocessing"]
-        PDF[PyMuPDF<br/>300 DPI raster]
-        ENH[OpenCV<br/>deskew · denoise · CLAHE]
-        MOD[Modality detection<br/>printed · fax · handwritten · form · table · visual]
-    end
+    L1 ==> L2 ==> L3 ==> L4 ==> L5 ==> L6 ==> L7 ==> OUT
 
-    subgraph L3["L3 — Understand"]
-        ANA[Analyzer<br/>doc_type · structure · complexity]
-        SPL[Splitter<br/>logical-segment boundaries]
-        TAB[TableDetector<br/>spatial clustering]
-        PRO[Profile detection<br/>generic · medical-rcm · finance]
-    end
+    OBS["<b>Cross-cutting</b> — LangGraph v3 state machine · durable SQLite checkpoints · PHI redaction · multi-tenant isolation · Phoenix span per stage"]
+    L1 -.observes.- OBS
+    L4 -.observes.- OBS
+    L7 -.observes.- OBS
 
-    subgraph L4["L4 — Extract"]
-        P1["Pass 1 · EXTRACTOR<br/>schema-bound JSON"]
-        P2["Pass 2 · AUDITOR<br/>bbox-mandated"]
-        REC["HeterogeneousReconciler<br/>5-step tiebreaker"]
-    end
-
-    subgraph L5["L5 — Validate"]
-        SCH[Schema layer<br/>Pydantic enforced]
-        PAT[Pattern layer<br/>hallucination detection]
-        COD[Codes layer<br/>NPI Luhn · CPT · ICD · POS]
-        CRF[Cross-field layer<br/>sums · dates · dependencies]
-        CRI["Critic agent<br/>independent VERIFIER frame"]
-        CAL[Calibration<br/>Platt / isotonic · partitioned]
-    end
-
-    subgraph L6["L6 — Output"]
-        JSN[JSON<br/>MINIMAL · STANDARD · DETAILED · DATAFRAME_FLAT]
-        XLS[Excel<br/>4-sheet workbook]
-        MD[Markdown<br/>narrative + decision trail]
-        FHIR[FHIR R4 Bundle<br/>healthcare profile]
-        BBX[Bbox overlay PNGs<br/>per-page]
-        RCP[Signed receipt<br/>HMAC-SHA256]
-    end
-
-    subgraph L7["L7 — Egress"]
-        WH[Webhook + DLQ<br/>HMAC signing · SSRF guard]
-        AUD[Audit log<br/>tamper-evident chain]
-        OBS[Phoenix · PostHog<br/>OpenTelemetry]
-    end
-
-    L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
-
+    classDef io fill:#0f172a,stroke:#020617,color:#fff,stroke-width:2px
     classDef ingress fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
     classDef preproc fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
-    classDef extract fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    classDef understand fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    classDef extract fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
     classDef validate fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
     classDef output fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
-    classDef egress fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
-    class L1,REST,CLI,UI ingress
-    class L2,PDF,ENH,MOD preproc
-    class L3,ANA,SPL,TAB,PRO extract
-    class L4,P1,P2,REC extract
-    class L5,SCH,PAT,COD,CRF,CRI,CAL validate
-    class L6,JSN,XLS,MD,FHIR,BBX,RCP output
-    class L7,WH,AUD,OBS egress
+    classDef egress fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef meta fill:#374151,stroke:#111827,color:#fff,stroke-width:2px,stroke-dasharray: 6 4
+    class IN,OUT io
+    class L1 ingress
+    class L2 preproc
+    class L3 understand
+    class L4 extract
+    class L5 validate
+    class L6 output
+    class L7 egress
+    class OBS meta
 ```
 
-Every layer is independently testable, independently observable (Phoenix span per stage), and independently disable-able via feature flags. The whole pipeline is a LangGraph v3 state machine with durable SQLite checkpointing — interrupt-resume works mid-extraction, even across process restarts.
+The whole pipeline is a **LangGraph v3 state machine** with durable SQLite checkpointing — interrupt-resume works mid-extraction, even across process restarts. Every layer is independently testable, independently observable (one Phoenix span per stage), and independently disable-able via feature flags.
+
+> Want the same picture with the per-layer detail? See [docs/VERIDOC_MASTER_PLAN.md §3](docs/VERIDOC_MASTER_PLAN.md#3-the-seven-layer-architecture).
 
 ---
 

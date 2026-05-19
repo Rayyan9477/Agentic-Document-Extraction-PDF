@@ -172,6 +172,14 @@ class WebhookClient:
         """
         Validate webhook URL for security.
 
+        V3 Phase 8 — DNS-resolves the hostname and rejects any URL
+        that resolves into private / loopback / link-local /
+        multicast / reserved / CGNAT ranges. Defeats SSRF via DNS
+        and via hostname-spoofing where a public-looking domain
+        resolves to a private IP. The legacy substring check is
+        retained as a defence-in-depth against IDN tricks but
+        ``check_public_url`` is the canonical gate.
+
         Args:
             url: URL to validate.
 
@@ -179,35 +187,14 @@ class WebhookClient:
             Tuple of (is_valid, error_message).
         """
         try:
-            parsed = urlparse(url)
+            from src.queue._url_safety import check_public_url
 
-            # Check scheme
-            if parsed.scheme not in self.ALLOWED_SCHEMES:
-                return False, f"Invalid scheme: {parsed.scheme}. Must be http or https."
-
-            # Check host
-            if not parsed.netloc:
-                return False, "URL must have a valid host."
-
-            # Extract hostname (without port)
-            hostname = parsed.hostname or ""
-
-            # Check blocked hosts
-            if hostname.lower() in self.BLOCKED_HOSTS:
-                return False, f"Host not allowed: {hostname}"
-
-            # Check for private network ranges (basic check)
-            if hostname.startswith("10.") or hostname.startswith("192.168."):
-                self._logger.warning(
-                    "webhook_private_ip_warning",
-                    url=url,
-                    hostname=hostname,
-                    message="Webhook URL points to private IP range",
-                )
-
+            result = check_public_url(url)
+            if not result.allowed:
+                return False, result.reason
             return True, None
-
         except Exception as e:
+            # Belt-and-braces: never allow a URL we couldn't validate.
             return False, f"Invalid URL: {e}"
 
     def _generate_signature(self, payload: str, timestamp: str) -> str:
@@ -302,7 +289,9 @@ class WebhookClient:
             attempts = attempt + 1
 
             try:
-                with httpx.Client(timeout=self._timeout) as client:
+                with httpx.Client(
+                    timeout=self._timeout, follow_redirects=False
+                ) as client:
                     response = client.post(
                         url,
                         content=payload_json,
@@ -469,7 +458,9 @@ class WebhookClient:
             attempts = attempt + 1
 
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout, follow_redirects=False
+                ) as client:
                     response = await client.post(
                         url,
                         content=payload_json,

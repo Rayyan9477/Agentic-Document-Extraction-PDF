@@ -100,6 +100,61 @@ _DEFAULT_BACKOFF_BASE_SECONDS: int = 60
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True, slots=True)
+class PoisonDetectionResult:
+    """V3 Phase 7 — outcome of ``WebhookDLQ.detect_poison_subscription``.
+
+    A subscription is "poisoned" when the last N consecutive failures
+    all share the same normalised error signature. The consumer of
+    this result decides what to do (disable the subscription, alert
+    on-call, etc.) — the DLQ itself is read-only here.
+    """
+
+    subscription_id: str
+    poisoned: bool
+    consecutive_failures: int
+    signature: str | None
+    threshold: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "subscription_id": self.subscription_id,
+            "poisoned": self.poisoned,
+            "consecutive_failures": self.consecutive_failures,
+            "signature": self.signature,
+            "threshold": self.threshold,
+        }
+
+
+def _normalise_error_signature(
+    last_error: Any,
+    *,
+    chars: int = 16,
+) -> str | None:
+    """Normalise a webhook error string to a stable signature.
+
+    Strips digits, lowercases, collapses whitespace, then takes
+    the first ``chars`` of a SHA-256 hex digest. Returns ``None``
+    when the input is empty.
+    """
+    if not last_error:
+        return None
+    import hashlib
+    import re as _re
+
+    text = str(last_error).strip().lower()
+    # Strip integers + ISO timestamps so transient details don't
+    # randomise the cluster key.
+    text = _re.sub(r"\b\d{4}-\d{2}-\d{2}t[\d:.\-+:]+", " ", text)
+    text = _re.sub(r"\b\d+\b", " ", text)
+    text = _re.sub(r"\s+", " ", text)
+    text = text.strip()
+    if not text:
+        return None
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return digest[:chars]
+
+
 @dataclass(slots=True)
 class DLQEntry:
     """A single failed-delivery record.
@@ -361,6 +416,95 @@ class WebhookDLQ:
         with self._lock, self._connect() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
             return [self._row_to_entry(row) for row in rows]
+
+    # ----- V3 Phase 7 — Poison-message detection -------------------------
+
+    def detect_poison_subscription(
+        self,
+        subscription_id: str,
+        *,
+        consecutive_threshold: int = 5,
+        signature_hash_chars: int = 16,
+    ) -> "PoisonDetectionResult":
+        """Detect a poisoned subscription by signature-clustering.
+
+        A subscription is considered "poisoned" when the **last
+        ``consecutive_threshold`` failures** all share the same
+        normalised error signature. Signature is the first
+        ``signature_hash_chars`` of a SHA-256 over the lowercased,
+        whitespace-collapsed ``last_error`` (numbers and timestamps
+        stripped) — so transient 5xx noise won't cluster, but
+        "401 Unauthorized" or "ConnectionRefused" will.
+
+        When the threshold trips, callers should:
+
+        * Audit-log the detection (the helper emits a structlog
+          info but does NOT touch external state — the consumer
+          decides whether to disable the subscription).
+        * Mark the subscription disabled in their subscription
+          store of choice.
+
+        Returns:
+            PoisonDetectionResult with the verdict + matched signature.
+        """
+        # Pull the most-recent N entries for this subscription. We
+        # look at the failure-history regardless of status so a
+        # subscription that's already partially recovered (some
+        # delivered) doesn't keep tripping forever.
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT last_error, status FROM webhook_dlq "
+                "WHERE subscription_id=? "
+                "ORDER BY first_failed_at DESC, id DESC LIMIT ?",
+                (subscription_id, consecutive_threshold),
+            ).fetchall()
+        if len(rows) < consecutive_threshold:
+            return PoisonDetectionResult(
+                subscription_id=subscription_id,
+                poisoned=False,
+                consecutive_failures=len(rows),
+                signature=None,
+                threshold=consecutive_threshold,
+            )
+
+        # All N must be failures (not delivered).
+        if any(row["status"] == "delivered" for row in rows):
+            return PoisonDetectionResult(
+                subscription_id=subscription_id,
+                poisoned=False,
+                consecutive_failures=0,
+                signature=None,
+                threshold=consecutive_threshold,
+            )
+
+        # V3 Phase 8 — preserve "no error detail" as its own stable
+        # signature ``opaque_timeout`` so subscriptions that fail
+        # exclusively with timeouts (no TCP response → ``last_error``
+        # is None or empty) still cluster as a single signature and
+        # trip the poison gate. Without this the previous
+        # ``signatures[0] is None`` short-circuit silently let
+        # timeout-only subscriptions live forever.
+        signatures = [
+            _normalise_error_signature(row["last_error"], chars=signature_hash_chars)
+            or "opaque_timeout"
+            for row in rows
+        ]
+        unique = set(signatures)
+        if len(unique) == 1:
+            return PoisonDetectionResult(
+                subscription_id=subscription_id,
+                poisoned=True,
+                consecutive_failures=len(rows),
+                signature=signatures[0],
+                threshold=consecutive_threshold,
+            )
+        return PoisonDetectionResult(
+            subscription_id=subscription_id,
+            poisoned=False,
+            consecutive_failures=len(rows),
+            signature=None,
+            threshold=consecutive_threshold,
+        )
 
     def get(self, entry_id: int) -> DLQEntry | None:
         with self._lock, self._connect() as conn:

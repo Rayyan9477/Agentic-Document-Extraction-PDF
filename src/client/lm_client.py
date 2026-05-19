@@ -565,10 +565,25 @@ class LMStudioClient:
 
         # Build API kwargs. Per-request `model` override (if provided by the
         # caller via WS-2 model routing) takes precedence over the client default.
+        # Phase K — apply the reasoning-model floor. Models like
+        # gemma-4-26b-a4b consume the bulk of ``max_tokens`` on silent
+        # reasoning tokens before emitting any content. The
+        # ``LM_MIN_MAX_TOKENS`` env var raises every per-call budget so
+        # the existing site-by-site values (500 / 800 / 2000 / etc.) get
+        # promoted to a reasoning-safe floor without rewriting each agent.
+        import os as _os
+
+        effective_max_tokens = request.max_tokens
+        try:
+            floor = int(_os.environ.get("LM_MIN_MAX_TOKENS", "0"))
+            if floor > effective_max_tokens:
+                effective_max_tokens = floor
+        except ValueError:
+            pass
         api_kwargs: dict[str, Any] = {
             "model": model or self._model,
             "messages": messages,
-            "max_tokens": request.max_tokens,
+            "max_tokens": effective_max_tokens,
             "temperature": request.temperature,
         }
 
@@ -639,6 +654,22 @@ class LMStudioClient:
         except json.JSONDecodeError:
             pass
 
+        # Phase K — last-resort: repair common reasoning-model JSON artefacts
+        # (line comments, block comments, trailing commas) and try again.
+        # Reasoning models often emit JSON with explanatory comments or
+        # trailing commas after the last array/object element — both
+        # invalid for strict json.loads but trivial to fix.
+        try:
+            start = content.find("{")
+            end = content.rfind("}") + 1
+            if start >= 0 and end > start:
+                candidate = content[start:end]
+                repaired = self._repair_json(candidate)
+                if repaired is not None:
+                    return repaired
+        except Exception:  # noqa: BLE001
+            pass
+
         logger.debug(
             "json_extraction_failed",
             content_length=len(content),
@@ -646,6 +677,56 @@ class LMStudioClient:
         )
 
         return None
+
+    @staticmethod
+    def _repair_json(candidate: str) -> dict[str, Any] | None:
+        """Strip common reasoning-model JSON artefacts and try to parse.
+
+        Reasoning models (Gemma 4 26B-A4B, ministral-reasoning, etc.)
+        sometimes emit JSON with:
+          * ``// line comments`` or ``/* block comments */`` — not valid JSON
+          * trailing commas before ``}`` or ``]`` — not valid JSON
+          * literal ``None`` / ``True`` / ``False`` (Python words) instead
+            of ``null`` / ``true`` / ``false``
+
+        We do the cheapest possible repair pass and retry. Returns the
+        parsed dict on success or ``None`` if repair couldn't make it
+        valid (no exception leaks).
+        """
+        import re as _re
+
+        if not candidate or not candidate.strip():
+            return None
+        text = candidate
+        # Strip /* block comments */ first (greedy across newlines).
+        text = _re.sub(r"/\*.*?\*/", "", text, flags=_re.DOTALL)
+        # Strip // line comments — but only when ``//`` is outside a string.
+        # Approximation: drop ``//`` to end-of-line when not following ``:``
+        # of a URL-shaped string. False positives are acceptable because
+        # we re-try parse and bail to None on failure.
+        text = _re.sub(r"(?m)^\s*//.*$", "", text)
+        text = _re.sub(r"(?<![\":])//[^\n]*$", "", text, flags=_re.MULTILINE)
+        # Strip trailing commas before ``}`` or ``]``.
+        text = _re.sub(r",(\s*[}\]])", r"\1", text)
+        # Python-ism repair: True/False/None → JSON literals (only when
+        # standalone token, not inside a quoted string).
+        text = _re.sub(r"(?<![\w\"])True(?![\w\"])", "true", text)
+        text = _re.sub(r"(?<![\w\"])False(?![\w\"])", "false", text)
+        text = _re.sub(r"(?<![\w\"])None(?![\w\"])", "null", text)
+        # Unquoted property names: ``{ key: value }`` / ``, key: value``
+        # → ``{ "key": value }`` / ``, "key": value``. Approximation —
+        # may slip on identifiers that appear *inside* a string value,
+        # but quote-aware parsing here is overkill; we re-try and bail
+        # to None if the result is still invalid.
+        text = _re.sub(
+            r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:',
+            r'\1"\2":',
+            text,
+        )
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            return None
 
     async def _get_async_client(self) -> AsyncOpenAI:
         """Get or create the async OpenAI client (thread-safe)."""
