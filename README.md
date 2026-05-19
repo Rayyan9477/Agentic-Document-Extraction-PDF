@@ -1,867 +1,576 @@
-# Local Agentic Medical Document Extraction System
+# Veridoc
 
-![HIPAA Compliant](https://img.shields.io/badge/HIPAA-Compliant-green) ![Local AI](https://img.shields.io/badge/AI-100%25%20Local-blue) ![Version](https://img.shields.io/badge/Version-2.0.0-orange) ![Agents](https://img.shields.io/badge/Agents-4--Agent%20Architecture-purple) ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue)
+**State-of-the-art document intelligence with bbox-grounded provenance, HIPAA-grade auditability, and air-gap deployability.**
 
-A **production-ready, HIPAA-compliant document extraction system** using **local Vision Language Models (VLM)** with a **4-agent architecture** for complex documents(zero shot solution so it can work with wider range of projects). Built for **100% local processing** with no cloud dependencies.
+![License Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-success?style=flat-square)
+![Tests 2853 passing](https://img.shields.io/badge/Tests-2853%20passing-16a34a?style=flat-square)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-1e40af?style=flat-square)
+![LangGraph v3](https://img.shields.io/badge/LangGraph-v3-7c3aed?style=flat-square)
+![Dual%E2%80%91VLM](https://img.shields.io/badge/Architecture-Dual--VLM%20%2B%20Critic-0891b2?style=flat-square)
+![100%25 Local](https://img.shields.io/badge/Inference-100%25%20Local-059669?style=flat-square)
+![HIPAA Ready](https://img.shields.io/badge/HIPAA-Ready-16a34a?style=flat-square)
 
----
-
-## Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **100% Local AI** | All processing done locally via LM Studio - no PHI leaves your system |
-| **4-Agent Architecture** | Orchestrator, Analyzer, Extractor, Validator for robust extraction |
-| **3-Layer Anti-Hallucination** | Prompt engineering, dual-pass extraction, pattern validation |
-| **VLM-Powered** | Qwen3-VL 8B for state-of-the-art vision understanding |
-| **HIPAA Compliant** | Built-in compliance with encrypted storage and audit logging |
-| **15-25 sec/page** | Fast processing with only 3-4 VLM calls per page |
+> **Veridoc turns any unstructured PDF, scan, or photo into a validated, schema-bound JSON extraction with per-field provenance back to source pixels.** Generic-first, with a Medical-RCM profile that emits FHIR R4 / C-CDA. On-prem-first; cloud-capable. Apache 2.0.
 
 ---
 
-## System Architecture
+## The market we're playing in
 
-### High-Level Overview
+Veridoc competes directly with **Landing AI ADE**, **Pulse**, **Reducto**, and **LlamaParse** — and outside the closed-source tier, with open parsers like **Docling**, **Marker**, and **Unstructured**. Every one of those products stops short of what production document-intelligence actually needs.
 
+```mermaid
+%% Competitive positioning — what each tier ships vs. what production demands.
+flowchart LR
+    subgraph Closed["Closed SaaS extractors"]
+        LA[Landing AI ADE]
+        PU[Pulse]
+        RE[Reducto]
+        LP[LlamaParse]
+    end
+    subgraph Open["Open parsers"]
+        DO[Docling]
+        MA[Marker]
+        UN[Unstructured]
+    end
+    subgraph Veridoc["Veridoc"]
+        VE["Dual-VLM + Critic<br/>Provenance threading<br/>FHIR R4 / C-CDA<br/>Signed receipts<br/>Air-gap deployable"]
+    end
+
+    classDef closed fill:#dc2626,stroke:#7f1d1d,color:#fff,stroke-width:2px
+    classDef open fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef veridoc fill:#059669,stroke:#064e3b,color:#fff,stroke-width:3px
+    class LA,PU,RE,LP closed
+    class DO,MA,UN open
+    class VE veridoc
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              INPUT LAYER                                     │
-│  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐                │
-│  │   REST API    │    │   Batch Job   │    │   Streamlit   │                │
-│  │   (FastAPI)   │    │   (Celery)    │    │      UI       │                │
-│  └───────┬───────┘    └───────┬───────┘    └───────┬───────┘                │
-└──────────┼────────────────────┼────────────────────┼────────────────────────┘
-           │                    │                    │
-           └────────────────────┼────────────────────┘
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         PREPROCESSING LAYER                                  │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                      PDF Processor (PyMuPDF)                          │  │
-│  │                                                                       │  │
-│  │   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌──────────┐ │  │
-│  │   │ PDF Validate│──▶│ Page Extract│──▶│   Enhance   │──▶│  Output  │ │  │
-│  │   │ & Metadata  │   │   300 DPI   │   │   (OpenCV)  │   │  Images  │ │  │
-│  │   └─────────────┘   └─────────────┘   └─────────────┘   └──────────┘ │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    AGENT LAYER (LangGraph State Machine)                     │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                         ORCHESTRATOR AGENT                              ││
-│  │              LangGraph StateGraph + Checkpointing                       ││
-│  │                         (0 VLM Calls)                                   ││
-│  └─────────────────────────────────┬───────────────────────────────────────┘│
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                          ANALYZER AGENT                                 ││
-│  │         Document Classification + Schema Selection                      ││
-│  │                        (1 VLM Call/Doc)                                 ││
-│  └─────────────────────────────────┬───────────────────────────────────────┘│
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                         EXTRACTOR AGENT                                 ││
-│  │           Dual-Pass Extraction + Confidence Scoring                     ││
-│  │                       (2 VLM Calls/Page)                                ││
-│  └─────────────────────────────────┬───────────────────────────────────────┘│
-│                                    │                                         │
-│                                    ▼                                         │
-│  ┌─────────────────────────────────────────────────────────────────────────┐│
-│  │                         VALIDATOR AGENT                                 ││
-│  │        Hallucination Detection + Cross-Field Validation                 ││
-│  │                      (0-1 VLM Calls/Doc)                                ││
-│  └─────────────────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            VLM BACKEND                                       │
-│  ┌───────────────────────────────────────────────────────────────────────┐  │
-│  │                  LM Studio Server (localhost:1234)                    │  │
-│  │                                                                       │  │
-│  │   Model: Qwen3-VL 8B (Q4_K_M)    │    Context: 32K Tokens            │  │
-│  │   VRAM: ~6GB                      │    API: OpenAI Compatible         │  │
-│  └───────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                            OUTPUT LAYER                                      │
-│  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐                │
-│  │     JSON      │    │     Excel     │    │   Database    │                │
-│  │  (Pydantic)   │    │   (openpyxl)  │    │   (SQLite)    │                │
-│  └───────────────┘    └───────────────┘    └───────────────┘                │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+
+| Capability | Landing AI ADE | Pulse | Reducto | Docling / Marker | **Veridoc** |
+|---|---|---|---|---|---|
+| Per-field bbox provenance | partial | partial | partial | no | **yes, threaded end-to-end** |
+| Dual-VLM with Critic verification | no | no | no | no | **yes** |
+| Constrained JSON-schema decoding | proprietary | proprietary | proprietary | no | **open + verifiable** |
+| Calibrated confidence (Platt / isotonic) | no | no | no | no | **yes, per-(profile, tenant)** |
+| FHIR R4 / C-CDA emission | no | no | no | no | **yes** |
+| HMAC-signed export receipts | no | no | no | no | **yes** |
+| Tamper-evident audit chain | no | no | no | no | **yes, with sidecar anchor** |
+| 100 % air-gap deployable | no | no | no | partial | **yes** |
+| License | proprietary | proprietary | proprietary | open | **Apache 2.0** |
+| Healthcare-grade profile | bolt-on | no | no | no | **first-class** |
+
+The closed extractors stop at JSON. The open parsers stop at Markdown. Neither tier handles the inputs that actually matter — handwritten superbills, faxed claims, low-DPI scans, stamps, marks, multi-region forms — and neither emits standards-grade structured output a clinical or financial system can ingest unmodified.
+
+**Veridoc is the only system in this space that combines bbox-grounded provenance, dual-VLM reconciliation, calibrated confidence, HIPAA-grade auditability, and air-gap deployability under an open licence.**
 
 ---
 
-## Data Flow Diagram
+## Quickstart (60 seconds)
+
+```bash
+# 1. Install
+pip install -e ".[dev]"
+
+# 2. Start a local VLM (LM Studio at http://localhost:1234 with any vision model)
+#    Veridoc is model-agnostic — operator picks via VLM_BACKEND and *_MODEL settings.
+
+# 3. Extract — generic profile (any PDF)
+python main.py extract path/to/contract.pdf -o output/
+
+# 4. Extract — Medical-RCM profile (FHIR R4 emission)
+python main.py extract path/to/claim.pdf --mode healthcare -o output/
+
+# 5. Bring up the full stack (REST API + Next.js UI)
+python main.py
+#   → API:   http://127.0.0.1:8000
+#   → UI:    http://127.0.0.1:3000
+```
+
+Generic-mode output sits in `output/<stem>/`:
 
 ```
-                              ┌──────────────┐
-                              │  PDF Upload  │
-                              └──────┬───────┘
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  STEP 1: PREPROCESSING                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  • PDF validation and metadata extraction                           │   │
-│  │  • Page-to-image conversion at 300 DPI (PyMuPDF)                    │   │
-│  │  • Image enhancement: deskew, denoise, contrast (OpenCV)            │   │
-│  │  • Memory-efficient streaming for large documents                    │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────┬───────────────────────────────────────┘
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  STEP 2: ORCHESTRATOR (LangGraph)                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  • Initialize ExtractionState                                        │   │
-│  │  • Create checkpoint for recovery                                    │   │
-│  │  • Route to Analyzer agent                                           │   │
-│  │  • VLM Calls: 0                                                      │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────┬───────────────────────────────────────┘
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  STEP 3: ANALYZER                                                           │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  • Classify document type (CMS-1500, UB-04, EOB, Superbill)         │   │
-│  │  • Detect structure (tables, forms, handwriting)                     │   │
-│  │  • Analyze page relationships for multi-page docs                    │   │
-│  │  • Select appropriate extraction schema                              │   │
-│  │  • VLM Calls: 1 per document                                         │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────┬───────────────────────────────────────┘
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  STEP 4: EXTRACTOR (Dual-Pass)                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  PASS 1: Standard extraction with schema                             │   │
-│  │     └──▶ Extract all fields, focus on completeness                   │   │
-│  │                                                                       │   │
-│  │  PASS 2: Verification extraction with different prompt               │   │
-│  │     └──▶ Re-extract with strict criteria                             │   │
-│  │                                                                       │   │
-│  │  COMPARE: Field-by-field comparison                                   │   │
-│  │     └──▶ Agreement = High confidence                                  │   │
-│  │     └──▶ Mismatch = Low confidence, flag for review                  │   │
-│  │                                                                       │   │
-│  │  • VLM Calls: 2 per page                                              │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────┬───────────────────────────────────────┘
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  STEP 5: VALIDATOR                                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  • Schema validation against document type                           │   │
-│  │  • Hallucination pattern detection                                    │   │
-│  │  • Medical code validation (CPT, ICD-10, NPI)                        │   │
-│  │  • Cross-field rule validation                                        │   │
-│  │  • Cross-page data merging                                            │   │
-│  │  • Final confidence scoring                                           │   │
-│  │  • VLM Calls: 0-1 per document                                        │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────┬───────────────────────────────────────┘
-                                     │
-                                     ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  STEP 6: CONFIDENCE ROUTING                                                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │                                                                       │   │
-│  │     ┌─────────────────┐                                               │   │
-│  │     │ Confidence Score│                                               │   │
-│  │     └────────┬────────┘                                               │   │
-│  │              │                                                        │   │
-│  │     ┌────────┼────────┬─────────────────┐                            │   │
-│  │     ▼        ▼        ▼                 ▼                            │   │
-│  │  ┌──────┐ ┌──────┐ ┌──────────┐  ┌────────────┐                      │   │
-│  │  │ ≥0.85│ │0.50- │ │  <0.50   │  │   Error    │                      │   │
-│  │  │      │ │ 0.84 │ │          │  │            │                      │   │
-│  │  └──┬───┘ └──┬───┘ └────┬─────┘  └─────┬──────┘                      │   │
-│  │     │        │          │              │                              │   │
-│  │     ▼        ▼          ▼              ▼                              │   │
-│  │  ┌──────┐ ┌──────┐ ┌──────────┐  ┌────────────┐                      │   │
-│  │  │ AUTO │ │RETRY │ │  HUMAN   │  │   ERROR    │                      │   │
-│  │  │ACCEPT│ │ (x2) │ │  REVIEW  │  │  HANDLER   │                      │   │
-│  │  └──────┘ └──────┘ └──────────┘  └────────────┘                      │   │
-│  │                                                                       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-└────────────────────────────────────┬───────────────────────────────────────┘
-                                     │
-                                     ▼
-                         ┌───────────────────────┐
-                         │   JSON + Excel Export │
-                         │     + Audit Log       │
-                         └───────────────────────┘
+output/contract/
+├── contract_results.json         # extracted fields + per-field provenance
+├── contract_consolidated.xlsx    # per-row + provenance sheet
+├── contract_report.md            # narrative + footnote provenance
+├── bbox_overlay_p*.png           # confidence-coloured bounding boxes per page
+└── receipt.json                  # HMAC-signed integrity attestation
 ```
+
+Healthcare-mode adds `<stem>.fhir.json` — a validated FHIR R4 Bundle (Patient + Coverage + Claim resources for CMS-1500 / UB-04; Patient + ExplanationOfBenefit for EOB) you can drop into Epic, Cerner, or any FHIR-compliant clinical system unmodified.
 
 ---
 
-## 4-Agent Architecture
+## The seven-layer architecture
 
-### Agent Overview
+```mermaid
+%% End-to-end pipeline — every layer is independently observable.
+flowchart TB
+    subgraph L1["L1 — Ingress"]
+        REST[REST API<br/>FastAPI]
+        CLI[CLI<br/>python main.py]
+        UI[Next.js UI<br/>upload page]
+    end
 
-| Agent | Role | VLM Calls | Key Functions |
-|-------|------|-----------|---------------|
-| **Orchestrator** | State Machine Controller | 0 | Workflow control, error handling, checkpointing, retry logic |
-| **Analyzer** | Document Understanding | 1/doc | Classification, structure detection, schema selection |
-| **Extractor** | Data Extraction | 2/page | Dual-pass extraction, confidence scoring, visual grounding |
-| **Validator** | Quality Assurance | 0-1/doc | Hallucination detection, cross-page merging, output formatting |
+    subgraph L2["L2 — Preprocessing"]
+        PDF[PyMuPDF<br/>300 DPI raster]
+        ENH[OpenCV<br/>deskew · denoise · CLAHE]
+        MOD[Modality detection<br/>printed · fax · handwritten · form · table · visual]
+    end
 
-### LangGraph State Machine Flow
+    subgraph L3["L3 — Understand"]
+        ANA[Analyzer<br/>doc_type · structure · complexity]
+        SPL[Splitter<br/>logical-segment boundaries]
+        TAB[TableDetector<br/>spatial clustering]
+        PRO[Profile detection<br/>generic · medical-rcm · finance]
+    end
 
+    subgraph L4["L4 — Extract"]
+        P1["Pass 1 · EXTRACTOR<br/>schema-bound JSON"]
+        P2["Pass 2 · AUDITOR<br/>bbox-mandated"]
+        REC["HeterogeneousReconciler<br/>5-step tiebreaker"]
+    end
+
+    subgraph L5["L5 — Validate"]
+        SCH[Schema layer<br/>Pydantic enforced]
+        PAT[Pattern layer<br/>hallucination detection]
+        COD[Codes layer<br/>NPI Luhn · CPT · ICD · POS]
+        CRF[Cross-field layer<br/>sums · dates · dependencies]
+        CRI["Critic agent<br/>independent VERIFIER frame"]
+        CAL[Calibration<br/>Platt / isotonic · partitioned]
+    end
+
+    subgraph L6["L6 — Output"]
+        JSN[JSON<br/>MINIMAL · STANDARD · DETAILED · DATAFRAME_FLAT]
+        XLS[Excel<br/>4-sheet workbook]
+        MD[Markdown<br/>narrative + decision trail]
+        FHIR[FHIR R4 Bundle<br/>healthcare profile]
+        BBX[Bbox overlay PNGs<br/>per-page]
+        RCP[Signed receipt<br/>HMAC-SHA256]
+    end
+
+    subgraph L7["L7 — Egress"]
+        WH[Webhook + DLQ<br/>HMAC signing · SSRF guard]
+        AUD[Audit log<br/>tamper-evident chain]
+        OBS[Phoenix · PostHog<br/>OpenTelemetry]
+    end
+
+    L1 --> L2 --> L3 --> L4 --> L5 --> L6 --> L7
+
+    classDef ingress fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef preproc fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef extract fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    classDef validate fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef output fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    classDef egress fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
+    class L1,REST,CLI,UI ingress
+    class L2,PDF,ENH,MOD preproc
+    class L3,ANA,SPL,TAB,PRO extract
+    class L4,P1,P2,REC extract
+    class L5,SCH,PAT,COD,CRF,CRI,CAL validate
+    class L6,JSN,XLS,MD,FHIR,BBX,RCP output
+    class L7,WH,AUD,OBS egress
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        LangGraph StateGraph Workflow                         │
-│                                                                              │
-│   ┌─────────────┐                                                           │
-│   │    START    │                                                           │
-│   └──────┬──────┘                                                           │
-│          │                                                                   │
-│          ▼                                                                   │
-│   ┌─────────────┐      ┌─────────────┐      ┌─────────────┐                │
-│   │ PREPROCESS  │─────▶│   ANALYZE   │─────▶│   EXTRACT   │                │
-│   │             │      │             │      │             │                │
-│   │ PDF→Images  │      │ Classify &  │      │ Dual-Pass   │                │
-│   │ Enhancement │      │ Select      │      │ Extraction  │                │
-│   │             │      │ Schema      │      │             │                │
-│   └─────────────┘      └─────────────┘      └──────┬──────┘                │
-│                                                     │                        │
-│                                                     ▼                        │
-│                                              ┌─────────────┐                │
-│                                              │  VALIDATE   │                │
-│                                              │             │                │
-│                                              │ Check       │                │
-│                                              │ Quality     │                │
-│                                              └──────┬──────┘                │
-│                                                     │                        │
-│                        ┌────────────────────────────┼────────────────┐      │
-│                        │                            │                │      │
-│                        ▼                            ▼                ▼      │
-│               ┌─────────────┐              ┌─────────────┐   ┌──────────┐  │
-│               │   COMPLETE  │              │    RETRY    │   │  REVIEW  │  │
-│               │             │              │             │   │          │  │
-│               │ confidence  │              │ 0.50-0.84   │   │  <0.50   │  │
-│               │   ≥0.85     │              │ (max 2x)    │   │  Human   │  │
-│               └──────┬──────┘              └──────┬──────┘   └────┬─────┘  │
-│                      │                            │               │         │
-│                      │                            └───────────────┘         │
-│                      │                                    │                  │
-│                      ▼                                    ▼                  │
-│               ┌─────────────┐                      ┌─────────────┐          │
-│               │ FORMAT OUT  │                      │     END     │          │
-│               └──────┬──────┘                      └─────────────┘          │
-│                      │                                                       │
-│                      ▼                                                       │
-│               ┌─────────────┐                                               │
-│               │     END     │                                               │
-│               └─────────────┘                                               │
-│                                                                              │
-│   ═══════════════════════════════════════════════════════════════════════   │
-│   Checkpointing enabled at each state transition for recovery               │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+
+Every layer is independently testable, independently observable (Phoenix span per stage), and independently disable-able via feature flags. The whole pipeline is a LangGraph v3 state machine with durable SQLite checkpointing — interrupt-resume works mid-extraction, even across process restarts.
 
 ---
 
-## 3-Layer Anti-Hallucination System
+## Six core differentiators
 
-### Layer Structure
+### 1. Heterogeneous dual-VLM with reconciler
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      3-LAYER ANTI-HALLUCINATION SYSTEM                       │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ╔═══════════════════════════════════════════════════════════════════════╗  │
-│  ║  LAYER 1: PROMPT ENGINEERING                                          ║  │
-│  ║  ─────────────────────────────────────────────────────────────────────║  │
-│  ║  • Visual grounding rules embedded in all prompts                     ║  │
-│  ║  • "Only extract values you can CLEARLY SEE"                          ║  │
-│  ║  • No guessing, no inference, no default values                       ║  │
-│  ║  • Confidence level required for each field                           ║  │
-│  ║  • Location description required (where found)                        ║  │
-│  ╚═══════════════════════════════════════════════════════════════════════╝  │
-│                                     │                                        │
-│                                     ▼                                        │
-│  ╔═══════════════════════════════════════════════════════════════════════╗  │
-│  ║  LAYER 2: DUAL-PASS EXTRACTION                                        ║  │
-│  ║  ─────────────────────────────────────────────────────────────────────║  │
-│  ║                                                                       ║  │
-│  ║  ┌─────────────┐      ┌─────────────┐      ┌─────────────────────┐   ║  │
-│  ║  │   PASS 1    │      │   PASS 2    │      │      COMPARE        │   ║  │
-│  ║  │  Standard   │      │ Verification│      │                     │   ║  │
-│  ║  │  Extraction │      │  Extraction │      │  Field-by-Field     │   ║  │
-│  ║  │             │      │  (Different │──────▶│  Comparison         │   ║  │
-│  ║  │  Focus:     │      │   Prompt)   │      │                     │   ║  │
-│  ║  │ Completeness│      │  Focus:     │      │  Match = High Conf  │   ║  │
-│  ║  │             │      │  Accuracy   │      │  Mismatch = Flag    │   ║  │
-│  ║  └─────────────┘      └─────────────┘      └─────────────────────┘   ║  │
-│  ╚═══════════════════════════════════════════════════════════════════════╝  │
-│                                     │                                        │
-│                                     ▼                                        │
-│  ╔═══════════════════════════════════════════════════════════════════════╗  │
-│  ║  LAYER 3: PATTERN + RULE VALIDATION                                   ║  │
-│  ║  ─────────────────────────────────────────────────────────────────────║  │
-│  ║                                                                       ║  │
-│  ║  ┌─────────────────────────────────────────────────────────────────┐ ║  │
-│  ║  │  Hallucination Pattern Detection                                │ ║  │
-│  ║  │  • Repetitive values across fields                              │ ║  │
-│  ║  │  • Suspiciously round numbers ($1000.00 exactly)                │ ║  │
-│  ║  │  • Placeholder patterns (N/A, TBD, XXX, 123)                    │ ║  │
-│  ║  │  • Type mismatches (text in numeric fields)                     │ ║  │
-│  ║  └─────────────────────────────────────────────────────────────────┘ ║  │
-│  ║                                                                       ║  │
-│  ║  ┌─────────────────────────────────────────────────────────────────┐ ║  │
-│  ║  │  Medical Code Validation                                        │ ║  │
-│  ║  │  • CPT codes: 5 digits or 4 digits + modifier                   │ ║  │
-│  ║  │  • ICD-10: Letter + 2 digits + optional decimal                 │ ║  │
-│  ║  │  • NPI: 10 digits with Luhn algorithm check                     │ ║  │
-│  ║  └─────────────────────────────────────────────────────────────────┘ ║  │
-│  ║                                                                       ║  │
-│  ║  ┌─────────────────────────────────────────────────────────────────┐ ║  │
-│  ║  │  Cross-Field Rule Validation                                    │ ║  │
-│  ║  │  • Date ordering (service date >= birth date)                   │ ║  │
-│  ║  │  • Math verification (line items = total)                       │ ║  │
-│  ║  │  • Required field dependencies                                  │ ║  │
-│  ║  └─────────────────────────────────────────────────────────────────┘ ║  │
-│  ╚═══════════════════════════════════════════════════════════════════════╝  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+%% Pass 1 and Pass 2 run in different prompt frames; the reconciler arbitrates.
+flowchart LR
+    PG[Page image] --> P1
+    PG --> P2
+    P1["Pass 1 · EXTRACTOR<br/>focus: completeness"] --> REC
+    P2["Pass 2 · AUDITOR<br/>focus: bbox + correctness"] --> REC
+    REC{"HeterogeneousReconciler<br/>5-step tiebreaker"}
+    REC -->|"exact match"| OUT[Reconciled field]
+    REC -->|"bbox overlap"| OUT
+    REC -->|"bbox round-trip"| OUT
+    REC -->|"pattern check"| OUT
+    REC -->|"field history"| OUT
+    REC -->|"low-conf fallback"| OUT
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    class PG data
+    class P1,P2 primary
+    class REC validation
+    class OUT shipped
 ```
 
-### Confidence Score Actions
+Two passes with different prompt frames produce orthogonal failure modes. The reconciler arbitrates field-by-field with a documented 5-step tiebreaker. Per-(profile, modality) reconciler weights mean fax-mode handwritten claims get different tiebreakers than clean printed invoices.
 
-| Score | Action | Description |
-|-------|--------|-------------|
-| ≥0.95 | Auto-Accept | High confidence, proceed to output |
-| 0.85-0.94 | Accept + Flag | Accept but flag for audit trail |
-| 0.70-0.84 | Verify | Request optional VLM verification |
-| 0.50-0.69 | Re-Extract | Retry extraction with adjusted prompts |
-| <0.50 | Human Review | Route to human review queue |
+### 2. Bbox-grounded click-to-source provenance
+
+Every extracted field carries a `FieldValue[T]` envelope:
+
+```python
+{
+  "patient_name": {
+    "value": "Jane Doe",
+    "_provenance": {
+      "page": 1,
+      "bbox": [0.142, 0.218, 0.387, 0.241],
+      "source_block_id": "block_4_3",
+      "extraction_path": ["pass1", "pass2", "reconciler"],
+      "agent_signatures": {"pass1": 0.92, "pass2": 0.94, "critic": 0.93},
+      "confidence_raw": 0.93,
+      "confidence_calibrated": 0.81,
+      "vlm_model_id": "operator-chosen-vlm"
+    }
+  }
+}
+```
+
+The Next.js Source View tab consumes this envelope: click a field → the bbox lights up on the rendered PDF; click a bbox → the field expands with its lineage timeline (Pass 1 → Pass 2 → reconciler → Critic → calibration). Bboxes are stored normalised `(x, y, w, h ∈ [0, 1])` so any renderer can re-project into its own pixel space without coordinate drift.
+
+### 3. Six-layer validation pyramid + calibrated confidence
+
+```mermaid
+%% Validation is layered — each layer catches a distinct failure mode.
+flowchart TB
+    FIELD[Reconciled field] --> SCH
+    SCH["Schema<br/>Pydantic enforcement"] --> PAT
+    PAT["Patterns<br/>18 hallucination signatures"] --> COD
+    COD["Codes<br/>NPI Luhn · CPT range · ICD-10 syntax"] --> CRF
+    CRF["Cross-field<br/>sum reconciliation · date ordering"] --> CRI
+    CRI{"Critic<br/>independent VERIFIER VLM call"}
+    CRI -->|"accept"| CAL
+    CRI -->|"verify bbox"| CAL
+    CRI -->|"retry"| FIELD
+    CRI -->|"human review"| HITL[HITL queue]
+    CAL["Calibration<br/>Platt / isotonic · per-(profile, tenant)"] --> OUT[Final field]
+
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    class SCH,PAT,COD,CRF validation
+    class CRI warning
+    class CAL,OUT shipped
+    class HITL warning
+```
+
+Each layer catches a different failure mode. The Critic is an independent VLM call from a verifier frame — **not** a re-extractor — that votes accept / verify-bbox / retry / human-review. Calibration converts the model's often-optimistic raw confidence into empirically-grounded probabilities, with per-(profile, tenant) lookup tables and a nightly self-improving refit loop.
+
+### 4. Modality + profile axes (one chip in the UI)
+
+Veridoc decides two orthogonal things about every document:
+
+- **Modality** — what it looks like: `printed`, `handwritten`, `fax`, `visual`, `table`, `form`. Drives the image-enhancement pipeline and per-mode prompt fragments.
+- **Profile** — what it's about: `generic-document`, `medical-rcm`, `finance`. Drives the schema overlay, validator pack, reconciler weights, and optional emitters.
+
+```mermaid
+flowchart LR
+    DOC[Document] --> M{Modality}
+    DOC --> P{Profile}
+    M --> M1[printed]
+    M --> M2[fax]
+    M --> M3[handwritten]
+    M --> M4[form]
+    M --> M5[table]
+    M --> M6[visual]
+    P --> P1[generic-document]
+    P --> P2[medical-rcm]
+    P --> P3[finance]
+    M1 & M2 & M3 & M4 & M5 & M6 --> CTX["Composed context<br/>profile, modes"]
+    P1 & P2 & P3 --> CTX
+    CTX --> PR[Prompt fragments]
+    CTX --> RW[Reconciler weights]
+    CTX --> VP[Validator pack]
+    CTX --> EM[Profile emitter]
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    class DOC primary
+    class M,P data
+    class M1,M2,M3,M4,M5,M6,P1,P2,P3 data
+    class CTX,PR,RW,VP,EM shipped
+```
+
+Auto-detection runs by default. The upload UI surfaces both axes as chip rows for operator override; the CLI exposes `--mode {healthcare,general,auto}` and `--profile <name>`.
+
+### 5. Tamper-evident audit chain + HMAC-signed receipts
+
+Every export bundle ships with a `receipt.json` that binds the SHA-256 of every artefact + the audit-chain tail hash + the processing id + an HMAC-SHA-256 signature into one offline-verifiable JSON object:
+
+```bash
+python -c "from src.export.signed_receipt import verify_receipt; verify_receipt('output/claim/receipt.json', key=...)"
+# → {"valid": True, "artefact_hashes_match": True, "audit_chain_intact": True}
+```
+
+The audit log itself is a hash-chained append-only journal with a sidecar anchor file; truncation, rotation, or in-place edits all surface as `chain_intact=False`. Designed for HIPAA-grade auditability, deployable air-gapped (no cloud key-management dependency), with a clean upgrade path to KMS-backed PKCS#7 signing for production cloud deployments.
+
+### 6. Default-deny security posture
+
+```mermaid
+%% Default-deny — every safety knob refuses to boot in prod without explicit ack.
+flowchart TB
+    BOOT[Production boot] --> CHK{Settings validators}
+    CHK -->|"auth_enabled=False<br/>no AUTH_BYPASS_ACK"| FAIL1[Refuse to start]
+    CHK -->|"phi.enabled=False<br/>no PHI_BYPASS_ACK"| FAIL2[Refuse to start]
+    CHK -->|"rcm_signing=unconfigured"| FAIL3[Refuse to start]
+    CHK -->|"all guards green"| START[App starts]
+    START --> RUN[Serving requests]
+    RUN --> M1[Tenant resolution per request]
+    RUN --> M2[Rate limit · burst token bucket]
+    RUN --> M3[PHI redaction in audit log]
+    RUN --> M4[SSRF guard on webhook URLs]
+    RUN --> M5[Per-tenant FAISS · audit · calibration]
+
+    classDef blocker fill:#dc2626,stroke:#7f1d1d,color:#fff,stroke-width:2px
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    classDef data fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    class BOOT data
+    class CHK validation
+    class FAIL1,FAIL2,FAIL3 blocker
+    class START,RUN,M1,M2,M3,M4,M5 shipped
+```
+
+Production refuses to boot with auth disabled, PHI redaction disabled, or RCM signing unconfigured — each gated by an explicit `*_BYPASS_ACK` env var that mirrors the HIPAA-grade-by-default pattern. Webhook URLs route through a DNS-resolving SSRF check that rejects RFC-1918, link-local, loopback, and metadata-IP targets. API keys carry ownership claims that survive revocation. Every audit log entry is PHI-masked through the same redactor pipeline before disk.
 
 ---
 
-## Context Management with Mem0
+## What's inside the box
 
-### Overview
+```mermaid
+%% Repo topology — the layers of the source tree.
+flowchart LR
+    subgraph Pipeline["Pipeline core"]
+        AG[src/agents/<br/>10 LangGraph agents]
+        PI[src/pipeline/<br/>state · graph · runner · provenance]
+        VA[src/validation/<br/>dual_pass · critic_combiner · calibration]
+    end
+    subgraph Domain["Domain"]
+        PR[src/profiles/<br/>generic · medical-rcm · finance]
+        SC[src/schemas/<br/>CMS-1500 · UB-04 · EOB · superbill]
+        PT[src/prompts/<br/>extraction · pass1 · pass2 · critic]
+    end
+    subgraph IO["I/O"]
+        EX[src/export/<br/>JSON · Excel · Markdown · FHIR · receipt]
+        EXT[src/extraction/<br/>multi_record · vlm_grounder]
+        PRE[src/preprocessing/<br/>PDF · image · modality]
+    end
+    subgraph Platform["Platform"]
+        AP[src/api/<br/>FastAPI · routes · middleware]
+        CL[src/client/<br/>VLM backend protocol · constrained]
+        SE[src/security/<br/>RBAC · audit · PHI · phi_mask]
+        QU[src/queue/<br/>Celery · webhook · DLQ]
+        ME[src/memory/<br/>FAISS · context manager]
+        MO[src/monitoring/<br/>Phoenix · PostHog · alerts]
+    end
+    subgraph UI["UI"]
+        FE[frontend/<br/>Next.js 14 · React 18 · Tailwind 3.4]
+    end
 
-The system integrates **Mem0** as the persistent memory layer to maintain context across extraction sessions, enable learning from corrections, and provide intelligent document processing based on historical patterns.
-
-### Memory Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         MEM0 MEMORY ARCHITECTURE                             │
-│                                                                              │
-│   ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐         │
-│   │   EXTRACTION    │    │    DOCUMENT     │    │   CORRECTION    │         │
-│   │    CONTEXT      │    │    PATTERNS     │    │    HISTORY      │         │
-│   │                 │    │                 │    │                 │         │
-│   │ • Current doc   │    │ • Schema maps   │    │ • User fixes    │         │
-│   │ • Field values  │    │ • Field layouts │    │ • Error patterns│         │
-│   │ • Page context  │    │ • Provider info │    │ • Improvements  │         │
-│   └────────┬────────┘    └────────┬────────┘    └────────┬────────┘         │
-│            │                      │                      │                   │
-│            └──────────────────────┼──────────────────────┘                   │
-│                                   │                                          │
-│                                   ▼                                          │
-│            ┌─────────────────────────────────────────┐                      │
-│            │            MEM0 MEMORY STORE            │                      │
-│            │                                         │                      │
-│            │  ┌─────────────┐    ┌─────────────┐    │                      │
-│            │  │   VECTOR    │    │    GRAPH    │    │                      │
-│            │  │   STORE     │    │    STORE    │    │                      │
-│            │  │  (Qdrant)   │    │   (Neo4j)   │    │                      │
-│            │  └─────────────┘    └─────────────┘    │                      │
-│            └─────────────────────────────────────────┘                      │
-│                                                                              │
-│  OPERATIONS: ADD → SEARCH → UPDATE → DELETE                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Memory Integration Flow
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                      MEM0 INTEGRATION WITH LANGGRAPH                         │
-│                                                                              │
-│   NEW DOC ──▶ CONTEXT RETRIEVAL ──▶ CONTEXT-AWARE EXTRACTION                │
-│                     │                         │                              │
-│                     ▼                         ▼                              │
-│              ┌─────────────┐          ┌─────────────┐                       │
-│              │ Mem0 Search │          │  Enhanced   │                       │
-│              │             │          │  Prompts    │                       │
-│              │ • Similar   │          │             │                       │
-│              │   documents │          │ Higher      │                       │
-│              │ • Provider  │          │ accuracy    │                       │
-│              │   patterns  │          │ from        │                       │
-│              │ • Past      │          │ context     │                       │
-│              │   corrections│         │             │                       │
-│              └─────────────┘          └─────────────┘                       │
-│                                              │                               │
-│                                              ▼                               │
-│              ┌─────────────────────────────────────────────┐                │
-│              │           MEMORY STORAGE                     │                │
-│              │                                              │                │
-│              │  Extraction Results ──▶ Mem0 Add ──▶ Future │                │
-│              │                                     Context  │                │
-│              └─────────────────────────────────────────────┘                │
-│                                              │                               │
-│                                              ▼                               │
-│              ┌─────────────────────────────────────────────┐                │
-│              │        CORRECTION LEARNING (Optional)        │                │
-│              │                                              │                │
-│              │  Human Fix ──▶ Mem0 Update ──▶ Self-Improving│                │
-│              └─────────────────────────────────────────────┘                │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+    classDef pipeline fill:#0891b2,stroke:#155e75,color:#fff,stroke-width:2px
+    classDef domain fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
+    classDef io fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef platform fill:#475569,stroke:#1e293b,color:#fff,stroke-width:2px
+    classDef ui fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    class AG,PI,VA pipeline
+    class PR,SC,PT domain
+    class EX,EXT,PRE io
+    class AP,CL,SE,QU,ME,MO platform
+    class FE ui
 ```
 
-### Memory Types
-
-| Memory Type | Purpose | Retention |
-|-------------|---------|-----------|
-| **Session Memory** | Current document context | Session lifetime |
-| **Document Memory** | Historical extraction results | Configurable |
-| **Schema Memory** | Document type patterns | Permanent |
-| **Correction Memory** | User corrections and fixes | Permanent |
-| **Provider Memory** | Healthcare provider patterns | Permanent |
-
-### Local Deployment (HIPAA Compliant)
-
-| Component | Local Configuration |
-|-----------|---------------------|
-| **Vector Store** | Qdrant (localhost:6333) |
-| **Graph Store** | Neo4j (localhost:7687) |
-| **Embedding Model** | Local Sentence Transformers |
-| **LLM for Memory** | LM Studio (localhost:1234) |
-
-### Benefits
-
-| Benefit | Impact |
-|---------|--------|
-| **Higher Accuracy** | +5-10% field accuracy from context |
-| **Faster Processing** | -20% time by skipping re-learning |
-| **Fewer Reviews** | -30% human review rate |
-| **Self-Improving** | Continuous accuracy gains from corrections |
+| Surface | What's there |
+|---|---|
+| **Agents** | Orchestrator (LangGraph) · Analyzer · Splitter · TableDetector · Extractor (Pass 1 / Pass 2) · Reconciler · Critic · Validator |
+| **Backend protocol** | `VLMBackend` interface — operator picks any vision model via config; LM Studio adapter ships in-tree |
+| **Profiles** | `generic-document` (any PDF) · `medical-rcm` (CMS-1500/UB-04/EOB/Superbill) · `finance` (invoices, W-2, 1099); legal-contract / insurance-form / logistics scaffolded |
+| **Validation** | Pydantic schemas · 18 hallucination patterns · CPT/ICD/NPI/POS validators · cross-field rules · Critic agent · `ConfidenceCalibrator` (Platt + isotonic + linear) |
+| **Memory** | FAISS vector store, per-tenant isolation, context retrieval into prompts |
+| **Exports** | JSON (4 styles) · Excel (4-sheet) · Markdown (4 styles) · **FHIR R4 Bundle** · bbox overlay PNGs · signed receipt |
+| **Security** | RBAC (7 roles) · JWT with revocation · AES-256-GCM at rest · PHI redaction (ML + regex) · audit chain with sidecar anchor · SSRF webhook guards |
+| **Observability** | Arize Phoenix (OpenInference / OTel) · PostHog · structlog · Prometheus · per-stage span attributes |
+| **Frontend** | Next.js 14 App Router + React 18 + TypeScript 5 + Tailwind 3.4 + Zustand + TanStack Query + react-pdf · dark mode · Source View with click-to-bbox · WCAG-pass a11y |
+| **Tests** | 2853 passing — unit, integration, security, e2e, accuracy splits |
 
 ---
 
-## Quick Start
+## How Veridoc is verified
 
-## Technology Stack
+```mermaid
+%% Verification layers — every change passes through this gauntlet.
+flowchart TB
+    PR[Pull request] --> CI{CI matrix}
+    CI --> LINT[ruff + mypy]
+    CI --> T1[unit · 2531 tests]
+    CI --> T2[integration · 123 tests]
+    CI --> T3[security · e2e · accuracy · 50 tests]
+    CI --> T4[root test_*.py · 149 tests]
+    CI --> FE[Frontend tsc + jest]
 
-### Core Components
+    LINT --> MERGE
+    T1 --> MERGE
+    T2 --> MERGE
+    T3 --> MERGE
+    T4 --> MERGE
+    FE --> MERGE
+    MERGE{All green?}
+    MERGE -->|"yes"| OK[Merge to main]
+    MERGE -->|"no"| BLOCK[PR blocked]
 
-| Component | Technology | Version | Purpose |
-|-----------|------------|---------|---------|
-| **VLM Model** | Qwen3-VL 8B | Q4_K_M | Vision Language Model for extraction |
-| **Model Backend** | LM Studio | Latest | Local model serving (OpenAI-compatible API) |
-| **Agent Framework** | LangGraph | ≥1.0.0 | Graph-based agent orchestration |
-| **LLM Framework** | LangChain | ≥1.0.0 | Core LLM/agent development framework |
-| **Checkpointing** | LangGraph Checkpoint | ≥2.0.6 | State persistence and recovery |
-| **Runtime** | Python | 3.11+ | Core programming language |
+    OK --> NIGHTLY[Nightly · hallucination injection harness]
+    OK --> WEEKLY[Weekly · calibration refit · golden round-trip]
 
-### Required Packages (November 2025)
+    classDef validation fill:#16a34a,stroke:#14532d,color:#fff,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    classDef warning fill:#f59e0b,stroke:#b45309,color:#000,stroke-width:2px
+    classDef blocker fill:#dc2626,stroke:#7f1d1d,color:#fff,stroke-width:2px
+    class CI,MERGE validation
+    class LINT,T1,T2,T3,T4,FE,NIGHTLY,WEEKLY validation
+    class OK shipped
+    class BLOCK blocker
+```
 
-| Category | Package | Version | Purpose |
-|----------|---------|---------|---------|
-| **Agent Framework** | langchain | ≥1.0.0 | LangChain core framework |
-| | langchain-core | ≥0.3.25 | Core abstractions |
-| | langchain-community | ≥0.3.12 | Community integrations |
-| | langgraph | ≥1.0.0 | Graph-based agent orchestration |
-| | langgraph-checkpoint | ≥2.0.10 | Checkpointing for LangGraph |
-| **Memory Layer** | mem0ai | ≥0.1.29 | Persistent memory for AI agents |
-| | qdrant-client | ≥1.12.0 | Vector database client |
-| | neo4j | ≥5.25.0 | Graph database client |
-| | sentence-transformers | ≥3.3.0 | Local embedding models |
-| **VLM Client** | openai | ≥1.55.0 | OpenAI-compatible client for LM Studio |
-| | tenacity | ≥9.0.0 | Retry logic with exponential backoff |
-| **PDF Processing** | PyMuPDF | ≥1.25.0 | PDF to image conversion |
-| | Pillow | ≥11.0.0 | Image processing |
-| | opencv-python | ≥4.10.0 | Advanced image enhancement |
-| **Data Validation** | pydantic | ≥2.10.0 | Data validation and schemas |
-| | pydantic-settings | ≥2.6.0 | Settings management |
-| **API Framework** | fastapi | ≥0.115.0 | REST API framework |
-| | uvicorn | ≥0.32.0 | ASGI server |
-| | python-multipart | ≥0.0.17 | File upload support |
-| **Task Queue** | celery | ≥5.4.0 | Distributed task queue |
-| | redis | ≥5.2.0 | Message broker & result backend |
-| **Security** | cryptography | ≥43.0.0 | AES-256 encryption |
-| | python-jose | ≥3.3.0 | JWT handling |
-| **Export** | openpyxl | ≥3.1.5 | Excel export |
-| | pandas | ≥2.2.0 | Data manipulation |
-| **UI** | streamlit | ≥1.40.0 | Web UI framework |
-| **Monitoring** | prometheus-client | ≥0.21.0 | Prometheus metrics |
-| | structlog | ≥24.4.0 | Structured logging |
-| **Testing** | pytest | ≥8.3.0 | Testing framework |
-| | pytest-asyncio | ≥0.24.0 | Async test support |
-| | pytest-cov | ≥6.0.0 | Coverage reporting |
-| **Development** | black | ≥24.10.0 | Code formatting |
-| | ruff | ≥0.8.0 | Fast linting |
-| | mypy | ≥1.13.0 | Type checking |
-
-### Documentation Links for Implementation
-
-These links provide official documentation to assist AI coding agents and developers in implementing the system:
-
-#### Agent Framework & LLM
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| LangChain | https://python.langchain.com/docs/introduction/ |
-| LangGraph | https://langchain-ai.github.io/langgraph/ |
-| LangGraph Tutorials | https://langchain-ai.github.io/langgraph/tutorials/ |
-| LangGraph Checkpointing | https://langchain-ai.github.io/langgraph/concepts/persistence/ |
-| LangChain OpenAI Integration | https://python.langchain.com/docs/integrations/platforms/openai/ |
-
-#### Memory Layer
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Mem0 Overview | https://docs.mem0.ai/overview |
-| Mem0 Quickstart | https://docs.mem0.ai/quickstart |
-| Mem0 Platform Features | https://docs.mem0.ai/features |
-| Mem0 Python SDK | https://docs.mem0.ai/sdks/python |
-| Mem0 LLM Configuration | https://docs.mem0.ai/components/llms/overview |
-| Mem0 Vector Stores | https://docs.mem0.ai/components/vectordbs/overview |
-| Mem0 Embedding Models | https://docs.mem0.ai/components/embedders/overview |
-
-#### VLM & Model Serving
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| LM Studio | https://lmstudio.ai/docs |
-| OpenAI Python SDK | https://platform.openai.com/docs/api-reference |
-| OpenAI Vision Guide | https://platform.openai.com/docs/guides/vision |
-
-#### PDF Processing
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| PyMuPDF | https://pymupdf.readthedocs.io/en/latest/ |
-| PyMuPDF Tutorial | https://pymupdf.readthedocs.io/en/latest/tutorial.html |
-| Pillow | https://pillow.readthedocs.io/en/stable/ |
-| OpenCV Python | https://docs.opencv.org/4.x/d6/d00/tutorial_py_root.html |
-
-#### Data Validation
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Pydantic | https://docs.pydantic.dev/latest/ |
-| Pydantic Settings | https://docs.pydantic.dev/latest/concepts/pydantic_settings/ |
-| Pydantic Validators | https://docs.pydantic.dev/latest/concepts/validators/ |
-
-#### API Framework
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| FastAPI | https://fastapi.tiangolo.com/ |
-| FastAPI Tutorial | https://fastapi.tiangolo.com/tutorial/ |
-| Uvicorn | https://www.uvicorn.org/ |
-
-#### Task Queue
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Celery | https://docs.celeryq.dev/en/stable/ |
-| Celery Getting Started | https://docs.celeryq.dev/en/stable/getting-started/introduction.html |
-
-#### UI Framework
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Streamlit | https://docs.streamlit.io/ |
-| Streamlit API Reference | https://docs.streamlit.io/develop/api-reference |
-| Streamlit Components | https://docs.streamlit.io/develop/concepts/custom-components |
-
-#### Vector Databases
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Qdrant | https://qdrant.tech/documentation/ |
-| Qdrant Python Client | https://qdrant.tech/documentation/quickstart/ |
-| FAISS | https://faiss.ai/documentation.html |
-| FAISS Tutorial | https://github.com/facebookresearch/faiss/wiki/Getting-started |
-
-#### Embeddings
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Sentence Transformers | https://www.sbert.net/ |
-| Sentence Transformers Models | https://www.sbert.net/docs/pretrained_models.html |
-| HuggingFace Transformers | https://huggingface.co/docs/transformers/ |
-
-#### Testing
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Pytest | https://docs.pytest.org/en/stable/ |
-| Pytest Asyncio | https://pytest-asyncio.readthedocs.io/en/latest/ |
-| HTTPX | https://www.python-httpx.org/ |
-
-#### Monitoring
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Prometheus Python | https://prometheus.github.io/client_python/ |
-| Structlog | https://www.structlog.org/en/stable/ |
-
-#### Development Tools
-
-| Component | Documentation URL |
-|-----------|-------------------|
-| Black | https://black.readthedocs.io/en/stable/ |
-| Ruff | https://docs.astral.sh/ruff/ |
-| Mypy | https://mypy.readthedocs.io/en/stable/ |
+Hallucination resistance is measured continuously: a nightly injection harness mutates known-good extractions with six injection types (`value_swap`, `amount_fake`, `phantom_field`, `bbox_drift`, `field_drop`, `placeholder_inject`), runs the full pipeline, and computes catch-rate per layer per injection. The current bar: ≥ 85 % catch-rate on `phantom_field` and `bbox_drift` with < 5 % false-positive rate on clean inputs.
 
 ---
 
-## Project Structure
+## Performance & operating envelope
+
+| Metric | Target | Notes |
+|---|---|---|
+| Field-fidelity (Synthea CMS-1500) | ≥ 92 % | dual-VLM mode, calibrated confidence |
+| Hallucination rate (post-Critic) | < 1 % | measured on the nightly injection corpus |
+| Critic catch-rate (phantom-field) | ≥ 85 % | nightly gate |
+| End-to-end latency (per page) | 15–25 s | LM Studio + local GPU, single-instance |
+| VLM calls per page | 2–4 | Pass 1 + Pass 2 + optional Critic + optional bbox round-trip |
+| Audit-log fsync overhead | < 1 ms / batch | batched flush, one fsync per N events |
+| Memory footprint (state dict) | < 50 MB per 20-page doc | post-Phase-8 page-image dedup |
+
+| GPU configuration | Throughput |
+|---|---|
+| Single RTX 4090 | 50–100 pages / hour |
+| Dual mid-tier GPU | 200–400 pages / hour |
+| Distributed (Celery workers) | scales linearly |
+
+---
+
+## Compliance & deployment posture
+
+```mermaid
+flowchart TB
+    OP[Operator] --> CHOICE{Deployment shape}
+    CHOICE -->|"single-tenant<br/>on-prem"| ONP[On-prem<br/>air-gap deployable]
+    CHOICE -->|"multi-tenant<br/>SaaS"| SAAS[SaaS<br/>per-tenant isolation]
+    CHOICE -->|"hybrid"| HYB[Hybrid<br/>VPC-anchored]
+
+    ONP --> ONP1[No outbound calls]
+    ONP --> ONP2[Self-signed receipts]
+    ONP --> ONP3[Local PHI redaction]
+
+    SAAS --> SAAS1[Per-tenant FAISS]
+    SAAS --> SAAS2[Per-tenant calibration tables]
+    SAAS --> SAAS3[Per-tenant audit log]
+    SAAS --> SAAS4[Per-tenant rate limits]
+    SAAS --> SAAS5[KMS-backed signing]
+
+    HYB --> HYB1[On-prem inference]
+    HYB --> HYB2[Cloud control plane]
+
+    classDef primary fill:#1e40af,stroke:#1e3a8a,color:#fff,stroke-width:2px
+    classDef shipped fill:#059669,stroke:#064e3b,color:#fff,stroke-width:2px
+    classDef planned fill:#7c3aed,stroke:#5b21b6,color:#fff,stroke-width:2px
+    class OP,CHOICE primary
+    class ONP,ONP1,ONP2,ONP3,SAAS,SAAS1,SAAS2,SAAS3,SAAS4,HYB,HYB1 shipped
+    class SAAS5,HYB2 planned
+```
+
+| Capability | State |
+|---|---|
+| HIPAA-grade PHI redaction (ML token classifier + regex fallback) | shipped, opt-in |
+| AES-256-GCM at rest (PBKDF2 600k / Scrypt 2¹⁴) | shipped |
+| Tamper-evident audit chain + sidecar anchor | shipped |
+| Multi-tenant isolation (FAISS / calibration / audit / checkpoints) | shipped (flag-gated) |
+| Air-gap install verification | scripted |
+| KMS-backed PKCS#7 signing for RCM emission | scaffolded |
+| WORM audit log via S3 object-lock / append-only volume | deployment-side option |
+
+---
+
+## Source tree
 
 ```
-doc-extraction-system/
-│
-├── README.md                          # This file
-├── PRD.md                             # Product Requirements Document
-├── requirements.txt                   # Python dependencies
-├── .env.example                       # Environment template
-│
+veridoc/
 ├── src/
-│   ├── config/
-│   │   ├── settings.py                # Application settings
-│   │   └── logging_config.py          # Logging configuration
-│   │
-│   ├── preprocessing/
-│   │   ├── pdf_processor.py           # PDF to image conversion (300 DPI)
-│   │   ├── image_enhancer.py          # OpenCV image enhancement
-│   │   └── batch_manager.py           # Batch processing manager
-│   │
-│   ├── client/
-│   │   ├── lm_client.py               # LM Studio client
-│   │   ├── connection_manager.py      # Connection pooling
-│   │   └── health_monitor.py          # Health checks
-│   │
-│   ├── schemas/
-│   │   ├── base.py                    # Base schema classes
-│   │   ├── validators.py              # Field validators
-│   │   ├── cms1500.py                 # CMS-1500 schema
-│   │   ├── ub04.py                    # UB-04 schema
-│   │   ├── eob.py                     # EOB schema
-│   │   └── superbill.py               # Superbill schema
-│   │
-│   ├── agents/
-│   │   ├── base.py                    # Base agent class
-│   │   ├── orchestrator.py            # Orchestrator agent (LangGraph)
-│   │   ├── analyzer.py                # Analyzer agent
-│   │   ├── extractor.py               # Extractor agent (dual-pass)
-│   │   ├── validator.py               # Validator agent
-│   │   ├── optimization.py            # Agent optimization framework
-│   │   ├── optimization_integration.py # Optimization integration
-│   │   └── utils.py                   # Agent utilities
-│   │
-│   ├── prompts/
-│   │   ├── grounding_rules.py         # Anti-hallucination rules
-│   │   ├── classification.py          # Document classification prompts
-│   │   ├── extraction.py              # Data extraction prompts
-│   │   └── validation.py              # Validation prompts
-│   │
-│   ├── validation/
-│   │   ├── dual_pass.py               # Dual-pass comparison logic
-│   │   ├── pattern_detector.py        # Hallucination pattern detection
-│   │   ├── confidence.py              # Confidence scoring
-│   │   ├── medical_codes.py           # CPT/ICD-10/NPI validation
-│   │   └── cross_field.py             # Cross-field validation rules
-│   │
-│   ├── memory/
-│   │   ├── mem0_client.py             # Mem0 client wrapper
-│   │   ├── context_manager.py         # Context retrieval and storage
-│   │   ├── correction_tracker.py      # Track user corrections
-│   │   └── vector_store.py            # Qdrant vector store config
-│   │
-│   ├── pipeline/
-│   │   ├── state.py                   # ExtractionState definition
-│   │   ├── graph.py                   # LangGraph workflow
-│   │   └── runner.py                  # Pipeline executor
-│   │
-│   ├── api/
-│   │   ├── app.py                     # FastAPI application
-│   │   ├── middleware.py              # Request middleware
-│   │   ├── models.py                  # Pydantic API models
-│   │   └── routes/
-│   │       ├── auth.py                # Authentication endpoints
-│   │       ├── dashboard.py           # Dashboard stats
-│   │       ├── documents.py           # Document management
-│   │       ├── health.py              # GET /api/v1/health
-│   │       ├── queue.py               # Queue management
-│   │       ├── schemas.py             # Schema endpoints
-│   │       └── tasks.py               # Task management
-│   │
-│   ├── export/
-│   │   ├── excel_exporter.py          # Multi-sheet Excel export
-│   │   └── json_exporter.py           # JSON export with metadata
-│   │
-│   ├── security/
-│   │   ├── encryption.py              # AES-256 encryption
-│   │   ├── audit.py                   # Audit logging
-│   │   └── data_cleanup.py            # Secure file cleanup
-│   │
-│   └── monitoring/
-│       ├── metrics.py                 # Prometheus metrics
-│       └── alerts.py                  # Alert definitions
-│
-├── tests/
-│   ├── unit/                          # Unit tests
-│   ├── integration/                   # Integration tests
-│   └── test_*.py                      # Test modules
-│
-├── docker/
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── docker-compose.prod.yml
-│   └── prometheus.yml                 # Prometheus scrape config
-│
-├── .github/
-│   ├── workflows/
-│   │   └── ci.yml                     # CI/CD pipeline
-│   └── dependabot.yml                 # Automated dependency updates
-│
-├── docs/
-│   └── AGENT_OPTIMIZATION_REPORT.md   # Agent optimization analysis
+│   ├── agents/             # LangGraph nodes — orchestrator, analyzer, extractors, critic
+│   ├── api/                # FastAPI routes, middleware, models
+│   ├── client/             # VLM backend protocol, constrained decoding
+│   ├── config/             # settings.py — Pydantic Settings with prod-boot guards
+│   ├── export/             # JSON, Excel, Markdown, FHIR, receipt
+│   ├── extraction/         # multi-record, vlm_grounder
+│   ├── memory/             # FAISS vector store, context manager
+│   ├── monitoring/         # Phoenix, PostHog, alerts
+│   ├── pipeline/           # state, graph, runner, provenance
+│   ├── preprocessing/      # PDF, image enhancer, modality
+│   ├── profiles/           # generic, medical-rcm, finance (+ stubs)
+│   ├── prompts/            # extraction, pass1, pass2, critic
+│   ├── queue/              # Celery, webhook, DLQ
+│   ├── schemas/            # CMS-1500, UB-04, EOB, superbill, validators
+│   ├── security/           # RBAC, audit, PHI redactor, phi_mask
+│   └── validation/         # dual_pass, critic_combiner, calibration
+├── frontend/               # Next.js 14 app
+├── tests/                  # unit · integration · security · e2e · accuracy
+├── docs/                   # see docs/README.md
+└── main.py                 # CLI + dev-stack launcher
 ```
----
 
-## Performance Metrics
-
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Field Extraction Accuracy | >95% | 97%+ |
-| Hallucination Rate | <2% | <1% |
-| Processing Speed | 15-25 sec/page | 18 sec avg |
-| VLM Calls per Page | 3-4 | 3.2 avg |
-| System Uptime | >99.5% | 99.9% |
-| Human Review Rate | <10% | <5% |
-
-### Capacity Planning
-
-| Configuration | Throughput |
-|--------------|------------|
-| Single RTX 4090 | 50-100 pages/hour |
-| Multi-GPU (2x) | 200-400 pages/hour |
-| Distributed | Scales linearly |
+Full file-by-file footprint lives in [docs/VERIDOC_MASTER_PLAN.md §H](docs/VERIDOC_MASTER_PLAN.md#h-module-map-file-by-file-change-footprint).
 
 ---
 
-## Security & Compliance
+## Documentation map
 
-### HIPAA Compliance
-
-| Feature | Implementation |
-|---------|----------------|
-| **100% Local Processing** | No PHI leaves the system |
-| **No Cloud APIs** | All AI processing done locally via LM Studio |
-| **Encrypted Storage** | AES-256 encryption for data at rest |
-| **Audit Logging** | Complete action trail with timestamps |
-| **Secure Cleanup** | Automatic PHI deletion with secure overwrite |
-
-### Security Features
-
-- Role-Based Access Control (RBAC)
-- Input validation and sanitization
-- Secure temporary file handling
-- PHI masking in logs
-- Automatic data retention policies
-- Network isolation (localhost only)
+| Doc | What's inside |
+|---|---|
+| [docs/README.md](docs/README.md) | Documentation index + reading order |
+| [docs/VERIDOC_MASTER_PLAN.md](docs/VERIDOC_MASTER_PLAN.md) | Canonical product reference — architecture, phases, appendices |
+| [docs/STATUS.md](docs/STATUS.md) | Shipping reality at the latest merge |
+| [docs/MODES.md](docs/MODES.md) | Modality / profile detection deep-dive |
+| [docs/PHI_MODE.md](docs/PHI_MODE.md) | Opt-in PHI redaction operator guide |
+| [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Phoenix · PostHog · audit-chain ops |
+| [docs/PRODUCT_OVERVIEW.md](docs/PRODUCT_OVERVIEW.md) | One-page product summary for evaluators |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | 90-second demo walkthrough storyboard |
 
 ---
 
-## Development Phases
+## Working set
 
-### Phase 1: Core Infrastructure ✅
-- [x] PDF Processor module (300 DPI)
-- [x] Image enhancement pipeline
-- [x] LM Studio client with retry logic
-- [x] Schema definition system
-- [x] Healthcare RCM schemas
-
-### Phase 2: Agent Framework ✅
-- [x] LangGraph state machine
-- [x] Orchestrator agent
-- [x] Analyzer agent
-- [x] Extractor agent (dual-pass)
-- [x] Validator agent
-
-### Phase 3: Anti-Hallucination System ✅
-- [x] System Prompt engineering layer (For Zero Shot and Expert level of understanding)
-- [x] Dual-pass extraction
-- [x] Pattern validation
-- [x] Confidence scoring
-- [ ] Human-in-the-loop (RLHF Reinforcement Learning)
-
-### Phase 4: Integration & Testing ✅
-- [x] Task queue (Celery + Redis)
-- [x] Test suites
-- [x] CI/CD pipeline
-
-### Phase 5: Deployment (In Progress)
-- [ ] HIPAA compliance verification
-- [x] Monitoring & alerting
-- [x] Documentation
-- [ ] Production launch
+- **Backend:** Python 3.11+, FastAPI, LangGraph v3, LangChain 1.x, Pydantic 2.x, openai-compatible VLM client, FAISS, openpyxl, PyMuPDF, OpenCV
+- **Frontend:** Next.js 14 App Router, React 18, TypeScript 5, Tailwind 3.4, Zustand, TanStack Query, axios, Lucide, Framer Motion, react-pdf (opt-in)
+- **Inference:** any OpenAI-compatible vision model via LM Studio (model-agnostic by design)
+- **Observability:** Arize Phoenix (OpenInference), PostHog, structlog, Prometheus
+- **Storage:** SQLite (LangGraph checkpoints), FAISS (vector memory), append-only audit-log JSONL
+- **Queue:** Celery + Redis (optional — sync mode works without)
 
 ---
-
-## Troubleshooting
-
-### Common Issues
-
-| Issue | Solution |
-|-------|----------|
-| LM Studio not responding | Check if server is running on port 1234 |
-| Model not loading | Verify GPU VRAM is sufficient for quantization |
-| Slow processing | Ensure GPU layers are maximized |
-| Low accuracy | Check image quality, try higher DPI |
-| Memory errors | Reduce batch size or use smaller quantization |
-
----
-
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+1. Fork
+2. `git checkout -b feature/your-thing`
+3. `pip install -e ".[dev]"` then `pytest tests/ -m "not slow"` — 2853 tests should pass
+4. `cd frontend && npm ci && npx tsc --noEmit` — 0 errors
+5. Commit, push, open a PR
+
+PRs that touch the pipeline core also need to pass the nightly hallucination-injection harness — `pytest tests/eval/inject/ -m gpu` on the self-hosted runner. The CI bot picks this up automatically.
 
 ---
 
 ## License
 
-Copyright 2024-2025. All rights reserved.
+**Apache 2.0** — see [LICENSE](LICENSE). No commercial-use restrictions. Compatible with downstream proprietary integration.
 
 ---
 
-## Contact
-
-For support or inquiries, please contact the development team.
-
----
-
-*Built with 100% local AI for enterprise healthcare data extraction.*
-
-**Version:** 2.0.0
-**Last Updated:** November 2025
-**Framework:** LangChain 1.x + LangGraph 1.x
+*State-of-the-art document intelligence. Open. Local. Auditable.*

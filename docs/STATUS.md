@@ -1,16 +1,16 @@
 ---
-title: Veridoc V3 — Current Status
+title: Veridoc — Current Status
 phase: 8
-test_count: 2586
+test_count: 2853
 shipping_backend: lm-studio
-last_verified: 2026-05-14
+last_verified: 2026-05-19
 canonical_plan: ./VERIDOC_MASTER_PLAN.md
 ---
 
 # Project Status
 
 ![Phase](https://img.shields.io/badge/Phase-8_shipped-059669?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-2586_passing-16a34a?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-2853_passing-16a34a?style=flat-square)
 ![Backend](https://img.shields.io/badge/Backend-LM_Studio-1e40af?style=flat-square)
 ![Next](https://img.shields.io/badge/Next-Phase_9_Bedrock-7c3aed?style=flat-square)
 
@@ -21,11 +21,11 @@ canonical_plan: ./VERIDOC_MASTER_PLAN.md
 > is wired, what is flag-gated, what is *not* shipping yet.
 
 > [!NOTE]
-> **Current test baseline: 2586 passing, 0 failed, 11 pre-existing skips.**
-> Verified against HEAD `426d428` on 2026-05-14. Run `pytest tests/unit/ tests/integration/ tests/security/` to reproduce.
+> **Current test baseline: 2853 passing, 0 failed, 11 pre-existing skips.**
+> Verified locally on 2026-05-19 across all four CI splits (unit / integration / security+e2e+accuracy / root test_*). Run `pytest tests/ -m "not slow"` to reproduce.
 
 > [!TIP]
-> The dev stack works today. LM Studio at `localhost:1234` with `qwen/qwen3-vl-8b` runs an end-to-end extraction on `medical_outputs/superbill1.pdf` via `python main.py extract`. Source View tab renders provenance overlays on the resulting JSON.
+> The dev stack runs end-to-end today. LM Studio at `localhost:1234` with any vision-capable model produces a full JSON + Excel + Markdown + FHIR R4 + bbox-overlay + signed receipt bundle via `python main.py extract <pdf> --mode healthcare`. Source View tab renders provenance overlays on the resulting JSON.
 
 ## System overview (60-second read)
 
@@ -80,7 +80,7 @@ flowchart TB
 
 | Surface | State |
 |---|---|
-| Backend | 2586 unit + integration tests · all green |
+| Backend | 2853 unit + integration tests · all green |
 | Frontend | Next.js 14 · TypeScript clean · schema chooser + modality + PHI live |
 | CI | `.github/workflows/ci.yml` runs ruff + mypy + pytest matrix on every PR |
 | LangGraph | v3 (`langgraph >= 1.0`) with Command + interrupt + durable SQLite checkpointer |
@@ -215,7 +215,7 @@ pip install -e ".[dev,fhir]"           # validated FHIR R4
 pip install -e ".[dev,profiles-rcm]"   # Medical-RCM emitters (C-CDA, X12N 275)
 
 # Test
-pytest tests/ -m "not slow"            # 2586 tests
+pytest tests/ -m "not slow"            # 2853 tests
 
 # Run
 python main.py extract path/to/doc.pdf

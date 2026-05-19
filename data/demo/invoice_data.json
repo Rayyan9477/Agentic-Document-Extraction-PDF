@@ -1,0 +1,70 @@
+{
+  "_comment": [
+    "Veridoc non-medical demo data — synthetic invoice identifiers.",
+    "All vendor / customer / amounts / addresses are made up.",
+    "Used to validate that General-mode handles non-medical PDFs cleanly,",
+    "without inventing medical fields (patient_name etc.) on a non-medical doc."
+  ],
+  "vendor": {
+    "name": "Riverbend Office Supplies LLC",
+    "address_line1": "1240 Industrial Way",
+    "city": "Portland",
+    "state": "OR",
+    "zip": "97214",
+    "phone": "(503) 555-0188",
+    "tax_id": "94-7755132",
+    "iban": "GB29 NWBK 6016 1331 9268 19",
+    "swift_bic": "NWBKGB2L"
+  },
+  "customer": {
+    "name": "Cascade Tech Group Inc.",
+    "address_line1": "888 Innovation Drive, Suite 400",
+    "city": "Beaverton",
+    "state": "OR",
+    "zip": "97005",
+    "contact": "Alex Chen, Procurement"
+  },
+  "invoice": {
+    "number": "INV-2026-04412",
+    "date": "2026-05-01",
+    "due_date": "2026-05-31",
+    "po_number": "PO-2026-A-9982",
+    "terms": "Net 30"
+  },
+  "line_items": [
+    {
+      "description": "Ergonomic mesh chair (Verde Pro v3)",
+      "sku": "ERG-MSH-V3",
+      "quantity": 12,
+      "unit_price": 285.00,
+      "amount": 3420.00
+    },
+    {
+      "description": "Standing desk converter (Adjustable, 32 inch)",
+      "sku": "DSK-ADJ-32",
+      "quantity": 8,
+      "unit_price": 425.50,
+      "amount": 3404.00
+    },
+    {
+      "description": "Premium office paper, 20lb, case (10 reams)",
+      "sku": "PAP-PRM-20",
+      "quantity": 25,
+      "unit_price": 42.75,
+      "amount": 1068.75
+    },
+    {
+      "description": "LED desk lamp with USB-C charging dock",
+      "sku": "LMP-LED-USB",
+      "quantity": 15,
+      "unit_price": 89.95,
+      "amount": 1349.25
+    }
+  ],
+  "totals": {
+    "subtotal": 9242.00,
+    "tax_rate": 0.0825,
+    "tax": 762.47,
+    "total": 10004.47
+  }
+}

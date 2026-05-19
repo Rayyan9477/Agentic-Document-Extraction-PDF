@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "Veridoc demo data — fully synthetic patient identifiers.",
+    "Names, DOBs, NPIs, addresses are made up. No real PHI.",
+    "NPI passes Luhn (matches src.schemas.validators._luhn_checksum).",
+    "CPT / ICD-10 / POS codes are real billing codes used in valid",
+    "ways so the medical-rcm validator pack accepts the document."
+  ],
+  "patient": {
+    "id": "synthea-mvp-001",
+    "first_name": "Mary",
+    "middle_name": "L",
+    "last_name": "Williams",
+    "dob": "1985-03-15",
+    "sex": "F",
+    "address_line1": "742 Evergreen Terrace",
+    "city": "Springfield",
+    "state": "OR",
+    "zip": "97403",
+    "phone": "(541) 555-0142",
+    "ssn_last4": "4321"
+  },
+  "insurance": {
+    "carrier": "BlueCare Health Plan",
+    "member_id": "BCHP4421988",
+    "group_number": "GRP-77810",
+    "plan_type": "PPO"
+  },
+  "provider": {
+    "name": "Dr. James A. Carter",
+    "specialty": "Family Medicine",
+    "npi": "1234567893",
+    "tax_id": "82-1234567",
+    "address_line1": "1500 Westgate Medical Plaza, Suite 200",
+    "city": "Springfield",
+    "state": "OR",
+    "zip": "97403",
+    "phone": "(541) 555-2100"
+  },
+  "billing_provider": {
+    "name": "Springfield Family Medicine PC",
+    "npi": "1234567893"
+  },
+  "encounter": {
+    "service_date": "2026-05-10",
+    "place_of_service": "11",
+    "diagnosis_codes": ["J06.9", "R05.9"],
+    "service_lines": [
+      {
+        "service_date_from": "2026-05-10",
+        "service_date_to": "2026-05-10",
+        "place_of_service": "11",
+        "cpt_code": "99213",
+        "modifier": "",
+        "diagnosis_pointer": "A",
+        "charge": 175.00,
+        "units": 1
+      },
+      {
+        "service_date_from": "2026-05-10",
+        "service_date_to": "2026-05-10",
+        "place_of_service": "11",
+        "cpt_code": "87880",
+        "modifier": "QW",
+        "diagnosis_pointer": "A",
+        "charge": 28.50,
+        "units": 1
+      }
+    ],
+    "total_charge": 203.50
+  }
+}
