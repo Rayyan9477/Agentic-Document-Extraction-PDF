@@ -66,8 +66,11 @@ from src.schemas.validators import (
     validate_date,
     validate_field,
     validate_icd10_code,
+    validate_modifier,
+    validate_modifier_combination,
     validate_npi,
     validate_phone,
+    validate_pos_code,
     validate_ssn,
 )
 
@@ -125,6 +128,9 @@ __all__ = [
     "validate_date",
     "validate_currency",
     "validate_field",
+    "validate_pos_code",
+    "validate_modifier",
+    "validate_modifier_combination",
     "MedicalCodeValidator",
     # Healthcare schemas
     "CMS1500_SCHEMA",

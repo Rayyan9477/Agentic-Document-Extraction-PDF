@@ -677,6 +677,33 @@ COB_FIELDS = [
 # =============================================================================
 
 EOB_CROSS_FIELD_RULES = [
+    # V3 Phase 5 — Sum reconciliation. Service-line "billed" amounts
+    # should sum to ``total_billed``; "plan paid" line items should
+    # sum to ``plan_paid``; etc. Advisory by default — payer EOBs
+    # frequently round at the line level so a $0.01 delta is
+    # acceptable. The validator surfaces the discrepancy for human
+    # review without blocking.
+    CrossFieldRule(
+        source_field="service_lines",
+        target_field="total_billed",
+        operator=RuleOperator.SUM_EQUALS,
+        value="billed_amount",
+        error_message=(
+            "Total billed should equal the sum of service-line billed "
+            "amounts."
+        ),
+        severity="warning",
+    ),
+    CrossFieldRule(
+        source_field="service_lines",
+        target_field="plan_paid",
+        operator=RuleOperator.SUM_EQUALS,
+        value="paid_amount",
+        error_message=(
+            "Plan paid should equal the sum of service-line paid amounts."
+        ),
+        severity="warning",
+    ),
     # Date of service must be before EOB date
     CrossFieldRule(
         source_field="date_of_service",

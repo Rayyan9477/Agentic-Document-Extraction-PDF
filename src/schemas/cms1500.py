@@ -726,6 +726,43 @@ FACILITY_FIELDS = [
 # =============================================================================
 
 CMS1500_CROSS_FIELD_RULES = [
+    # V3 Phase 5 — Sum reconciliation. The total_charge in Box 28
+    # should equal the sum of the per-line ``service_lines.charges``.
+    # Mismatches are common (rounding, discounts) — alert_evaluator
+    # treats SUM_EQUALS as advisory unless the rule's severity is
+    # ``"error"``. We keep this advisory ("warning") so a $0.01
+    # rounding delta does not block extraction; the validator surfaces
+    # the discrepancy for human review.
+    CrossFieldRule(
+        source_field="service_lines",
+        target_field="total_charge",
+        operator=RuleOperator.SUM_EQUALS,
+        value="charges",  # field on each list item to sum
+        error_message=(
+            "Total charge (Box 28) should equal the sum of service-line "
+            "charges (Box 24F across all lines)."
+        ),
+        severity="warning",
+    ),
+    # V3 Phase 5 — CPT/ICD pairing. Box 21 carries diagnosis codes;
+    # Box 24E carries diagnosis pointers (A/B/C/D/...) referring back
+    # to those codes. A diagnosis_pointer with no matching
+    # diagnosis_code is a structural error. ``REQUIRES_IF`` already
+    # exists; the more nuanced "every pointer must reference a
+    # populated code" check is done by the validator agent walking
+    # service_lines. Keeping the schema-level rule simple: if a
+    # service line is reported, at least one diagnosis code must be
+    # populated.
+    CrossFieldRule(
+        source_field="service_lines",
+        target_field="diagnosis_code_1",
+        operator=RuleOperator.REQUIRES_IF,
+        error_message=(
+            "At least one diagnosis code (Box 21 line A) must be "
+            "present when service lines are reported."
+        ),
+        severity="error",
+    ),
     # Date validations
     CrossFieldRule(
         source_field="patient_birth_date",

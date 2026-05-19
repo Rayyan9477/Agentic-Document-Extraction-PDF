@@ -2,7 +2,7 @@
   "dpi": 300,
   "max_retries": 3,
   "retry_delay": 5,
-  "vlm_model": "qwen/qwen3-vl-8b",
+  "vlm_model": "google/gemma-4-26b-a4b",
   "vlm_endpoint": "http://localhost:1234/v1",
   "enable_multi_record": true,
   "enable_duplicate_detection": true,
@@ -29,7 +29,5 @@
     "balance"
   ],
   "validation_confidence_threshold": 0.85,
-  "max_fields_per_extraction_call": 10,
-  "enable_schema_decomposition": true,
-  "enable_synthetic_few_shot_examples": false
+  "mask_phi": false
 }
