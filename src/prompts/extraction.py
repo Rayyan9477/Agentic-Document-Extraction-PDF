@@ -140,6 +140,34 @@ _MODALITY_PROMPT_FRAGMENTS: dict[str, str] = {
 }
 
 
+def _build_profile_section(profile_name: str | None) -> str:
+    """Compose the profile-specific guidance block.
+
+    V3 Phase 5: when a profile is active, append its
+    ``prompt_fragment`` to the extraction prompt. The fragment is
+    self-contained markdown owned by ``src.profiles.<profile>``;
+    this helper only handles the lookup and the surrounding
+    section header.
+
+    The ``generic-document`` profile carries an empty fragment, so
+    nothing is appended for the common case. We swallow lookup
+    errors silently — a missing/typo'd profile name should never
+    block extraction.
+    """
+    if not profile_name:
+        return ""
+    try:
+        from src.profiles import get_profile
+
+        descriptor = get_profile(profile_name)
+    except Exception:
+        return ""
+    fragment = (descriptor.prompt_fragment or "").strip()
+    if not fragment:
+        return ""
+    return "\n" + fragment + "\n"
+
+
 def _build_modality_section(modalities: list[str] | None) -> str:
     """Compose the modality-specific guidance block from active modes.
 
@@ -175,6 +203,7 @@ def build_extraction_prompt(
     include_reasoning: bool = True,
     include_anti_patterns: bool = True,
     modalities: list[str] | None = None,
+    profile: str | None = None,
 ) -> str:
     """
     Build the main extraction prompt for a document page.
@@ -208,6 +237,7 @@ def build_extraction_prompt(
         anti_patterns = EXTRACTION_ANTI_PATTERNS
 
     modality_section = _build_modality_section(modalities)
+    profile_section = _build_profile_section(profile)
 
     prompt = f"""
 ## DOCUMENT EXTRACTION TASK - {document_type}
@@ -234,7 +264,7 @@ def build_extraction_prompt(
 
 3. If a field appears multiple times, extract the most prominent instance
 4. For multi-value fields (lists), extract all visible values
-{modality_section}{anti_patterns}
+{profile_section}{modality_section}{anti_patterns}
 
 ### REQUIRED OUTPUT FORMAT
 
@@ -411,17 +441,36 @@ Approach:
 
 
 def _build_field_instructions(schema_fields: list[dict[str, Any]]) -> str:
-    """Build field-by-field extraction instructions."""
+    """Build field-by-field extraction instructions.
+
+    V3 Phase 5: every schema-supplied string is run through
+    ``_sanitize_schema_text`` because Schema Wizard / custom-schema
+    payloads can carry user-controlled content. Previously only the
+    field ``name`` was sanitized; ``display_name`` / ``description`` /
+    ``examples`` / ``location_hint`` were interpolated raw, which left
+    a prompt-injection gap. Now all schema-provided fields go through
+    the same sanitization boundary.
+    """
     instructions = []
 
     for field in schema_fields:
-        name = field.get("name", "unknown")
-        display = field.get("display_name", name)
-        field_type = field.get("field_type", "string")
-        description = field.get("description", "")
-        examples = field.get("examples", [])
-        location_hint = field.get("location_hint", "")
-        required = field.get("required", False)
+        raw_name = field.get("name", "unknown")
+        name = _sanitize_schema_text(raw_name, max_length=64)
+        display = _sanitize_schema_text(
+            field.get("display_name", raw_name), max_length=128
+        )
+        field_type = _sanitize_schema_text(
+            field.get("field_type", "string"), max_length=32
+        )
+        description = _sanitize_schema_text(
+            field.get("description", ""), max_length=500, allow_newlines=True
+        )
+        examples_raw = field.get("examples", []) or []
+        examples = [_sanitize_schema_text(e, max_length=64) for e in examples_raw[:3]]
+        location_hint = _sanitize_schema_text(
+            field.get("location_hint", ""), max_length=200
+        )
+        required = bool(field.get("required", False))
 
         parts = [f"**{display}** (`{name}`)"]
 
@@ -431,7 +480,7 @@ def _build_field_instructions(schema_fields: list[dict[str, Any]]) -> str:
         parts.append(f"  - Type: {field_type}")
 
         if examples:
-            example_str = ", ".join(str(e) for e in examples[:3])
+            example_str = ", ".join(examples)
             parts.append(f"  - Examples: {example_str}")
 
         if location_hint:

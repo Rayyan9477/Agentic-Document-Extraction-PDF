@@ -15,6 +15,9 @@ def run_extraction_pipeline(
     pdf_path: str | Path,
     schema_name: str | None = None,
     enable_checkpointing: bool = False,
+    *,
+    profile_override: str | None = None,
+    modality_override: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Run the extraction pipeline on a PDF document.
@@ -26,6 +29,11 @@ def run_extraction_pipeline(
         pdf_path: Path to the PDF file.
         schema_name: Optional schema name for extraction.
         enable_checkpointing: Whether to enable checkpointing.
+        profile_override: Phase K — explicit profile id (e.g.
+            ``"medical-rcm"``, ``"generic-document"``). Bypasses the
+            analyzer's auto-detection. None = auto-detect.
+        modality_override: Phase 5 — explicit modality list. Empty
+            list / None = auto-detect.
 
     Returns:
         Dictionary containing extraction results and state.
@@ -41,6 +49,8 @@ def run_extraction_pipeline(
     state = runner.extract_from_pdf(
         pdf_path=pdf_path,
         custom_schema=custom_schema,
+        profile_override=profile_override,
+        modality_override=modality_override,
     )
 
     # Convert TypedDict to regular dict for JSON serialization

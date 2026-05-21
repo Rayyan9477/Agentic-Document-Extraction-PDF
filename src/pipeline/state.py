@@ -216,6 +216,40 @@ class FieldMetadata:
             result["bbox"] = self.bbox.to_dict()
         return result
 
+    def to_provenance(
+        self,
+        *,
+        extraction_path: list[str] | None = None,
+        agent_signatures: list[str] | None = None,
+        vlm_model_id: str = "",
+        mem0_match: str | None = None,
+    ) -> Any:  # returns Provenance — typed as Any to avoid an import cycle
+        """V3 Phase 4 — derive a ``Provenance`` from this metadata.
+
+        Bridges the legacy ``FieldMetadata`` shape to the V3
+        ``Provenance`` model so the dual-write reconciler can build a
+        ``FieldValue`` envelope without rewriting every extraction
+        node. Callers supply the fields the metadata didn't track:
+        ``extraction_path``, ``agent_signatures``, ``vlm_model_id``,
+        ``mem0_match``.
+
+        Lazy import of ``Provenance`` keeps ``state.py`` free of any
+        Pydantic v2 dep cycle (state.py is imported very early during
+        agent module loading).
+        """
+        from src.pipeline.provenance import Provenance
+
+        return Provenance(
+            page=self.source_page,
+            bbox=self.bbox,
+            source_block_id="",  # not tracked by FieldMetadata
+            extraction_path=list(extraction_path or []),
+            agent_signatures=list(agent_signatures or []),
+            confidence=self.confidence,
+            vlm_model_id=vlm_model_id,
+            mem0_match=mem0_match,
+        )
+
 
 @dataclass(slots=True)
 class PageExtraction:
@@ -374,6 +408,62 @@ class ExtractionState(TypedDict, total=False):
     merged_extraction: dict[str, Any]  # Final merged extraction
     field_metadata: dict[str, dict[str, Any]]  # Field name -> FieldMetadata dict
 
+    # === V3 Phase 2 — Heterogeneous dual-VLM extraction fields ===
+    # Populated only when ``settings.extraction.engine == "dual_vlm"``.
+    # Per-page raw outputs from each pass; the reconciler fuses them into
+    # ``merged_extraction``. Existing legacy callers continue to read
+    # ``merged_extraction`` and ``field_metadata`` unchanged.
+    pass1_result: dict[int, dict[str, Any]]  # page_index -> Qwen EXTRACTOR output
+    pass2_result: dict[int, dict[str, Any]]  # page_index -> Gemma AUDITOR output
+    pass1_model_id: str  # e.g. "qwen3.6-27b-vl@8001"
+    pass2_model_id: str  # e.g. "gemma-4-31b-vl@8002"
+    pass1_latency_ms: int  # cumulative across pages
+    pass2_latency_ms: int
+    reconciliation_metadata: dict[str, Any]  # agreement_rate, disagreements, tiebreakers_used
+    extraction_engine: str  # "legacy" | "dual_vlm" — what actually ran for this doc
+
+    # === V3 Phase 3 — Critic agent + confidence combiner ===
+    # Populated only when ``settings.extraction.critic_enabled`` is set.
+    # The Critic runs as an independent verifier after the validator;
+    # its output drives downstream routing via ``critic_recommendation``.
+    critic_report: dict[str, Any]  # serialised CriticReport: trust_score, concerns, recommendation
+    critic_recommendation: str  # "accept" | "verify_bbox" | "retry" | "human_review"
+    critic_model_id: str
+    critic_latency_ms: int
+    confidence_components: dict[str, float]  # {dual_pass, critic, modality_penalty, calibrated}
+
+    # === V3 Phase 5 — Document profile ===
+    # Populated by the analyzer's profile-detection step.
+    # ``profile`` is the selected profile name (default "generic-document").
+    # ``profile_confidence`` is the detection confidence in [0, 1].
+    # ``profile_signals_matched`` lists the matched detection signals
+    # for audit/UI consumption.
+    # ``profile_fallback_to_generic`` is True when no profile cleared
+    # its confidence floor and we defaulted to generic — distinct from
+    # "we positively detected generic".
+    # ``profile_override`` is the operator-supplied override (UI chip
+    # or API parameter); when set, detection scoring is skipped.
+    profile: str
+    profile_confidence: float
+    profile_signals_matched: list[str]
+    profile_fallback_to_generic: bool
+    profile_override: str | None
+
+    # === V3 Phase 4 — Provenance threading ===
+    # ``merged_extraction_v2`` is the FieldValue-shaped twin of
+    # ``merged_extraction``. The reconciler dual-writes both during
+    # the migration window so legacy exporters keep working while new
+    # exporters can opt into provenance-aware serialisation. When
+    # ``settings.provenance.enforce_field_value_wrapper`` flips to
+    # True, only this path is populated and downstream consumers
+    # MUST use ``unwrap_value()`` / ``unwrap_provenance()``.
+    #
+    # ``provenance_index`` is a flat ``{field_name: extraction_path[]}``
+    # map for cheap lookups by audit consumers that don't want to walk
+    # the full ``merged_extraction_v2`` tree.
+    merged_extraction_v2: dict[str, dict[str, Any]]
+    provenance_index: dict[str, list[str]]
+
     # === Validation Fields ===
     validation: dict[str, Any]  # Serialized ValidationResult
     overall_confidence: float
@@ -463,6 +553,9 @@ def create_initial_state(
     custom_schema: dict[str, Any] | None = None,
     max_retries: int = 2,
     processing_id: str | None = None,
+    *,
+    profile_override: str | None = None,
+    modality_override: list[str] | None = None,
 ) -> ExtractionState:
     """
     Create initial extraction state for a new document.
@@ -474,6 +567,13 @@ def create_initial_state(
         custom_schema: Optional custom schema for zero-shot extraction.
         max_retries: Maximum extraction retry attempts.
         processing_id: Optional processing ID (auto-generated if not provided).
+        profile_override: Phase K — explicit profile id (e.g.
+            ``"medical-rcm"``, ``"generic-document"``). When set, the
+            analyzer skips auto-detection. ``None`` preserves the
+            previous behaviour.
+        modality_override: Phase 5 — explicit modality list (subset of
+            ``{printed, handwritten, table, form, fax, visual}``). When
+            non-empty, the analyzer respects this list verbatim.
 
     Returns:
         Initialized ExtractionState ready for pipeline.
@@ -538,6 +638,11 @@ def create_initial_state(
         similar_docs=[],
         provider_patterns=None,
         correction_hints=None,
+        # Phase K — operator / API supplied overrides. The analyzer
+        # reads ``profile_override`` to bypass auto-detection and
+        # ``modality_override`` to bypass modality detection.
+        profile_override=profile_override,
+        modality_override=list(modality_override) if modality_override else [],
     )
 
 

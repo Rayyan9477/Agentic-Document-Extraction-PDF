@@ -410,10 +410,186 @@ def set_dispatcher(dispatcher: ObservabilityDispatcher) -> None:
     _dispatcher = dispatcher
 
 
+# ---------------------------------------------------------------------------
+# V3 Phase 6 — Canonical span / event attribute helpers
+# ---------------------------------------------------------------------------
+
+
+# Canonical PostHog event names. Centralised here so producers and
+# consumers agree on the event vocabulary. Any sink-side filter or
+# downstream dashboard can rely on the names matching exactly.
+EVENT_EXTRACTION_STARTED = "extraction_started"
+EVENT_EXTRACTION_COMPLETED = "extraction_completed"
+EVENT_VLM_CALLED = "vlm_called"
+EVENT_CRITIC_DISAGREED = "critic_disagreed"
+EVENT_HUMAN_REVIEW_TRIGGERED = "human_review_triggered"
+EVENT_EXPORT_COMPLETED = "export_completed"
+
+
+# Canonical span names.
+SPAN_EXTRACTION_PASS = "extraction.pass"
+SPAN_VLM_REQUEST = "vlm.request"
+SPAN_RECONCILER = "extraction.reconciler"
+SPAN_CRITIC = "extraction.critic"
+
+
+def build_pass_span_attrs(
+    *,
+    pass_name: str,
+    model_id: str | None = None,
+    latency_ms: float | None = None,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    page_number: int | None = None,
+    profile: str | None = None,
+    tenant_id: str | None = None,
+    trace_id: str | None = None,
+    document_type: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build canonical per-pass span attributes.
+
+    V3 Phase 6 — every extraction pass (legacy single-pass, dual-VLM
+    pass1/pass2, critic, reconciler) tags spans with the same
+    attribute schema so dashboards can pivot uniformly:
+
+    * ``pass`` — short label, e.g. ``"pass1_vlm"``, ``"pass2_auditor"``,
+      ``"reconciler"``, ``"critic"``, ``"validator"``.
+    * ``model_id`` — resolved model identifier (best-effort).
+    * ``latency_ms`` — wall-clock duration of this pass.
+    * ``tokens_in`` / ``tokens_out`` — token counts when the backend
+      reports them.
+    * ``page_number`` — 1-based page index.
+    * ``profile`` — V3 Phase 5 detected profile (``"medical-rcm"`` …).
+    * ``tenant_id`` — current tenant (default ``"_global"``).
+    * ``trace_id`` — links the span to the audit log entry for the
+      same operation; pulled from structlog ``contextvars`` when
+      ``None``.
+    * ``document_type`` — ``"CMS-1500"`` etc.
+
+    None values are dropped so we never over-stamp spans with
+    ``None``s. Returns a fresh dict caller passes to
+    ``dispatcher.start_span(**attrs)``.
+    """
+    attrs: dict[str, Any] = {"pass": pass_name}
+    if model_id is not None:
+        attrs["model_id"] = model_id
+    if latency_ms is not None:
+        attrs["latency_ms"] = latency_ms
+    if tokens_in is not None:
+        attrs["tokens_in"] = tokens_in
+    if tokens_out is not None:
+        attrs["tokens_out"] = tokens_out
+    if page_number is not None:
+        attrs["page_number"] = page_number
+    if profile is not None:
+        attrs["profile"] = profile
+    if tenant_id is not None:
+        attrs["tenant_id"] = tenant_id
+    if document_type is not None:
+        attrs["document_type"] = document_type
+
+    # Pull trace_id from structlog contextvars when not explicitly
+    # supplied — the audit module sets it via ``bind_trace_id``, so
+    # spans started anywhere downstream automatically pick it up.
+    if trace_id is not None:
+        attrs["trace_id"] = trace_id
+    else:
+        ctx_trace = _read_trace_id_from_context()
+        if ctx_trace is not None:
+            attrs["trace_id"] = ctx_trace
+
+    if extra:
+        for k, v in extra.items():
+            if v is not None:
+                attrs[k] = v
+    return attrs
+
+
+def emit_export_event(
+    *,
+    exporter: str,
+    style: str | None = None,
+    record_count: int | None = None,
+    success: bool = True,
+    duration_ms: float | None = None,
+    profile: str | None = None,
+    document_type: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """Emit the canonical ``export_completed`` PostHog event.
+
+    Centralised here so each exporter (JSON / Markdown / Excel /
+    FHIR / consolidated) can call one helper instead of duplicating
+    the dispatcher lookup. Failures are silenced — observability
+    must never break an export.
+    """
+    try:
+        dispatcher = get_dispatcher()
+    except Exception:  # pragma: no cover - defensive
+        return
+    if dispatcher is None or not dispatcher.is_active:
+        return
+
+    properties: dict[str, Any] = {
+        "exporter": exporter,
+        "success": success,
+        "trace_id": _read_trace_id_from_context(),
+    }
+    if style is not None:
+        properties["style"] = style
+    if record_count is not None:
+        properties["record_count"] = record_count
+    if duration_ms is not None:
+        properties["duration_ms"] = duration_ms
+    if profile is not None:
+        properties["profile"] = profile
+    if document_type is not None:
+        properties["document_type"] = document_type
+    if extra:
+        for k, v in extra.items():
+            if v is not None:
+                properties[k] = v
+
+    try:
+        dispatcher.emit_event(EVENT_EXPORT_COMPLETED, properties)
+    except Exception:  # pragma: no cover - defensive
+        pass
+
+
+def _read_trace_id_from_context() -> str | None:
+    """Lift trace_id off structlog's ``contextvars`` bag.
+
+    Falls through silently when structlog isn't configured or no
+    trace is bound.
+    """
+    try:
+        import structlog
+
+        ctx = structlog.contextvars.get_contextvars()
+    except Exception:
+        return None
+    val = ctx.get("trace_id")
+    return str(val) if val else None
+
+
 __all__ = [
     "ObservabilityDispatcher",
     "PhoenixSink",
     "PostHogSink",
     "get_dispatcher",
     "set_dispatcher",
+    # V3 Phase 6 canonical names + helpers
+    "EVENT_EXTRACTION_STARTED",
+    "EVENT_EXTRACTION_COMPLETED",
+    "EVENT_VLM_CALLED",
+    "EVENT_CRITIC_DISAGREED",
+    "EVENT_HUMAN_REVIEW_TRIGGERED",
+    "EVENT_EXPORT_COMPLETED",
+    "SPAN_EXTRACTION_PASS",
+    "SPAN_VLM_REQUEST",
+    "SPAN_RECONCILER",
+    "SPAN_CRITIC",
+    "build_pass_span_attrs",
+    "emit_export_event",
 ]
