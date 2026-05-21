@@ -42,6 +42,11 @@ class CeleryConfig:
         task_routes: Task routing configuration.
     """
 
+    # NOTE: Defaults assume the Redis URL comes from settings (env: REDIS_URL).
+    # For HIPAA-style deployments, prefer "rediss://" (TLS) with AUTH, e.g.
+    #   rediss://:STRONG_PASSWORD@redis-host:6380/0?ssl_cert_reqs=required
+    # The plaintext localhost defaults below exist solely so unit tests can
+    # construct a CeleryConfig() without env vars; production must override.
     broker_url: str = "redis://localhost:6379/0"
     result_backend: str = "redis://localhost:6379/1"
     task_serializer: str = "json"
@@ -56,7 +61,9 @@ class CeleryConfig:
     task_reject_on_worker_lost: bool = True
     worker_prefetch_multiplier: int = 1
     worker_concurrency: int = 4
-    result_expires: int = 86400  # 24 hours
+    # Result retention: shortened from 24h to 1h. Extracted records may contain
+    # PHI; Redis is not the durable store. Long retention enlarges blast radius.
+    result_expires: int = 3600
     task_default_queue: str = "document_processing"
     task_routes: dict[str, dict[str, str]] = field(
         default_factory=lambda: {
@@ -118,6 +125,27 @@ def create_celery_app(config: CeleryConfig | None = None) -> Celery:
             # Rebuild URL with new DB path
             result_url = urlunparse(parsed._replace(path=f"/{result_db}"))
             config.result_backend = result_url
+
+            # HIPAA: Warn loudly if Redis is unencrypted or unauthenticated.
+            # rediss:// is the TLS scheme; lack of password in netloc means no AUTH.
+            if parsed.scheme == "redis":
+                logger.warning(
+                    "redis_plaintext_transport",
+                    message=(
+                        "REDIS_URL uses 'redis://' (plaintext). For HIPAA-style "
+                        "deployments, use 'rediss://' (TLS). Extracted records may "
+                        "contain PHI in transit between Celery and Redis."
+                    ),
+                )
+            if not parsed.password:
+                logger.warning(
+                    "redis_no_auth",
+                    message=(
+                        "REDIS_URL has no AUTH password. Configure a strong password "
+                        "and rotate periodically; Redis without AUTH is open to anyone "
+                        "with network reach to the broker."
+                    ),
+                )
     except ImportError as e:
         logger.warning(
             "celery_settings_import_failed",

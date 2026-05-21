@@ -47,6 +47,8 @@ class EnhancementType(str, Enum):
     CLAHE = "clahe"
     BINARIZATION = "binarization"
     MORPHOLOGICAL = "morphological"
+    DESPECKLE = "despeckle"
+    REORIENT = "reorient"
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,13 +284,19 @@ class ImageEnhancer:
                 contrast_improvement = self._calculate_contrast_improvement(img_before_clahe, img)
                 enhancements_applied.append(EnhancementType.CLAHE)
 
-            # Fax-specific path: Otsu threshold + morphological opening to
-            # clean speckle noise typical of CCITT-compressed fax scans.
+            # Fax-specific path: Otsu threshold + morphological opening
+            # + connected-components despeckle to clean speckle noise
+            # typical of CCITT-compressed fax scans.
             if is_fax:
                 img = self._apply_binarization(img)
                 enhancements_applied.append(EnhancementType.BINARIZATION)
                 img = self._apply_morphology(img)
                 enhancements_applied.append(EnhancementType.MORPHOLOGICAL)
+                # V3 Phase 5: drop sub-glyph speckle that morphology
+                # leaves behind. Cheap and high-leverage on
+                # 1-bit fax scans.
+                img = self._apply_despeckle(img)
+                enhancements_applied.append(EnhancementType.DESPECKLE)
 
             # Calculate enhanced metrics
             enhanced_variance = self._calculate_variance(img)
@@ -592,6 +600,127 @@ class ImageEnhancer:
         """
         kernel = np.ones((2, 2), np.uint8)
         return cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel)
+
+    def _apply_despeckle(
+        self,
+        img: NDArray[np.uint8],
+        *,
+        min_component_area: int = 4,
+    ) -> NDArray[np.uint8]:
+        """
+        V3 Phase 5 — Despeckle for fax / poor-quality scans.
+
+        Uses a connected-components pass to drop tiny black blobs that
+        survive Otsu thresholding. Faxes typically include scattered
+        speckle pixels (1-3 px each) that morphological opening leaves
+        behind because they are larger than the 2x2 erosion kernel but
+        smaller than any glyph component.
+
+        We work on a binarised copy: anything that's a connected-black
+        component below ``min_component_area`` pixels gets erased to
+        white. Glyphs (strokes) at typical fax 200 DPI are ≥ 30 px²,
+        so we have a wide safety margin.
+        """
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        # If the input is not already binary, threshold first.
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # Invert so connected components run on black-on-white text
+        # (cv2.connectedComponents looks for non-zero blobs).
+        inverted = cv2.bitwise_not(binary)
+        n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            inverted, connectivity=8
+        )
+        # Build mask: keep components above the area threshold;
+        # erase the rest.
+        keep_mask = np.zeros_like(inverted)
+        for label_idx in range(1, n_labels):  # 0 is background
+            area = stats[label_idx, cv2.CC_STAT_AREA]
+            if area >= min_component_area:
+                keep_mask[labels == label_idx] = 255
+        # Re-invert back to black-on-white.
+        cleaned = cv2.bitwise_not(keep_mask)
+        # Restore BGR shape so downstream stages don't have to branch.
+        return cv2.cvtColor(cleaned, cv2.COLOR_GRAY2BGR)
+
+    def _classify_orientation(
+        self,
+        img: NDArray[np.uint8],
+    ) -> int:
+        """
+        V3 Phase 5 — 4-way orientation classifier (0/90/180/270).
+
+        Faxes and phone-camera scans frequently arrive sideways or
+        upside-down. PDF rotation metadata catches the easy cases;
+        this method catches the rest by analysing pixel-row text
+        density profiles.
+
+        Strategy: a correctly-oriented document has roughly equal
+        horizontal text-line density top vs. bottom but stronger
+        density in the upper half (header/letterhead). We use the
+        dispersion of horizontal projection profiles to disambiguate
+        portrait-portrait (0°) from upside-down (180°). For 90° vs
+        270° we rotate by 90° and re-test. Returns the rotation in
+        degrees the *image* should be rotated to be upright.
+
+        This is a coarse heuristic; it does not replace a full OSD
+        (orientation + script detection) but it's free and cheap. When
+        in doubt it returns 0 so we never mis-rotate a correct page.
+        """
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        h, w = gray.shape
+        # Threshold to text-like dark pixels.
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+        def _portrait_score(arr: NDArray[np.uint8]) -> float:
+            # Sum dark pixels per row; portrait orientation produces
+            # strong horizontal text bands.
+            row_density = arr.sum(axis=1).astype(np.float64)
+            if row_density.size == 0 or row_density.max() == 0:
+                return 0.0
+            row_density /= row_density.max()
+            # Peakiness: variance of normalised row densities. Strong
+            # text bands → high variance. Random / noise → low variance.
+            return float(np.var(row_density))
+
+        # Test the four rotations and pick the one with the highest
+        # portrait score. Note: for "upside-down" portrait (180°), the
+        # variance is similar to upright (text bands are still
+        # horizontal); we additionally check whether the *upper half*
+        # has more density than the *lower half* (typical letterhead
+        # heuristic) and only flip to 180° when the lower half clearly
+        # dominates.
+        scores: dict[int, float] = {}
+        for rot in (0, 90, 180, 270):
+            if rot == 0:
+                rotated = binary
+            elif rot == 180:
+                rotated = cv2.rotate(binary, cv2.ROTATE_180)
+            elif rot == 90:
+                rotated = cv2.rotate(binary, cv2.ROTATE_90_CLOCKWISE)
+            else:  # 270
+                rotated = cv2.rotate(binary, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            scores[rot] = _portrait_score(rotated)
+
+        # 90 vs 270 vs 0 vs 180: the rotation that maximises the
+        # portrait score is the one needed to reach upright.
+        best = max(scores, key=lambda k: scores[k])
+
+        # Tie-breaker between 0 and 180: compare upper-half vs
+        # lower-half density on the rotated image. If uppers > lower
+        # we're upright (rotation 0). Use ``np.sum`` on int64 to avoid
+        # uint8 overflow on large pages.
+        if best in (0, 180):
+            half = h // 2
+            upper_density = int(np.sum(binary[:half].astype(np.int64)))
+            lower_density = int(np.sum(binary[half:].astype(np.int64)))
+            # Letterhead heuristic: if the upper half has noticeably
+            # more density than the lower half (>10% gap), we're
+            # likely upright; otherwise be conservative and stick
+            # with the higher-variance rotation.
+            if upper_density > lower_density * 1.1:
+                return 0
+
+        return best
 
     def _apply_clahe(self, img: NDArray[np.uint8]) -> NDArray[np.uint8]:
         """
