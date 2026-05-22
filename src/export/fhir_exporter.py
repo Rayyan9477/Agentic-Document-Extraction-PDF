@@ -123,10 +123,30 @@ def export_fhir(
     flat = _flatten_value_envelopes(record)
     bundle_id = processing_id or str(uuid.uuid4())
 
+    # Phase K — normalise the document-type label. The analyzer's adaptive
+    # schema reports human-readable names like ``health_insurance_claim_form``
+    # or ``hcfa_1500``; the dispatch below expects canonical short keys.
+    # This alias table lets the exporter route correctly without forcing
+    # the analyzer to use exporter-internal names.
+    DOCTYPE_ALIASES = {
+        "health_insurance_claim_form": "cms1500",
+        "hcfa_1500": "cms1500",
+        "hcfa-1500": "cms1500",
+        "cms-1500": "cms1500",
+        "uniform_billing_04": "ub04",
+        "uniform_bill": "ub04",
+        "ub-04": "ub04",
+        "cms1450": "ub04",
+        "cms_1450": "ub04",
+        "explanation_of_benefits": "eob",
+        "remittance_advice": "eob",
+    }
+    canonical_type = DOCTYPE_ALIASES.get(document_type, document_type)
+
     resources: list[dict[str, Any]] = []
-    if document_type in ("cms1500", "ub04"):
-        resources.extend(_build_cms_resources(flat, document_type=document_type))
-    elif document_type == "eob":
+    if canonical_type in ("cms1500", "ub04"):
+        resources.extend(_build_cms_resources(flat, document_type=canonical_type))
+    elif canonical_type == "eob":
         resources.extend(_build_eob_resources(flat))
     else:
         # Unknown schema — emit a minimal Patient + DocumentReference so
@@ -351,12 +371,45 @@ def _build_patient(flat: dict[str, Any]) -> dict[str, Any] | None:
         "id": str(uuid.uuid4()),
         "name": [name],
     }
-    dob = _coerce_date(_first(flat, ("patient_dob", "date_of_birth", "dob")))
+    dob = _coerce_date(
+        _first(flat, ("patient_dob", "patient_birth_date", "date_of_birth", "dob"))
+    )
     if dob:
         patient["birthDate"] = dob
-    gender = _first(flat, ("patient_gender", "gender", "sex"))
+    gender = _first(flat, ("patient_gender", "gender", "sex", "patient_sex"))
     if gender:
         patient["gender"] = _coerce_gender(gender)
+    # Phase K — telecom + address from Gemma's adaptive schema names.
+    phone = _first(flat, ("patient_phone", "phone", "telephone"))
+    if phone:
+        patient["telecom"] = [{"system": "phone", "value": str(phone)}]
+    email = _first(flat, ("patient_email", "email"))
+    if email:
+        patient.setdefault("telecom", []).append({"system": "email", "value": str(email)})
+    line = _first(
+        flat,
+        (
+            "patient_address_street",
+            "patient_address",
+            "address_line_1",
+            "address",
+            "address_line1",
+        ),
+    )
+    city = _first(flat, ("patient_city", "city"))
+    state = _first(flat, ("patient_state", "state"))
+    zip_code = _first(flat, ("patient_zip_code", "patient_zip", "zip", "postal_code"))
+    if any((line, city, state, zip_code)):
+        address: dict[str, Any] = {}
+        if line:
+            address["line"] = [str(line)]
+        if city:
+            address["city"] = str(city)
+        if state:
+            address["state"] = str(state)
+        if zip_code:
+            address["postalCode"] = str(zip_code)
+        patient["address"] = [address]
 
     return patient
 
@@ -366,7 +419,20 @@ def _build_coverage(
     *,
     patient_ref: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    member_id = _first(flat, ("member_id", "policy_number", "subscriber_id", "insurance_id"))
+    # Phase K — accept the field names the analyzer's adaptive schema
+    # produces ("insured_id_number") alongside the canonical CMS labels.
+    member_id = _first(
+        flat,
+        (
+            "member_id",
+            "policy_number",
+            "subscriber_id",
+            "insurance_id",
+            "insured_id_number",
+            "insured_id",
+            "insured_member_id",
+        ),
+    )
     if not member_id:
         return None
     coverage: dict[str, Any] = {
@@ -376,9 +442,20 @@ def _build_coverage(
         "subscriberId": str(member_id),
         "beneficiary": patient_ref or {"display": "unknown"},
     }
-    payor = _first(flat, ("insurance_company", "payer_name", "insurer"))
+    payor = _first(
+        flat,
+        ("insurance_company", "payer_name", "insurer", "insurance_carrier", "carrier"),
+    )
     if payor:
         coverage["payor"] = [{"display": str(payor)}]
+    group = _first(flat, ("group_number", "insurance_group", "group_id"))
+    if group:
+        coverage["class"] = [
+            {
+                "type": {"text": "group"},
+                "value": str(group),
+            }
+        ]
     return coverage
 
 
@@ -389,8 +466,33 @@ def _build_claim(
     coverage_ref: dict[str, Any] | None,
     claim_type: str,
 ) -> dict[str, Any] | None:
-    claim_number = _first(flat, ("claim_number", "claim_id", "patient_account_number"))
-    if not claim_number:
+    # Phase K — relaxed claim-number requirement. Many CMS-1500 forms
+    # leave the optional patient-account-number blank (or the analyzer
+    # doesn't capture it); we synthesise an id from the service date +
+    # CPT in those cases so the Claim resource still emits and downstream
+    # FHIR consumers get the Patient + Coverage + Claim triple.
+    claim_number = _first(
+        flat,
+        (
+            "claim_number",
+            "claim_id",
+            "patient_account_number",
+            "claim_control_number",
+        ),
+    )
+    has_billing_signal = any(
+        _first(flat, (key,))
+        for key in (
+            "total_charge",
+            "total_charges",
+            "billed_amount",
+            "total",
+            "cpt_hcpcs",
+            "cpt_code",
+            "procedure_code",
+        )
+    )
+    if not claim_number and not has_billing_signal:
         return None
     claim: dict[str, Any] = {
         "resourceType": "Claim",
@@ -406,8 +508,18 @@ def _build_claim(
         },
         "use": "claim",
         "patient": patient_ref or {"display": "unknown"},
-        "created": _coerce_date(_first(flat, ("claim_date", "service_date", "statement_date"))),
-        "identifier": [{"value": str(claim_number)}],
+        "created": _coerce_date(
+            _first(
+                flat,
+                (
+                    "claim_date",
+                    "service_date",
+                    "service_date_from",
+                    "statement_date",
+                ),
+            )
+        ),
+        "identifier": [{"value": str(claim_number or flat.get("processing_id") or uuid.uuid4())}],
     }
     if coverage_ref:
         claim["insurance"] = [
@@ -417,9 +529,41 @@ def _build_claim(
                 "coverage": coverage_ref,
             }
         ]
-    total = _coerce_money(_first(flat, ("total_charges", "billed_amount", "total")))
+    total = _coerce_money(
+        _first(flat, ("total_charges", "total_charge", "billed_amount", "total"))
+    )
     if total is not None:
         claim["total"] = total
+    # Phase K — line-item carry-through. CMS-1500 box 24 is the
+    # service-line table; we materialise the primary line so the FHIR
+    # Claim has at least one ``item`` entry. Multi-line packets are a
+    # follow-up; today's adaptive schema flattens to box-24 line 1.
+    primary_cpt = _first(flat, ("cpt_hcpcs", "cpt_code", "procedure_code"))
+    if primary_cpt:
+        item: dict[str, Any] = {
+            "sequence": 1,
+            "productOrService": {
+                "coding": [
+                    {
+                        "system": "http://www.ama-assn.org/go/cpt",
+                        "code": str(primary_cpt),
+                    }
+                ]
+            },
+        }
+        modifier = _first(flat, ("modifier", "modifier_line1"))
+        if modifier:
+            item["modifier"] = [{"text": str(modifier)}]
+        units = _first(flat, ("units", "units_line1"))
+        if units is not None:
+            try:
+                item["quantity"] = {"value": float(units)}
+            except (TypeError, ValueError):
+                pass
+        line_charge = _coerce_money(_first(flat, ("charges", "charge_line1", "line1_charge")))
+        if line_charge is not None:
+            item["net"] = line_charge
+        claim["item"] = [item]
     return claim
 
 

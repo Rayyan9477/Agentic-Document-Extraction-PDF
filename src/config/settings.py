@@ -71,9 +71,9 @@ class VLMBackendName(str, Enum):
       easier ops, ``response_format=json_schema`` constrained decoding.
     * ``VLLM`` — production-grade. XGrammar guided decoding, real
       tensor parallelism, dual-instance heterogeneous extraction.
-    * ``GEMMA`` — Phase K Kaggle MVP. Gemma 4 26B-A4B-it via LM Studio
-      at a dedicated port. Native function-calling for medical-code
-      validators. ~17 GB VRAM at Q4_K_M; runs on a 24+ GB GPU.
+    * ``GEMMA`` — Gemma 4 26B-A4B-it via LM Studio at a dedicated port.
+      Native function-calling for medical-code validators.
+      ~17 GB VRAM at Q4_K_M; runs on a 24+ GB GPU.
     """
 
     LM_STUDIO = "lm_studio"
@@ -188,7 +188,7 @@ class VLLMBackendSettings(BaseSettings):
 
 
 class GemmaBackendSettings(BaseSettings):
-    """Gemma 4 backend configuration (Phase K — Kaggle MVP).
+    """Gemma 4 backend configuration.
 
     Targets ``lmstudio-community/gemma-4-26B-A4B-it-GGUF`` served by LM
     Studio at a dedicated port (default 1235, distinct from the

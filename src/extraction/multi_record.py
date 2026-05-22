@@ -426,11 +426,28 @@ class MultiRecordExtractor:
 
                 # Try manual JSON extraction from raw content
                 content = response.content.strip()
+                raw_full = content  # keep original for repair fallback
                 if "```json" in content:
                     content = content.split("```json")[1].split("```")[0].strip()
                 elif "```" in content:
                     content = content.split("```")[1].split("```")[0].strip()
-                return json.loads(content)
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    # Phase K — reasoning-model fallback. Strip line/block
+                    # comments + trailing commas + Pythonic True/False/None
+                    # + unquoted property names via the LM client's repair
+                    # pass. Tries the code-block-stripped content first,
+                    # then the unstripped raw content (in case the splits
+                    # above cut the JSON in half on a stray ``` inside a
+                    # string value).
+                    from src.client.lm_client import LMStudioClient
+
+                    for cand in (content, raw_full):
+                        repaired = LMStudioClient._repair_json(cand)
+                        if repaired is not None:
+                            return repaired
+                    raise
 
             except json.JSONDecodeError as e:
                 # Malformed JSON - emphasize JSON formatting on next retry

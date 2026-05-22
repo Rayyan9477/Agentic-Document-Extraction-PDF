@@ -525,3 +525,166 @@ def export_json(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     logger.info("json_exported", path=str(output_path), mask_phi=mask_phi)
+
+
+def export_fhir_bundle(
+    result: DocumentExtractionResult,
+    output_path: str | Path,
+    *,
+    mask_phi: bool = False,
+    profile: str | None = None,
+) -> dict[str, Any] | None:
+    """Phase K — emit a FHIR R4 Bundle for Healthcare-mode extractions.
+
+    Gated by profile: only runs when ``profile == "medical-rcm"`` (or
+    when the caller explicitly forces it by passing a known medical
+    document_type via the underlying record). For non-medical profiles
+    this is a no-op so the surrounding callsite stays profile-agnostic.
+
+    The bundle is written to ``output_path`` as ``application/fhir+json``
+    and also returned to the caller (so the API can stream it inline up
+    to a size cap without re-reading the file).
+
+    Args:
+        result: Multi-record extraction result. The first record is
+            treated as the primary subject; additional records are
+            currently dropped (single-Patient bundle). A future
+            ``profile_overlays`` extension can fan multi-record to
+            one bundle per record.
+        output_path: Path to write the FHIR Bundle JSON.
+        mask_phi: If True, redact PHI fields/values before bundle
+            construction.
+        profile: Phase K profile id. When supplied and not equal to
+            ``"medical-rcm"``, the call short-circuits and returns
+            ``None``. ``None`` (auto-detected) defers the decision to
+            the underlying record's ``document_type``.
+
+    Returns:
+        The bundle dict on success; ``None`` when emission is skipped
+        (non-medical profile, no records, missing required fields).
+    """
+    from src.export.fhir_exporter import export_fhir
+
+    output_path = Path(output_path)
+
+    # Phase K — profile gate. ``None`` means caller did not pass a
+    # profile, so we fall back to inferring from document_type below.
+    if profile is not None and profile != "medical-rcm":
+        logger.debug(
+            "fhir_emission_skipped_non_medical_profile",
+            profile=profile,
+        )
+        return None
+
+    masked = _apply_mask_phi(result, mask_phi=mask_phi)
+    if not masked.records:
+        logger.info("fhir_emission_skipped_no_records", path=str(output_path))
+        return None
+
+    primary = masked.records[0]
+    document_type = (masked.document_type or "").lower().strip()
+    # DocumentExtractionResult doesn't carry a processing_id today (it's
+    # threaded through state), so derive a stable bundle id from the pdf
+    # path. The FHIR exporter falls back to a UUID when None.
+    processing_id = getattr(masked, "processing_id", None) or Path(masked.pdf_path).stem
+
+    # Profile=auto path: only emit FHIR when the document_type is a
+    # known medical schema. This protects the General-mode path from
+    # silently emitting FHIR for a contract or invoice.
+    # Canonical + Gemma-analyzer-friendly aliases. The analyzer's
+    # adaptive schema names land here verbatim, so we accept the
+    # human-readable forms it produces as well as the short codes.
+    medical_doc_types = {
+        "cms1500",
+        "ub04",
+        "eob",
+        "superbill",
+        "health_insurance_claim_form",
+        "hcfa_1500",
+        "uniform_billing_04",
+        "explanation_of_benefits",
+        "remittance_advice",
+    }
+    if profile is None and document_type not in medical_doc_types:
+        logger.debug(
+            "fhir_emission_skipped_non_medical_doc_type",
+            document_type=document_type,
+        )
+        return None
+
+    fhir_bundle = export_fhir(
+        record=primary.fields,
+        document_type=document_type,
+        processing_id=processing_id,
+    )
+
+    output_path.write_text(
+        json.dumps(fhir_bundle.bundle, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    logger.info(
+        "fhir_exported",
+        path=str(output_path),
+        document_type=document_type,
+        resource_count=fhir_bundle.resource_count,
+        validated=fhir_bundle.validated,
+        mask_phi=mask_phi,
+    )
+    return fhir_bundle.bundle
+
+
+def write_signed_receipt(
+    *,
+    bundle_dir: Path | str,
+    processing_id: str,
+    profile: str | None,
+    artefact_paths: list[Path | str],
+    audit_chain_tail: str | None = None,
+    signing_key: str | None = None,
+    signer_key_id: str | None = None,
+) -> Path:
+    """Phase K — mint a SignedReceipt over the export bundle.
+
+    Hashes every artefact, optionally HMAC-signs the receipt, and writes
+    ``receipt.json`` into ``bundle_dir``. The receipt is offline-verifiable
+    with :func:`src.export.signed_receipt.verify_receipt`.
+
+    Args:
+        bundle_dir: Where ``receipt.json`` will land.
+        processing_id: Pipeline processing id — binds the receipt to a
+            specific extraction run.
+        profile: Active mode profile (``"medical-rcm"`` /
+            ``"generic-document"`` / etc.). Stored verbatim.
+        artefact_paths: All files the receipt should attest. Missing
+            files are silently skipped (Phase K: FHIR bundle is
+            absent for non-medical extractions).
+        audit_chain_tail: Optional audit-chain tail hash (Phase 8). When
+            ``None`` the receipt records ``audit_chain_tail=None`` —
+            still useful for offline artefact-integrity checks.
+        signing_key: HMAC shared secret. ``None`` → unsigned receipt.
+        signer_key_id: Optional key identifier.
+
+    Returns:
+        The path to the written ``receipt.json``.
+    """
+    from src.export.signed_receipt import mint_receipt, write_receipt
+
+    bundle_dir_p = Path(bundle_dir)
+    receipt = mint_receipt(
+        processing_id=processing_id,
+        profile=profile,
+        artefact_paths=[Path(p) for p in artefact_paths],
+        audit_chain_tail=audit_chain_tail,
+        signing_key=signing_key,
+        signer_key_id=signer_key_id,
+    )
+    out = write_receipt(receipt, bundle_dir_p / "receipt.json")
+    logger.info(
+        "signed_receipt_written",
+        path=str(out),
+        artefact_count=len(receipt.artefact_hashes),
+        signed=receipt.signature is not None,
+        signer_key_id=signer_key_id,
+        profile=profile,
+    )
+    return out

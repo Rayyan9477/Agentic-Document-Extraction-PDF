@@ -69,12 +69,57 @@ class VectorStoreManager:
 
     Provides a unified interface for different vector store backends
     with support for local FAISS and remote Qdrant deployments.
+
+    V3 Phase 7 — Multi-tenant support. Use ``for_tenant(tenant_id)``
+    to obtain a manager scoped to a single tenant's index files.
+    Each tenant's data lives in its own subdirectory under
+    ``data_dir`` so cross-tenant queries are physically impossible.
     """
+
+    # Reserved scope name for the default (single-tenant / shared)
+    # store. Tenant ids passed in must not collide with this value.
+    GLOBAL_SCOPE: str = "_global"
+
+    @classmethod
+    def for_tenant(
+        cls,
+        tenant_id: str,
+        *,
+        config: VectorStoreConfig | None = None,
+        data_dir: Path | str | None = None,
+    ) -> "VectorStoreManager":
+        """Return a ``VectorStoreManager`` scoped to ``tenant_id``.
+
+        The manager points at ``<data_dir>/tenants/<tenant_id>/``;
+        its FAISS index file and id_map are kept entirely separate
+        from every other tenant's. ``tenant_id`` may not be the
+        empty string and may not equal ``GLOBAL_SCOPE`` (those are
+        reserved). Path-unsafe characters are rejected.
+        """
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
+        if tenant_id == cls.GLOBAL_SCOPE:
+            raise ValueError(
+                f"tenant_id may not be '{cls.GLOBAL_SCOPE}' (reserved)"
+            )
+        # Reject path traversal / separators outright. Tenants are
+        # filesystem directory names; allow alphanumerics + dash +
+        # underscore + dot only.
+        if any(c in tenant_id for c in ("/", "\\", "..", "\x00")):
+            raise ValueError(f"tenant_id contains forbidden chars: {tenant_id!r}")
+
+        settings = get_settings()
+        base_dir = Path(data_dir) if data_dir else settings.mem0.data_dir
+        tenant_dir = base_dir / "tenants" / tenant_id
+
+        return cls(config=config, data_dir=tenant_dir, tenant_id=tenant_id)
 
     def __init__(
         self,
         config: VectorStoreConfig | None = None,
         data_dir: Path | str | None = None,
+        *,
+        tenant_id: str | None = None,
     ) -> None:
         """
         Initialize the vector store manager.
@@ -82,6 +127,9 @@ class VectorStoreManager:
         Args:
             config: Vector store configuration.
             data_dir: Directory for data storage.
+            tenant_id: V3 Phase 7 — when set, this manager is scoped
+                to a single tenant. Reflected in ``self.tenant_id``
+                and stamped on logs for diagnostic clarity.
         """
         settings = get_settings()
         mem0_settings = settings.mem0
@@ -92,6 +140,7 @@ class VectorStoreManager:
 
         self._data_dir = Path(data_dir) if data_dir else mem0_settings.data_dir
         self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._tenant_id = tenant_id or self.GLOBAL_SCOPE
 
         self._logger = get_logger("memory.vector_store")
 
@@ -103,7 +152,22 @@ class VectorStoreManager:
             "vector_store_initialized",
             store_type=self._config.store_type.value,
             data_dir=str(self._data_dir),
+            tenant_id=self._tenant_id,
         )
+
+    @property
+    def tenant_id(self) -> str:
+        """Return the tenant scope this manager is bound to.
+
+        ``"_global"`` for the default / shared store; a real tenant
+        id when constructed via ``for_tenant``.
+        """
+        return self._tenant_id
+
+    @property
+    def data_dir(self) -> Path:
+        """Return the on-disk directory backing this manager."""
+        return self._data_dir
 
     def _initialize_store(self) -> None:
         """Initialize the vector store backend."""
@@ -278,8 +342,14 @@ class VectorStoreManager:
         """Add vector to Qdrant."""
         from qdrant_client.models import PointStruct
 
+        from src.memory._qdrant_ids import safe_query_id
+
         point = PointStruct(
-            id=hash(id) % (2**63),  # Qdrant requires int IDs
+            # Phase 8.5-A4: deterministic int63 projection. The previous
+            # ``hash(id) % 2**63`` was randomised per process by
+            # ``PYTHONHASHSEED``, so the same external id mapped to a
+            # different Qdrant int after every restart.
+            id=safe_query_id(id),
             vector=embedding,
             payload={"original_id": id, **(metadata or {})},
         )
