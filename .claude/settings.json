@@ -82,7 +82,8 @@
       "Bash(npx jest *)",
       "Bash(echo \"JEST_EXIT=$?\")",
       "Bash(echo \"RUFF_EXIT=$?\")",
-      "Bash(git ls-tree *)"
+      "Bash(git ls-tree *)",
+      "Bash(echo \"GREP_EXIT=$?\")"
     ],
     "additionalDirectories": [
       "D:\\Repo\\PDF"

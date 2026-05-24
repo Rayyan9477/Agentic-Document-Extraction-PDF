@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from src.api.middleware import require_permission
 from src.config import get_logger
+from src.security.rbac import Permission
 
 
 logger = get_logger(__name__)
@@ -174,6 +176,10 @@ async def get_workers(
 async def purge_queue(
     queue_name: str,
     http_request: Request,
+    # P0 fix: purging a Celery queue kills every in-flight extraction.
+    # Locking this behind ``system:admin`` keeps a viewer JWT from
+    # DOS-ing the worker pool with a single POST.
+    _: None = Depends(require_permission(Permission.SYSTEM_ADMIN)),
 ) -> dict[str, Any]:
     """
     Purge all messages from a queue.

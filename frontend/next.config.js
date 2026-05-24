@@ -1,3 +1,19 @@
+// R1.3 (P0) — refuse to produce a production build if the
+// developer-bypass flag is on. The ``ProtectedRoute`` component
+// already guards against runtime use of ``NEXT_PUBLIC_DEV_AUTO_LOGIN``
+// in prod, but a build-time hard-fail prevents the bypass from being
+// silently shipped via a misconfigured ``.env.production``.
+if (
+  process.env.NODE_ENV === 'production' &&
+  process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN === 'true'
+) {
+  throw new Error(
+    'NEXT_PUBLIC_DEV_AUTO_LOGIN=true is forbidden in production builds. ' +
+      'This flag bypasses authentication for the entire frontend. ' +
+      'Unset it (or set it to "false") before running `next build`.'
+  );
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

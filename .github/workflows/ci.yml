@@ -66,6 +66,19 @@ jobs:
         run: mypy src --no-strict-optional --ignore-missing-imports || true
         # The trailing ``|| true`` is intentional during the initial
         # roll-out. Drop it once `mypy src` is clean.
+      - name: Forbid hardcoded auth-bypass literal (R1.3)
+        # ``const DEV_AUTO_LOGIN = true`` (or ``let``/``var``) in any
+        # frontend file ships a production auth bypass. The flag must
+        # be env-gated; see frontend/src/components/auth/ProtectedRoute.tsx
+        # for the canonical pattern. Pattern requires ``const|let|var``
+        # so doc-comment references like
+        # ``NEXT_PUBLIC_DEV_AUTO_LOGIN=true`` in setup instructions
+        # don't false-trip.
+        run: |
+          if grep -RInE "(const|let|var)[[:space:]]+DEV_AUTO_LOGIN[[:space:]]*=[[:space:]]*true" frontend/src/; then
+            echo "::error::Hardcoded 'const DEV_AUTO_LOGIN = true' found. Use the env-gated pattern instead (see ProtectedRoute.tsx)."
+            exit 1
+          fi
 
   test:
     name: Test (pytest, py${{ matrix.python }})
@@ -136,9 +149,10 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
       - name: Test
-        # Jest is a transitive dependency of @testing-library/react via
-        # the existing setup. Run the targeted test file rather than
-        # globbing so a missing test config doesn't fail the build
-        # before the suite is fully ported.
-        run: npx jest --passWithNoTests
-        continue-on-error: true
+        # R1.4: the project ships ``vitest`` (see frontend/package.json
+        # ``scripts.test``). The previous ``npx jest --passWithNoTests``
+        # was a no-op (jest isn't installed; the suite was vitest the
+        # whole time) and ``continue-on-error: true`` made the job
+        # green regardless. The frontend tests now actually run and a
+        # failure blocks the PR.
+        run: npm test

@@ -33,7 +33,6 @@ from src.config import get_logger, get_settings
 from src.pipeline.state import (
     ExtractionState,
     ExtractionStatus,
-    set_status,
     update_state,
 )
 from src.prompts.pass1_extractor import (
@@ -178,7 +177,12 @@ class ExtractorPass1Agent(BaseAgent):
                 "pass1_model_id": model_id_seen,
                 "pass1_latency_ms": total_latency_ms,
                 "extraction_engine": "dual_vlm",
-                **set_status(state, ExtractionStatus.EXTRACTING),
+                # NB: ``set_status`` returns the *full* ExtractionState;
+                # spreading it here would clobber the freshly-written
+                # ``pass1_result`` above (Python dict literals resolve
+                # duplicate keys in source order, later-wins). Write the
+                # status fragment directly instead.
+                "status": ExtractionStatus.EXTRACTING.value,
             },
         )
 

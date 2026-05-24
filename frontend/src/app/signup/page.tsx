@@ -9,8 +9,12 @@ import { FileText, Mail, Lock, User, ArrowRight } from 'lucide-react';
 import { Card, CardContent, Button, Input } from '@/components/ui';
 import { authApi } from '@/lib/api';
 
-// DEV MODE: Skip signup (must match authStore.ts)
-const DEV_AUTO_LOGIN = true;
+// DEV MODE: Skip signup. R1.3 (P0) — gated on NODE_ENV + opt-in env
+// var so production builds never compile the bypass. Matches the gate
+// in ``src/components/auth/ProtectedRoute.tsx``.
+const DEV_AUTO_LOGIN =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN === 'true';
 
 export default function SignupPage() {
   const router = useRouter();

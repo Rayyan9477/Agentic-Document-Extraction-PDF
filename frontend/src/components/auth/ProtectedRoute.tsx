@@ -5,8 +5,24 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { PageLoader } from '@/components/ui';
 
-// DEV MODE: Skip auth check entirely (must match authStore.ts)
-const DEV_AUTO_LOGIN = true;
+// DEV MODE: Skip auth check entirely.
+//
+// R1.3 (P0) fix: this was previously a hardcoded ``true`` literal with
+// no env / NODE_ENV gate, so every ``next build`` shipped an auth
+// bypass into production. The flag now:
+//   1. Is FORCED off whenever ``NODE_ENV === 'production'`` regardless
+//      of what the operator set.
+//   2. Otherwise reads ``NEXT_PUBLIC_DEV_AUTO_LOGIN``, defaulting to
+//      OFF in dev too — operators must opt in by setting it to
+//      ``"true"`` in ``.env.local``.
+//
+// A matching build-time guard in ``next.config.js`` refuses to produce
+// a production build at all when the env var is set to ``"true"`` AND
+// ``NODE_ENV === 'production'``, so an operator can't silently re-enable
+// the bypass by typo.
+const DEV_AUTO_LOGIN =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN === 'true';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;

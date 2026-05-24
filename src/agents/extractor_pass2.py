@@ -27,7 +27,6 @@ from src.config import get_logger, get_settings
 from src.pipeline.state import (
     ExtractionState,
     ExtractionStatus,
-    set_status,
     update_state,
 )
 from src.prompts.pass2_auditor import (
@@ -219,7 +218,11 @@ class ExtractorPass2Agent(BaseAgent):
                 "pass2_result": pass2_result,
                 "pass2_model_id": model_id_seen,
                 "pass2_latency_ms": total_latency_ms,
-                **set_status(state, ExtractionStatus.EXTRACTING),
+                # NB: ``set_status`` returns the *full* ExtractionState;
+                # spreading it here would clobber the freshly-written
+                # ``pass2_result`` above. Write the status fragment
+                # directly instead.
+                "status": ExtractionStatus.EXTRACTING.value,
             },
         )
 

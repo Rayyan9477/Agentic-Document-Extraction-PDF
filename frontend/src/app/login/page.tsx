@@ -10,8 +10,12 @@ import { Card, CardContent, Button, Input } from '@/components/ui';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 
-// DEV MODE: Skip login (must match authStore.ts)
-const DEV_AUTO_LOGIN = true;
+// DEV MODE: Skip login. R1.3 (P0) — gated on NODE_ENV + opt-in env var
+// so production builds never compile the bypass. Matches the gate in
+// ``src/components/auth/ProtectedRoute.tsx``.
+const DEV_AUTO_LOGIN =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_DEV_AUTO_LOGIN === 'true';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -74,8 +78,11 @@ export default function LoginPage() {
       toast.success('Welcome back!');
       router.push('/dashboard');
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Invalid credentials';
-      toast.error(message);
+      // R1.3 (P1): ``new Error()`` with no args has an empty message
+      // string, which is truthy-false. Use ``||`` so we surface a
+      // useful fallback instead of an empty toast.
+      const raw = error instanceof Error ? error.message : '';
+      toast.error(raw || 'Invalid credentials');
     } finally {
       setLoading(false);
     }
@@ -112,9 +119,15 @@ export default function LoginPage() {
                 label="Username"
                 type="text"
                 value={formData.username}
-                onChange={(e) =>
-                  setFormData({ ...formData, username: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, username: e.target.value });
+                  // R1.3 (P1): clear validation error the moment the
+                  // user starts typing — otherwise stale messages
+                  // linger even after the field is valid again.
+                  if (errors.username) {
+                    setErrors({ ...errors, username: '' });
+                  }
+                }}
                 error={errors.username}
                 placeholder="Enter your username"
                 leftIcon={<Mail className="w-4 h-4" />}
@@ -125,9 +138,12 @@ export default function LoginPage() {
                 label="Password"
                 type="password"
                 value={formData.password}
-                onChange={(e) =>
-                  setFormData({ ...formData, password: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  if (errors.password) {
+                    setErrors({ ...errors, password: '' });
+                  }
+                }}
                 error={errors.password}
                 placeholder="Enter your password"
                 leftIcon={<Lock className="w-4 h-4" />}
